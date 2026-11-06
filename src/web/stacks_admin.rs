@@ -171,7 +171,7 @@ pub(super) async fn stack_edit(
         &headers,
         &providers,
         &values,
-        &format!("/stacks/definitions/{}/edit", stack.id),
+        &format!("/stacks/{id}/edit"),
         "Edit stack",
         "Save changes",
         Some(&provider_name),
@@ -217,7 +217,7 @@ pub(super) async fn stack_update(
                 &headers,
                 &providers,
                 &values,
-                &format!("/stacks/definitions/{id}/edit"),
+                &format!("/stacks/{id}/edit"),
                 "Edit stack",
                 "Save changes",
                 Some(&provider_name),
@@ -242,7 +242,7 @@ pub(super) async fn stack_update(
             &headers,
             &providers,
             &values,
-            &format!("/stacks/definitions/{id}/edit"),
+            &format!("/stacks/{id}/edit"),
             "Edit stack",
             "Save changes",
             Some(&provider_name),
@@ -250,34 +250,6 @@ pub(super) async fn stack_update(
             StatusCode::BAD_REQUEST,
         ),
     }
-}
-
-pub(super) async fn stack_delete_page(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    Path(id): Path<String>,
-) -> Response {
-    if !authenticated(&state, &headers).await {
-        return Redirect::to("/login").into_response();
-    }
-    let stack = match load_stack(&state, &id).await {
-        Ok(Some(stack)) => stack,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error(error),
-    };
-    let providers = match enabled_providers(&state).await {
-        Ok(providers) => providers,
-        Err(error) => return internal_error(error),
-    };
-    let provider_name = provider_label(&providers, &stack.provider_id);
-    render_delete_page(
-        &state,
-        &headers,
-        &stack,
-        &provider_name,
-        None,
-        StatusCode::OK,
-    )
 }
 
 pub(super) async fn stack_delete(

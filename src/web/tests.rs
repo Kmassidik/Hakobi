@@ -184,7 +184,10 @@ async fn login_dashboard_and_logout_enforce_the_session() {
         .unwrap();
     assert_eq!(dashboard.status(), StatusCode::OK);
     let body = to_bytes(dashboard.into_body(), 64 * 1024).await.unwrap();
-    assert!(String::from_utf8_lossy(&body).contains("Hello, world."));
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("Hello, world."));
+    assert!(body.contains("aria-label=\"Mobile primary\""));
+    assert!(body.contains("href=\"/stacks\""));
 
     let status = app
         .clone()
@@ -501,7 +504,7 @@ async fn providers_and_containers_work_end_to_end() {
     let stack_detail = app
         .clone()
         .oneshot(
-            Request::get(format!("/stacks/{}/hakobi-stack", provider.id))
+            Request::get(format!("/stacks/runtime/{}/hakobi-stack", provider.id))
                 .header(COOKIE, authenticated.clone())
                 .body(Body::empty())
                 .unwrap(),
@@ -605,7 +608,7 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
     let (authenticated, csrf) = sign_in(&app).await;
 
     let path = data.path().join("catalog.sqlite3");
-    let provider_id = {
+    let provider = {
         let mut catalog = Catalog::open(&path).unwrap();
         catalog
             .create_provider_connection("local", "docker", "unix:///var/run/docker.sock", "")
@@ -637,7 +640,7 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
                 .header(ORIGIN, "null")
                 .header(COOKIE, authenticated.clone())
                 .body(Body::from(format!(
-                    "kind=compose&provider_id={provider_id}&name=web&source=.&yaml=&csrf_token={csrf}"
+                    "kind=compose&provider_id={provider}&name=web&source=.&yaml=&csrf_token={csrf}"
                 )))
                 .unwrap(),
         )
@@ -656,7 +659,7 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
                 .header(ORIGIN, "null")
                 .header(COOKIE, authenticated.clone())
                 .body(Body::from(format!(
-                    "kind=compose&provider_id={provider_id}&name=web&source=.&yaml={}&csrf_token={csrf}",
+                    "kind=compose&provider_id={provider}&name=web&source=.&yaml={}&csrf_token={csrf}",
                     form_encode(manifest)
                 )))
                 .unwrap(),
@@ -694,8 +697,8 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("Managed stacks"));
     assert!(body.contains("web"));
-    assert!(body.contains(&format!("/stacks/definitions/{}/edit", stack.id)));
-    assert!(body.contains(&format!("/stacks/definitions/{}/delete", stack.id)));
+    assert!(body.contains(&format!("/stacks/{}/edit", stack.id)));
+    assert!(body.contains(&format!("/stacks/{}/delete", stack.id)));
     assert!(body.contains("data-delete-name=\"web\""));
     assert!(body.contains("id=\"delete-stack\""));
     assert!(body.contains("data-confirm-input"));
@@ -703,7 +706,7 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
     let edit_page = app
         .clone()
         .oneshot(
-            Request::get(format!("/stacks/definitions/{}/edit", stack.id))
+            Request::get(format!("/stacks/{}/edit", stack.id))
                 .header(COOKIE, authenticated.clone())
                 .body(Body::empty())
                 .unwrap(),
@@ -719,7 +722,7 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
     let update = app
         .clone()
         .oneshot(
-            Request::post(format!("/stacks/definitions/{}/edit", stack.id))
+            Request::post(format!("/stacks/{}/edit", stack.id))
                 .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(ORIGIN, "null")
                 .header(COOKIE, authenticated.clone())
@@ -738,22 +741,10 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
         assert_eq!(updated.name, "api");
     }
 
-    let delete_page = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/stacks/definitions/{}/delete", stack.id))
-                .header(COOKIE, authenticated.clone())
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(delete_page.status(), StatusCode::OK);
-
     let wrong_name = app
         .clone()
         .oneshot(
-            Request::post(format!("/stacks/definitions/{}/delete", stack.id))
+            Request::post(format!("/stacks/{}/delete", stack.id))
                 .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(ORIGIN, "null")
                 .header(COOKIE, authenticated.clone())
@@ -769,7 +760,7 @@ async fn managed_stack_definitions_can_be_created_edited_and_deleted() {
     let delete = app
         .clone()
         .oneshot(
-            Request::post(format!("/stacks/definitions/{}/delete", stack.id))
+            Request::post(format!("/stacks/{}/delete", stack.id))
                 .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
                 .header(ORIGIN, "null")
                 .header(COOKIE, authenticated)
@@ -859,7 +850,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     let (data, app) = app();
     let (authenticated, csrf) = sign_in(&app).await;
     let path = data.path().join("catalog.sqlite3");
-    let provider_id = {
+    let provider = {
         let mut catalog = Catalog::open(&path).unwrap();
         catalog
             .create_provider_connection("local", "docker", "unix:///var/run/docker.sock", "")
@@ -889,11 +880,11 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     assert!(body.contains("Container port"));
     assert!(body.contains("name=\"provider_id\""));
     assert!(body.contains("local"));
-    assert!(body.contains(&provider_id));
+    assert!(body.contains(&provider));
     assert!(body.contains(&format!("value=\"{csrf}\"")));
 
     let create = format!(
-        "provider_id={provider_id}&image=nginx%3Alatest&name=demo-api&container_port=8080&csrf_token="
+        "provider_id={provider}&image=nginx%3Alatest&name=demo-api&container_port=8080&csrf_token="
     );
 
     let no_csrf = post_form(
@@ -901,7 +892,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
         "/containers/new",
         &authenticated,
         "null",
-        format!("provider_id={provider_id}&image=nginx%3Alatest&name=demo-api&container_port=8080&csrf_token=invalid"),
+        format!("provider_id={provider}&image=nginx%3Alatest&name=demo-api&container_port=8080&csrf_token=invalid"),
     )
     .await;
     assert_eq!(no_csrf.status(), StatusCode::FORBIDDEN);
@@ -931,7 +922,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
         "/containers/new",
         &authenticated,
         "null",
-        format!("provider_id={provider_id}&image=bad+image&name=demo-api&container_port=8080&csrf_token={csrf}"),
+        format!("provider_id={provider}&image=bad+image&name=demo-api&container_port=8080&csrf_token={csrf}"),
     )
     .await;
     assert_eq!(bad_image.status(), StatusCode::BAD_REQUEST);
@@ -944,7 +935,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
         "/containers/new",
         &authenticated,
         "null",
-        format!("provider_id={provider_id}&image=nginx%3Alatest&name=bad%2Fname&container_port=8080&csrf_token={csrf}"),
+        format!("provider_id={provider}&image=nginx%3Alatest&name=bad%2Fname&container_port=8080&csrf_token={csrf}"),
     )
     .await;
     assert_eq!(bad_name.status(), StatusCode::BAD_REQUEST);
@@ -955,7 +946,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
         "/containers/new",
         &authenticated,
         "null",
-        format!("provider_id={provider_id}&image=nginx%3Alatest&name=demo-api&container_port=0&csrf_token={csrf}"),
+        format!("provider_id={provider}&image=nginx%3Alatest&name=demo-api&container_port=0&csrf_token={csrf}"),
     )
     .await;
     assert_eq!(bad_port.status(), StatusCode::BAD_REQUEST);
@@ -996,11 +987,11 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     assert_eq!(listed.status(), StatusCode::OK);
     let body = body_text(listed, 256 * 1024).await;
     assert!(body.contains("is running on host port 18050."));
-    assert!(body.contains(&format!("/containers/{provider_id}/demo-api/start")));
-    assert!(body.contains(&format!("/containers/{provider_id}/demo-api/stop")));
-    assert!(body.contains(&format!("/containers/{provider_id}/demo-api/restart")));
+    assert!(body.contains(&format!("/containers/{provider}/demo-api/start")));
+    assert!(body.contains(&format!("/containers/{provider}/demo-api/stop")));
+    assert!(body.contains(&format!("/containers/{provider}/demo-api/restart")));
     assert!(body.contains(&format!(
-        "data-delete-action=\"/containers/{provider_id}/demo-api/delete\""
+        "data-delete-action=\"/containers/{provider}/demo-api/delete\""
     )));
     assert!(body.contains("data-delete-name=\"demo-api\""));
     assert!(body.contains("data-dialog-open=\"delete-container\""));
@@ -1011,7 +1002,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     let stack = app
         .clone()
         .oneshot(
-            Request::get(format!("/stacks/{provider_id}/hakobi-stack"))
+            Request::get(format!("/stacks/runtime/{provider}/hakobi-stack"))
                 .header(COOKIE, authenticated.clone())
                 .body(Body::empty())
                 .unwrap(),
@@ -1020,7 +1011,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
         .unwrap();
     assert_eq!(stack.status(), StatusCode::OK);
     let body = body_text(stack, 256 * 1024).await;
-    assert!(body.contains(&format!("/containers/{provider_id}/demo-api/start")));
+    assert!(body.contains(&format!("/containers/{provider}/demo-api/start")));
     assert!(body.contains("id=\"delete-container\""));
 
     for (action, word) in [
@@ -1030,7 +1021,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     ] {
         let forbidden = post_form(
             &app,
-            &format!("/containers/{provider_id}/demo-api/{action}"),
+            &format!("/containers/{provider}/demo-api/{action}"),
             &authenticated,
             "null",
             "csrf_token=invalid".to_owned(),
@@ -1040,7 +1031,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
 
         let bad_origin = post_form(
             &app,
-            &format!("/containers/{provider_id}/demo-api/{action}"),
+            &format!("/containers/{provider}/demo-api/{action}"),
             &authenticated,
             "http://attacker.example",
             format!("csrf_token={csrf}"),
@@ -1060,7 +1051,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
 
         let invalid_name = post_form(
             &app,
-            &format!("/containers/{provider_id}/bad%2Fname/{action}"),
+            &format!("/containers/{provider}/bad%2Fname/{action}"),
             &authenticated,
             "null",
             format!("csrf_token={csrf}"),
@@ -1070,7 +1061,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
 
         let ok = post_form(
             &app,
-            &format!("/containers/{provider_id}/demo-api/{action}"),
+            &format!("/containers/{provider}/demo-api/{action}"),
             &authenticated,
             "null",
             format!("csrf_token={csrf}"),
@@ -1083,7 +1074,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
 
     let delete_without_csrf = post_form(
         &app,
-        &format!("/containers/{provider_id}/demo-api/delete"),
+        &format!("/containers/{provider}/demo-api/delete"),
         &authenticated,
         "null",
         "confirm_name=demo-api&csrf_token=invalid".to_owned(),
@@ -1093,7 +1084,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
 
     let delete_wrong_name = post_form(
         &app,
-        &format!("/containers/{provider_id}/demo-api/delete"),
+        &format!("/containers/{provider}/demo-api/delete"),
         &authenticated,
         "null",
         format!("confirm_name=other&csrf_token={csrf}"),
@@ -1116,7 +1107,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
 
     let deleted = post_form(
         &app,
-        &format!("/containers/{provider_id}/demo-api/delete"),
+        &format!("/containers/{provider}/demo-api/delete"),
         &authenticated,
         "null",
         format!("confirm_name=demo-api&csrf_token={csrf}"),
@@ -1133,7 +1124,7 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
 
     {
         let mut catalog = Catalog::open(&path).unwrap();
-        catalog.set_provider_enabled(&provider_id, false).unwrap();
+        catalog.set_provider_enabled(&provider, false).unwrap();
     }
     let disabled = post_form(
         &app,

@@ -60,6 +60,20 @@ fn nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str) -> Mar
     }
 }
 
+fn mobile_nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str) -> Markup {
+    let class = if active == key {
+        "flex min-w-0 flex-col items-center gap-1 rounded-lg bg-brand/10 px-1 py-2 text-[0.62rem] font-bold text-brand no-underline"
+    } else {
+        "flex min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-2 text-[0.62rem] font-semibold text-muted no-underline transition hover:bg-surface hover:text-ink"
+    };
+    html! {
+        a class=(class) href=(href) aria-current=(if active == key { "page" } else { "false" }) {
+            i class=(format!("fa-solid {icon} text-[0.95rem]")) aria-hidden="true" {}
+            span class="w-full truncate text-center" { (label) }
+        }
+    }
+}
+
 fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Markup {
     html! {
         aside class="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-line bg-[#faf9f4] px-5 py-6 lg:flex" aria-label="Sidebar" {
@@ -89,6 +103,15 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
                         "Sign out"
                     }
                 }
+            }
+        }
+        nav class="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-paper/95 px-2 pb-2 pt-1.5 backdrop-blur lg:hidden" aria-label="Mobile primary" {
+            div class="mx-auto grid max-w-md grid-cols-5 gap-0.5" {
+                (mobile_nav_item(active, "overview", "/", "fa-gauge-high", "Overview"))
+                (mobile_nav_item(active, "stacks", "/stacks", "fa-layer-group", "Stacks"))
+                (mobile_nav_item(active, "containers", "/containers", "fa-cubes", "Containers"))
+                (mobile_nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infra"))
+                (mobile_nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
             }
         }
     }
@@ -177,7 +200,7 @@ pub(super) fn dashboard(
                         (brand("Hakobi dashboard"))
                         nav class="flex items-center gap-1 text-[0.8rem] font-semibold max-md:hidden" aria-label="Primary" {
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/" { "Overview" }
-                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/providers" { "Providers" }
+                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/stacks" { "Stacks" }
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/containers" { "Containers" }
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/infrastructure" { "Infrastructure" }
                         }
@@ -616,8 +639,8 @@ pub(super) fn containers(
     )
 }
 
-fn container_actions(provider_id: &str, container: &ContainerRow, csrf_token: &str) -> Markup {
-    let base = format!("/containers/{provider_id}/{}", container.name);
+fn container_actions(provider: &str, container: &ContainerRow, csrf_token: &str) -> Markup {
+    let base = format!("/containers/{provider}/{}", container.name);
     let container_name = container.name.as_str();
     html! {
         div class="flex flex-wrap items-center gap-1.5" {
@@ -873,11 +896,11 @@ pub(super) fn stacks(
                                             "Updated " (stack.updated_at)
                                         }
                                         div class="mt-4 flex flex-wrap gap-2" {
-                                            a class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink no-underline" href=(format!("/stacks/definitions/{}/edit", stack.id)) {
+                                            a class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink no-underline" href=(format!("/stacks/{}/edit", stack.id)) {
                                                 i class="fa-solid fa-pen mr-2" aria-hidden="true" {}
                                                 "Edit"
                                             }
-                                            button type="button" class="rounded-lg border border-danger/40 bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-danger" data-dialog-open="delete-stack" data-delete-action=(format!("/stacks/definitions/{}/delete", stack.id)) data-delete-name=(stack.name) {
+                                            button type="button" class="rounded-lg border border-danger/40 bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-danger" data-dialog-open="delete-stack" data-delete-action=(format!("/stacks/{}/delete", stack.id)) data-delete-name=(stack.name) {
                                                 i class="fa-solid fa-trash-can mr-2" aria-hidden="true" {}
                                                 "Delete"
                                             }
@@ -930,7 +953,7 @@ pub(super) fn stacks(
                                                                 " · " (stack.running_count) "/" (stack.container_count) " containers running"
                                                             }
                                                         }
-                                                        a class="text-[0.78rem] font-semibold text-brand no-underline hover:underline" href=(format!("/stacks/{}/{}", provider.id, stack.name)) { "Open stack →" }
+                                                        a class="text-[0.78rem] font-semibold text-brand no-underline hover:underline" href=(format!("/stacks/runtime/{}/{}", provider.id, stack.name)) { "Open stack →" }
                                                     }
                                                     div class="mt-4 overflow-x-auto" {
                                                         table class="w-full border-collapse text-left text-xs" {
@@ -1156,7 +1179,7 @@ pub(super) fn stack_delete(
                     @if let Some(message) = error {
                         div class="mb-6 mt-6 border-l-[3px] border-danger bg-danger/5 px-4 py-3.5 text-sm leading-normal text-danger" role="alert" { (message) }
                     }
-                    form method="post" action=(format!("/stacks/definitions/{}/delete", stack.id)) class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+                    form method="post" action=(format!("/stacks/{}/delete", stack.id)) class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
                         p class="m-0 text-sm leading-relaxed text-muted" {
                             "This permanently removes " strong class="text-ink" { (stack.name) } " from the catalog. Type the stack name exactly to confirm."
@@ -1293,6 +1316,7 @@ pub(super) fn infrastructure(
                         nav class="flex items-center gap-1 text-[0.8rem] font-semibold max-md:hidden" aria-label="Primary" {
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/" { "Overview" }
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/providers" { "Providers" }
+                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/stacks" { "Stacks" }
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/containers" { "Containers" }
                         }
                         div class="flex items-center gap-4" {

@@ -67,19 +67,19 @@ pub fn router_with_backend(
             get(handlers::container_new).post(handlers::container_create),
         )
         .route(
-            "/containers/{provider_id}/{name}/start",
+            "/containers/{provider}/{name}/start",
             post(handlers::container_start),
         )
         .route(
-            "/containers/{provider_id}/{name}/stop",
+            "/containers/{provider}/{name}/stop",
             post(handlers::container_stop),
         )
         .route(
-            "/containers/{provider_id}/{name}/restart",
+            "/containers/{provider}/{name}/restart",
             post(handlers::container_restart),
         )
         .route(
-            "/containers/{provider_id}/{name}/delete",
+            "/containers/{provider}/{name}/delete",
             post(handlers::container_delete),
         )
         .route("/stacks", get(handlers::stacks))
@@ -88,14 +88,14 @@ pub fn router_with_backend(
             get(stacks_admin::stack_new).post(stacks_admin::stack_create),
         )
         .route(
-            "/stacks/definitions/{id}/edit",
+            "/stacks/{id}/edit",
             get(stacks_admin::stack_edit).post(stacks_admin::stack_update),
         )
         .route(
-            "/stacks/definitions/{id}/delete",
-            get(stacks_admin::stack_delete_page).post(stacks_admin::stack_delete),
+            "/stacks/{id}/delete",
+            post(stacks_admin::stack_delete),
         )
-        .route("/stacks/{provider_id}/{stack_name}", get(handlers::stack_detail))
+        .route("/stacks/runtime/{provider}/{name}", get(handlers::stack_detail))
         .route("/infrastructure", get(handlers::infrastructure))
         .route(
             "/login",

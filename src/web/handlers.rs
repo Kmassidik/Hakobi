@@ -587,13 +587,13 @@ pub(super) async fn container_create(
 pub(super) async fn container_start(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((provider_id, name)): Path<(String, String)>,
+    Path((provider, name)): Path<(String, String)>,
     Form(form): Form<CsrfForm>,
 ) -> Response {
     container_action(
         &state,
         &headers,
-        &provider_id,
+        &provider,
         &name,
         &form.csrf_token,
         ContainerAction::Start,
@@ -604,13 +604,13 @@ pub(super) async fn container_start(
 pub(super) async fn container_stop(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((provider_id, name)): Path<(String, String)>,
+    Path((provider, name)): Path<(String, String)>,
     Form(form): Form<CsrfForm>,
 ) -> Response {
     container_action(
         &state,
         &headers,
-        &provider_id,
+        &provider,
         &name,
         &form.csrf_token,
         ContainerAction::Stop,
@@ -621,13 +621,13 @@ pub(super) async fn container_stop(
 pub(super) async fn container_restart(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((provider_id, name)): Path<(String, String)>,
+    Path((provider, name)): Path<(String, String)>,
     Form(form): Form<CsrfForm>,
 ) -> Response {
     container_action(
         &state,
         &headers,
-        &provider_id,
+        &provider,
         &name,
         &form.csrf_token,
         ContainerAction::Restart,
@@ -638,7 +638,7 @@ pub(super) async fn container_restart(
 pub(super) async fn container_delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((provider_id, name)): Path<(String, String)>,
+    Path((provider, name)): Path<(String, String)>,
     Form(form): Form<DeleteContainerForm>,
 ) -> Response {
     if !authenticated(&state, &headers).await {
@@ -654,7 +654,7 @@ pub(super) async fn container_delete(
         )
             .into_response();
     }
-    let provider = match enabled_docker_provider(&state, &provider_id).await {
+    let provider = match enabled_docker_provider(&state, provider.as_str()).await {
         Ok(Some(provider)) => provider,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
@@ -858,7 +858,7 @@ pub(super) async fn stacks(
 pub(super) async fn stack_detail(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Path((provider_id, stack_name)): Path<(String, String)>,
+    Path((provider, name)): Path<(String, String)>,
 ) -> Response {
     if !authenticated(&state, &headers).await {
         return Redirect::to("/login").into_response();
@@ -869,7 +869,7 @@ pub(super) async fn stack_detail(
     };
     let Some(provider) = providers
         .into_iter()
-        .find(|provider| provider.id == provider_id && provider.enabled)
+        .find(|p| p.id == provider && p.enabled)
     else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -884,7 +884,7 @@ pub(super) async fn stack_detail(
                     &state.config.username,
                     &csrf_token,
                     &provider,
-                    &stack_name,
+                    &name,
                     Err(truncate(&error.to_string(), 500)),
                 ),
                 cookies,
@@ -895,7 +895,7 @@ pub(super) async fn stack_detail(
     let stack = inventory
         .stacks
         .into_iter()
-        .find(|stack| stack.name == stack_name);
+        .find(|stack| stack.name == name);
     match stack {
         Some(stack) => {
             let stack_name = stack.name.clone();
