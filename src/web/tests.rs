@@ -16,7 +16,7 @@ use hakobi::{
     catalog::Catalog,
     providers::{
         ContainerBackend, ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow,
-        NetworkRow, RunResult, VolumeRow,
+        NetworkRow, RoutingBackend, RunResult, VolumeRow,
     },
 };
 use tempfile::TempDir;
@@ -1149,4 +1149,126 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     assert!(body_text(form_page, 128 * 1024)
         .await
         .contains("No enabled Docker providers"));
+}
+
+/// Fails every call so a test can prove which backend served a request.
+struct UnroutableBackend;
+
+#[async_trait]
+impl ContainerBackend for UnroutableBackend {
+    async fn test(&self, _endpoint: &str) -> anyhow::Result<String> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+
+    async fn containers(&self, _endpoint: &str) -> anyhow::Result<Vec<ContainerRow>> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+
+    async fn snapshot(&self, _endpoint: &str) -> anyhow::Result<DockerSnapshot> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+
+    async fn start_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+
+    async fn stop_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+
+    async fn restart_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+
+    async fn remove_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+
+    async fn run_container(
+        &self,
+        _endpoint: &str,
+        _image: &str,
+        _name: &str,
+        _container_port: u16,
+    ) -> anyhow::Result<RunResult> {
+        Err(anyhow::anyhow!("the direct Docker backend was used"))
+    }
+}
+
+#[tokio::test]
+async fn agent_endpoint_providers_are_served_by_the_agent_backend() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("catalog.sqlite3");
+    let provider_id = {
+        let mut catalog = Catalog::open(&path).unwrap();
+        catalog
+            .create_provider_connection("Local host", "docker", "agent://local", "")
+            .unwrap()
+    };
+    let app = router_with_backend(
+        config(),
+        path.clone(),
+        Arc::new(RoutingBackend::new(
+            Arc::new(UnroutableBackend),
+            Some(Arc::new(FakeBackend)),
+        )),
+    );
+    let (authenticated, csrf) = sign_in(&app).await;
+
+    let test = post_form(
+        &app,
+        &format!("/providers/{provider_id}/test"),
+        &authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await;
+    assert_eq!(test.status(), StatusCode::SEE_OTHER);
+    let catalog = Catalog::open(&path).unwrap();
+    let checked = catalog.list_provider_connections().unwrap().remove(0);
+    assert!(checked.last_checked_at.is_some());
+    assert_eq!(checked.last_error, None);
+    assert_eq!(checked.endpoint, "agent://local");
+    drop(catalog);
+
+    let containers = app
+        .clone()
+        .oneshot(
+            Request::get("/containers")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(containers.status(), StatusCode::OK);
+    let body = body_text(containers, 64 * 1024).await;
+    assert!(body.contains("demo-api"));
+    assert!(body.contains("hakobi-stack"));
+    assert!(!body.contains("the direct Docker backend was used"));
+
+    let start = post_form(
+        &app,
+        &format!("/containers/{provider_id}/demo-api/start"),
+        &authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await;
+    assert_eq!(start.status(), StatusCode::SEE_OTHER);
+
+    let infrastructure = app
+        .clone()
+        .oneshot(
+            Request::get("/infrastructure")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(infrastructure.status(), StatusCode::OK);
+    let body = body_text(infrastructure, 64 * 1024).await;
+    assert!(body.contains("fedora-test"));
+    assert!(!body.contains("the direct Docker backend was used"));
 }

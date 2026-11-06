@@ -1,8 +1,16 @@
-use std::{future::pending, path::PathBuf, process::ExitStatus};
+use std::{
+    future::pending,
+    path::{Path, PathBuf},
+    process::ExitStatus,
+};
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use dialoguer::{Confirm, Input, Password};
+use hakobi::{
+    catalog::Catalog,
+    providers::agent::{detect_local_access, ensure_local_provider},
+};
 use tokio::{net::TcpListener, task};
 use zeroize::Zeroizing;
 
@@ -254,7 +262,11 @@ pub async fn serve(store: &ConfigStore) -> Result<()> {
     let listener = TcpListener::bind(&listen_addr)
         .await
         .with_context(|| format!("could not bind {listen_addr}"))?;
-    let app = web::router(public, store.data_dir().join("catalog.sqlite3"));
+    let catalog_path = store.data_dir().join("catalog.sqlite3");
+    if let Err(error) = register_local_provider(&catalog_path) {
+        eprintln!("warning: could not register the local Docker provider: {error:#}");
+    }
+    let app = web::router(public, catalog_path);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let server = axum::serve(listener, app).with_graceful_shutdown(async {
         let _ = shutdown_rx.await;
@@ -283,6 +295,27 @@ pub async fn serve(store: &ConfigStore) -> Result<()> {
         }
     }
     outcome
+}
+
+/// Registers the automatically managed local Docker provider before serving.
+///
+/// The provider is created only when a usable local access path exists: the
+/// host agent when it is configured, otherwise an accessible Docker socket.
+/// An existing row is never rewritten, so this stays idempotent across
+/// restarts and preserves operator edits.
+fn register_local_provider(catalog_path: &Path) -> Result<()> {
+    let Some(access) = detect_local_access() else {
+        return Ok(());
+    };
+    let mut catalog = Catalog::open(catalog_path)?;
+    if let Some(provider) = ensure_local_provider(&mut catalog, Some(access))? {
+        tracing::info!(
+            provider = %provider,
+            endpoint = access.endpoint(),
+            "local Docker provider is registered"
+        );
+    }
+    Ok(())
 }
 
 async fn wait_for_tunnel(tunnel: &mut Option<TunnelProcess>) -> Result<ExitStatus> {

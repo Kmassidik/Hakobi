@@ -318,8 +318,13 @@ pub(super) fn metrics_section(metrics: &DashboardMetrics) -> Markup {
     };
     let services_foot = if inventory_known {
         format!(
-            "{} stacks · {} tracked{}",
+            "{} {} · {} tracked{}",
             metrics.stacks,
+            if metrics.stacks == 1 {
+                "stack"
+            } else {
+                "stacks"
+            },
             metrics.services_total,
             if metrics.providers_failed > 0 {
                 " · partial"

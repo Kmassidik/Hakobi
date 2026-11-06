@@ -25,7 +25,7 @@ use tower_http::{
 
 use self::auth::{LoginLimiter, Sessions};
 use crate::config::PublicConfig;
-use hakobi::providers::{ContainerBackend, DockerBackend};
+use hakobi::providers::{ContainerBackend, RoutingBackend};
 
 #[derive(Clone)]
 pub(super) struct AppState {
@@ -37,8 +37,13 @@ pub(super) struct AppState {
     pub backend: Arc<dyn ContainerBackend>,
 }
 
+/// Builds the production router.
+///
+/// Providers with an `agent://` endpoint are served by the host agent when
+/// `HAKOBI_AGENT_URL` and `HAKOBI_AGENT_TOKEN` are configured; every other
+/// endpoint keeps using the direct Docker backend.
 pub fn router(config: PublicConfig, catalog_path: PathBuf) -> Router {
-    router_with_backend(config, catalog_path, Arc::new(DockerBackend))
+    router_with_backend(config, catalog_path, Arc::new(RoutingBackend::from_env()))
 }
 
 pub fn router_with_backend(

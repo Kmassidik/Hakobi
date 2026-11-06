@@ -313,12 +313,25 @@ pub fn validate_image_reference(image: &str) -> Result<()> {
     Ok(())
 }
 
+impl DockerBackend {
+    /// Returns the Docker server version and the API version it exposes.
+    ///
+    /// Kept separate from [`ContainerBackend::test`] so the host agent can
+    /// report the two values as typed data instead of an already formatted
+    /// string.
+    pub async fn version(&self, endpoint: &str) -> Result<(String, String)> {
+        let version = connect(endpoint)?.version().await?;
+        Ok((
+            version.version.unwrap_or_else(|| "unknown".into()),
+            version.api_version.unwrap_or_else(|| "unknown".into()),
+        ))
+    }
+}
+
 #[async_trait]
 impl ContainerBackend for DockerBackend {
     async fn test(&self, endpoint: &str) -> Result<String> {
-        let version = connect(endpoint)?.version().await?;
-        let server = version.version.unwrap_or_else(|| "unknown".into());
-        let api = version.api_version.unwrap_or_else(|| "unknown".into());
+        let (server, api) = self.version(endpoint).await?;
         Ok(format!("Docker {server} · API {api}"))
     }
 

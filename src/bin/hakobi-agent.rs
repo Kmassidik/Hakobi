@@ -7,47 +7,40 @@
 
 #![forbid(unsafe_code)]
 
-use std::{collections::HashMap, env, net::SocketAddr, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, future::Future, net::SocketAddr, sync::Arc, time::Duration};
 
 use anyhow::{bail, Context, Result};
 use axum::{
-    extract::{Path, State},
+    extract::{rejection::JsonRejection, Path, State},
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
-use serde::Serialize;
+use hakobi::{
+    host_agent::{
+        self, AgentErrorBody, DockerContainerRow, DockerContainersResponse, DockerMetrics,
+        DockerSnapshotResponse, DockerVersion, InstallJob, RunContainerRequest,
+        RunContainerResponse,
+    },
+    providers::{
+        validate_container_name, validate_image_reference, ContainerBackend, DockerBackend,
+    },
+};
 use subtle::ConstantTimeEq;
 use tokio::{net::TcpListener, process::Command, sync::Mutex, time::timeout};
 
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
 const MAX_REPORTED_OUTPUT: usize = 8 * 1024;
+const MAX_REPORTED_ROWS: usize = 512;
+const MAX_ERROR_DETAIL: usize = 500;
+const DOCKER_TIMEOUT: Duration = Duration::from_secs(20);
+const DOCKER_RUN_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
 struct AgentState {
     token: Arc<str>,
     jobs: Arc<Mutex<HashMap<String, InstallJob>>>,
-}
-
-#[derive(Clone, Serialize)]
-struct InstallJob {
-    running: bool,
-    success: bool,
-    output: String,
-}
-
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-}
-
-#[derive(Debug, Default, Serialize)]
-struct DockerMetrics {
-    containers: usize,
-    cpu_percent: f64,
-    memory_used_bytes: u64,
-    memory_limit_bytes: u64,
 }
 
 #[tokio::main]
@@ -82,16 +75,32 @@ async fn run() -> Result<()> {
         token: Arc::from(token),
         jobs: Arc::new(Mutex::new(HashMap::new())),
     };
-    let app = Router::new()
+    axum::serve(listener, app(state))
+        .await
+        .context("host agent server")
+}
+
+/// Builds the agent router.
+///
+/// Every route except `/healthz` requires the bearer token. The Docker routes
+/// are read and operate endpoints for the fixed host socket; none of them
+/// proxies raw Docker API calls or accepts a user-supplied endpoint.
+fn app(state: AgentState) -> Router {
+    Router::new()
         .route("/healthz", get(health))
         .route("/v1/readiness", get(readiness))
         .route("/v1/docker/metrics", get(docker_metrics))
+        .route("/v1/docker/version", get(docker_version))
+        .route("/v1/docker/containers", get(docker_containers))
+        .route("/v1/docker/snapshot", get(docker_snapshot))
+        .route("/v1/docker/containers/run", post(docker_run))
+        .route("/v1/docker/containers/{name}/start", post(docker_start))
+        .route("/v1/docker/containers/{name}/stop", post(docker_stop))
+        .route("/v1/docker/containers/{name}/restart", post(docker_restart))
+        .route("/v1/docker/containers/{name}/delete", post(docker_delete))
         .route("/v1/install/status", get(install_status))
         .route("/v1/install/{tool}", post(install))
-        .with_state(state);
-    axum::serve(listener, app)
-        .await
-        .context("host agent server")
+        .with_state(state)
 }
 
 fn load_token() -> Result<String> {
@@ -269,6 +278,220 @@ async fn docker_metrics(State(state): State<AgentState>, headers: HeaderMap) -> 
     Json(metrics).into_response()
 }
 
+/// Runs a Docker operation against the fixed host socket with a time limit.
+async fn docker_call<T>(
+    operation: impl Future<Output = Result<T>>,
+    limit: Duration,
+) -> std::result::Result<T, Box<Response>> {
+    match timeout(limit, operation).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(Box::new(docker_failure(error))),
+        Err(_) => Err(Box::new(error_response(
+            StatusCode::GATEWAY_TIMEOUT,
+            "the Docker daemon did not answer in time",
+        ))),
+    }
+}
+
+/// Maps a Docker failure to a safe, bounded error body.
+///
+/// The full error is logged locally; the response only carries a truncated
+/// detail, so no credential or environment value can be reflected back to the
+/// caller.
+fn docker_failure(error: anyhow::Error) -> Response {
+    tracing::warn!(error = %error, "host Docker request failed");
+    error_response(
+        StatusCode::BAD_GATEWAY,
+        truncate_to(&error.to_string(), MAX_ERROR_DETAIL),
+    )
+}
+
+async fn docker_version(State(state): State<AgentState>, headers: HeaderMap) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    let backend = DockerBackend;
+    match docker_call(
+        backend.version(host_agent::DOCKER_SOCKET_ENDPOINT),
+        DOCKER_TIMEOUT,
+    )
+    .await
+    {
+        Ok((version, api_version)) => Json(DockerVersion {
+            version,
+            api_version,
+        })
+        .into_response(),
+        Err(response) => *response,
+    }
+}
+
+async fn docker_containers(State(state): State<AgentState>, headers: HeaderMap) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    let backend = DockerBackend;
+    match docker_call(
+        backend.containers(host_agent::DOCKER_SOCKET_ENDPOINT),
+        DOCKER_TIMEOUT,
+    )
+    .await
+    {
+        Ok(rows) => {
+            let containers = rows
+                .into_iter()
+                .take(MAX_REPORTED_ROWS)
+                .map(DockerContainerRow::from)
+                .collect::<Vec<_>>();
+            Json(DockerContainersResponse { containers }).into_response()
+        }
+        Err(response) => *response,
+    }
+}
+
+async fn docker_snapshot(State(state): State<AgentState>, headers: HeaderMap) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    let backend = DockerBackend;
+    match docker_call(
+        backend.snapshot(host_agent::DOCKER_SOCKET_ENDPOINT),
+        DOCKER_TIMEOUT,
+    )
+    .await
+    {
+        Ok(snapshot) => {
+            let mut response = DockerSnapshotResponse::from(snapshot);
+            response.images.truncate(MAX_REPORTED_ROWS);
+            response.volumes.truncate(MAX_REPORTED_ROWS);
+            response.networks.truncate(MAX_REPORTED_ROWS);
+            Json(response).into_response()
+        }
+        Err(response) => *response,
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ContainerAction {
+    Start,
+    Stop,
+    Restart,
+    Delete,
+}
+
+async fn container_action(
+    state: AgentState,
+    headers: HeaderMap,
+    name: String,
+    action: ContainerAction,
+) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    if let Err(error) = validate_container_name(&name) {
+        return error_response(StatusCode::BAD_REQUEST, error.to_string());
+    }
+    let backend = DockerBackend;
+    let endpoint = host_agent::DOCKER_SOCKET_ENDPOINT;
+    let result = match action {
+        ContainerAction::Start => {
+            docker_call(backend.start_container(endpoint, &name), DOCKER_TIMEOUT).await
+        }
+        ContainerAction::Stop => {
+            docker_call(backend.stop_container(endpoint, &name), DOCKER_TIMEOUT).await
+        }
+        ContainerAction::Restart => {
+            docker_call(backend.restart_container(endpoint, &name), DOCKER_TIMEOUT).await
+        }
+        ContainerAction::Delete => {
+            docker_call(backend.remove_container(endpoint, &name), DOCKER_TIMEOUT).await
+        }
+    };
+    match result {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => *response,
+    }
+}
+
+async fn docker_start(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    container_action(state, headers, name, ContainerAction::Start).await
+}
+
+async fn docker_stop(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    container_action(state, headers, name, ContainerAction::Stop).await
+}
+
+async fn docker_restart(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    container_action(state, headers, name, ContainerAction::Restart).await
+}
+
+async fn docker_delete(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    container_action(state, headers, name, ContainerAction::Delete).await
+}
+
+async fn docker_run(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<RunContainerRequest>, JsonRejection>,
+) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    let Json(request) = match payload {
+        Ok(payload) => payload,
+        Err(rejection) => {
+            return error_response(StatusCode::BAD_REQUEST, rejection.body_text());
+        }
+    };
+    if let Err(error) = validate_image_reference(&request.image) {
+        return error_response(StatusCode::BAD_REQUEST, error.to_string());
+    }
+    if let Err(error) = validate_container_name(&request.name) {
+        return error_response(StatusCode::BAD_REQUEST, error.to_string());
+    }
+    if request.container_port == 0 {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "container port must be between 1 and 65535",
+        );
+    }
+    let backend = DockerBackend;
+    match docker_call(
+        backend.run_container(
+            host_agent::DOCKER_SOCKET_ENDPOINT,
+            &request.image,
+            &request.name,
+            request.container_port,
+        ),
+        DOCKER_RUN_TIMEOUT,
+    )
+    .await
+    {
+        Ok(result) => (
+            StatusCode::CREATED,
+            Json(RunContainerResponse::from(result)),
+        )
+            .into_response(),
+        Err(response) => *response,
+    }
+}
+
 fn host_memory_total() -> Option<u64> {
     let contents = std::fs::read_to_string("/proc/meminfo").ok()?;
     let line = contents
@@ -320,7 +543,7 @@ fn unauthorized() -> Response {
 fn error_response(status: StatusCode, error: impl Into<String>) -> Response {
     (
         status,
-        Json(ErrorResponse {
+        Json(AgentErrorBody {
             error: error.into(),
         }),
     )
@@ -328,10 +551,15 @@ fn error_response(status: StatusCode, error: impl Into<String>) -> Response {
 }
 
 fn truncate(value: &str) -> String {
-    if value.len() <= MAX_REPORTED_OUTPUT {
+    truncate_to(value, MAX_REPORTED_OUTPUT)
+}
+
+/// Truncates `value` to at most `limit` bytes on a character boundary.
+fn truncate_to(value: &str, limit: usize) -> String {
+    if value.len() <= limit {
         return value.to_owned();
     }
-    let mut end = MAX_REPORTED_OUTPUT;
+    let mut end = limit;
     while !value.is_char_boundary(end) {
         end -= 1;
     }
@@ -407,5 +635,151 @@ nixpacks --version
 "#,
         ),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::{
+        body::{to_bytes, Body},
+        http::{header::CONTENT_TYPE, Method, Request},
+    };
+    use tower::ServiceExt;
+
+    use super::*;
+
+    /// Token long enough to satisfy the agent's minimum length rule.
+    const TEST_TOKEN: &str = "test-token-0123456789abcdef";
+
+    fn state() -> AgentState {
+        AgentState {
+            token: Arc::from(TEST_TOKEN),
+            jobs: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn docker_routes() -> Vec<(Method, &'static str)> {
+        vec![
+            (Method::GET, "/v1/docker/version"),
+            (Method::GET, "/v1/docker/containers"),
+            (Method::GET, "/v1/docker/snapshot"),
+            (Method::POST, "/v1/docker/containers/demo-api/start"),
+            (Method::POST, "/v1/docker/containers/demo-api/stop"),
+            (Method::POST, "/v1/docker/containers/demo-api/restart"),
+            (Method::POST, "/v1/docker/containers/demo-api/delete"),
+            (Method::POST, "/v1/docker/containers/run"),
+        ]
+    }
+
+    fn request(method: Method, uri: &str, token: Option<&str>) -> Request<Body> {
+        let builder = Request::builder().method(method).uri(uri);
+        let builder = match token {
+            Some(token) => builder.header(AUTHORIZATION, format!("Bearer {token}")),
+            None => builder,
+        };
+        builder.body(Body::empty()).unwrap()
+    }
+
+    fn json_request(uri: &str, token: &str, body: &str) -> Request<Body> {
+        Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header(AUTHORIZATION, format!("Bearer {token}"))
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned()))
+            .unwrap()
+    }
+
+    async fn status_of(request: Request<Body>) -> StatusCode {
+        app(state()).oneshot(request).await.unwrap().status()
+    }
+
+    #[tokio::test]
+    async fn docker_endpoints_require_the_bearer_token() {
+        for (method, uri) in docker_routes() {
+            assert_eq!(
+                status_of(request(method.clone(), uri, None)).await,
+                StatusCode::UNAUTHORIZED,
+                "{method} {uri} without a token"
+            );
+            assert_eq!(
+                status_of(request(
+                    method.clone(),
+                    uri,
+                    Some("wrong-token-0123456789abcdef")
+                ))
+                .await,
+                StatusCode::UNAUTHORIZED,
+                "{method} {uri} with a wrong token"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn docker_run_requires_the_bearer_token_even_with_an_invalid_body() {
+        assert_eq!(
+            status_of(json_request(
+                "/v1/docker/containers/run",
+                "wrong-token-0123456789abcdef",
+                "not json"
+            ))
+            .await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[tokio::test]
+    async fn docker_container_names_are_validated_before_docker_is_contacted() {
+        for action in ["start", "stop", "restart", "delete"] {
+            let uri = format!("/v1/docker/containers/bad%20name/{action}");
+            let response = app(state())
+                .oneshot(request(Method::POST, &uri, Some(TEST_TOKEN)))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+            let body = to_bytes(response.into_body(), 1024).await.unwrap();
+            let body: AgentErrorBody = serde_json::from_slice(&body).unwrap();
+            assert!(body.error.contains("container name"), "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn docker_run_rejects_invalid_requests_before_touching_docker() {
+        let cases = [
+            r#"{"image":"alpine latest","name":"demo-api","container_port":8080}"#,
+            r#"{"image":"alpine;rm -rf /","name":"demo-api","container_port":8080}"#,
+            r#"{"image":"alpine:3.20","name":"bad name","container_port":8080}"#,
+            r#"{"image":"alpine:3.20","name":"demo-api","container_port":0}"#,
+            r#"{"image":42}"#,
+        ];
+        for body in cases {
+            let response = app(state())
+                .oneshot(json_request("/v1/docker/containers/run", TEST_TOKEN, body))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
+            let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+            let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
+            assert!(!error.error.is_empty(), "{body}");
+        }
+    }
+
+    #[test]
+    fn bounded_truncation_keeps_character_boundaries() {
+        assert_eq!(truncate_to("short", 32), "short");
+        assert_eq!(truncate_to("abcdef", 3), "abc…");
+        let unicode = "ü".repeat(4);
+        assert_eq!(truncate_to(&unicode, 3), "ü…");
+    }
+
+    #[test]
+    fn installers_stay_fixed_and_finite() {
+        assert!(installer("docker").is_some());
+        assert!(installer("compose").is_some());
+        assert!(installer("kubectl").is_some());
+        assert!(installer("nix").is_some());
+        assert!(installer("nixpacks").is_some());
+        assert!(installer("sh -c whoami").is_none());
+        assert!(installer("").is_none());
     }
 }
