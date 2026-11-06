@@ -149,6 +149,11 @@
     }
   }
 
+  const installWatch = document.querySelector('[data-install-watch="true"]');
+  if (installWatch) {
+    window.setTimeout(() => window.location.reload(), 4000);
+  }
+
   const passwordToggle = document.querySelector("[data-password-toggle]");
   if (passwordToggle) {
     const password = document.getElementById("password");

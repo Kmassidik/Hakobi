@@ -27,12 +27,13 @@ Keep both values in a root-owned env file rather than the shell history.
 
 ## Contract
 
-- `GET /v1/readiness` returns the real host tool status.
-- `POST /v1/install/{docker|compose|kubectl|nixpacks}` runs a fixed installer.
+- `GET /v1/readiness` returns the real host Docker, Compose, kubectl, Nix, and Nixpacks status.
+- `POST /v1/install/{docker|compose|kubectl|nix|nixpacks}` runs a fixed installer.
 - Authentication is `Authorization: Bearer <token>`, compared in constant time.
 - The agent listens on `127.0.0.1:8787` by default.
 - Request data is never interpolated into a shell command.
 - Installers time out after 15 minutes and report bounded output.
+- Jobs are asynchronous; `GET /v1/install/status` reports running/success/output.
 
 ## Security
 

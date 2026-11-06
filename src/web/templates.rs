@@ -26,6 +26,7 @@ pub(super) struct DashboardView<'a> {
     pub notice: Option<&'a str>,
     pub agent_configured: bool,
     pub agent_online: bool,
+    pub install_running: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -246,6 +247,7 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
         notice,
         agent_configured,
         agent_online,
+        install_running,
     } = view;
     let readiness_note = if agent_online {
         "Detected by the host agent. Installs run on the host."
@@ -272,7 +274,7 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
     page(
         "Dashboard · Hakobi",
         html! {
-            div class="min-h-screen bg-[#f5f5f7] lg:pl-64" {
+            div class="min-h-screen bg-[#f5f5f7] lg:pl-64" data-install-watch=(if install_running { "true" } else { "false" }) {
                 (sidebar("overview", base_url, username, csrf_token))
                 header class="bg-[#f5f5f7]/90 backdrop-blur lg:hidden" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5rem] items-center justify-between")) {
@@ -291,6 +293,12 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
                 }
 
                 main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
+                    @if agent_configured && !agent_online {
+                        div class="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" role="alert" {
+                            strong { "Host agent unreachable." }
+                            " Host installs are disabled until the agent is running."
+                        }
+                    }
                     @if let Some(notice) = notice {
                         div class="mb-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-700 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" role="status" {
                             (notice)
@@ -388,11 +396,12 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
                             h2 id="readiness-title" class="m-0 text-[1.05rem] font-semibold tracking-[-0.02em]" { "Host readiness" }
                             p class="m-0 text-xs text-[#86868b]" { (readiness_note) }
                         }
-                        div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" {
-                            (readiness_card("Docker", "fa-solid fa-cube", "docker", &readiness.docker, csrf_token, agent_online))
-                            (readiness_card("Compose", "fa-solid fa-layer-group", "compose", &readiness.compose, csrf_token, agent_online))
-                            (readiness_card("kubectl", "fa-solid fa-dharmachakra", "kubectl", &readiness.kubectl, csrf_token, agent_online))
-                            (readiness_card("Nixpacks", "fa-solid fa-box", "nixpacks", &readiness.nixpacks, csrf_token, agent_online))
+                        div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5" {
+                            (readiness_card("Docker", "fa-solid fa-cube", "docker", &readiness.docker, csrf_token, agent_online, agent_configured))
+                            (readiness_card("Compose", "fa-solid fa-layer-group", "compose", &readiness.compose, csrf_token, agent_online, agent_configured))
+                            (readiness_card("kubectl", "fa-solid fa-dharmachakra", "kubectl", &readiness.kubectl, csrf_token, agent_online, agent_configured))
+                            (readiness_card("Nix", "fa-solid fa-boxes-stacked", "nix", &readiness.nix, csrf_token, agent_online, agent_configured))
+                            (readiness_card("Nixpacks", "fa-solid fa-box", "nixpacks", &readiness.nixpacks, csrf_token, agent_online, agent_configured))
                         }
                     }
 
@@ -451,6 +460,7 @@ fn readiness_card(
     status: &ToolStatus,
     csrf_token: &str,
     can_install: bool,
+    agent_configured: bool,
 ) -> Markup {
     html! {
         article class="rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
@@ -480,6 +490,8 @@ fn readiness_card(
                                 "Install on host"
                             }
                         }
+                    } @else if agent_configured {
+                        p class="mb-0 mt-3 text-[0.72rem] font-semibold text-amber-700" { "Agent offline" }
                     } @else {
                         button type="button" class="mt-3 rounded-lg bg-slate-100 px-3 py-1.5 text-[0.72rem] font-semibold text-slate-700 transition hover:bg-slate-200" data-dialog-open="install-tool" data-install-title=(label) data-install-command=(install_command) {
                             "Show install command"

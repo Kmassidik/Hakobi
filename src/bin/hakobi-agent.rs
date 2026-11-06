@@ -280,6 +280,14 @@ rm -f /tmp/hakobi-kubectl /tmp/hakobi-kubectl.sha256
 kubectl version --client
 "#,
         ),
+        "nix" => Some(
+            r#"set -eu
+installer="$(mktemp)"
+trap 'rm -f "$installer"' EXIT
+curl -fsSL --max-time 300 --retry 2 --retry-delay 3 https://install.determinate.systems/nix -o "$installer"
+sh "$installer" install --no-confirm
+"#,
+        ),
         "nixpacks" => Some(
             r#"set -eu
 case "$(uname -m)" in

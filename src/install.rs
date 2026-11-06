@@ -48,6 +48,10 @@ const COMPOSE_INSTALL_COMMAND: &str =
 const KUBECTL_INSTALL_COMMAND: &str =
     "install kubectl from https://kubernetes.io/docs/tasks/tools/";
 
+/// Installation hint shown when Nix is missing.
+const NIX_INSTALL_COMMAND: &str =
+    "curl -fsSL https://install.determinate.systems/nix | sh -s -- install --no-confirm";
+
 /// Installation hint shown when nixpacks is missing.
 const NIXPACKS_INSTALL_COMMAND: &str = "curl -sSL https://nixpacks.com/install.sh | bash";
 
@@ -73,6 +77,7 @@ pub struct Readiness {
     pub docker: ToolStatus,
     pub compose: ToolStatus,
     pub kubectl: ToolStatus,
+    pub nix: ToolStatus,
     pub nixpacks: ToolStatus,
 }
 
@@ -97,7 +102,7 @@ struct DetectConfig {
 impl DetectConfig {
     fn from_env() -> Self {
         Self {
-            path: env::var_os("PATH").unwrap_or_default(),
+            path: detection_path(),
             docker_socket: local_docker_socket(
                 env::var_os("DOCKER_HOST").as_deref(),
                 env::var_os("XDG_RUNTIME_DIR").as_deref(),
@@ -108,16 +113,33 @@ impl DetectConfig {
     }
 }
 
+fn detection_path() -> OsString {
+    let path = env::var_os("PATH").unwrap_or_default();
+    let mut paths: Vec<PathBuf> = env::split_paths(&path).collect();
+    for extra in [
+        "/nix/var/nix/profiles/default/bin",
+        "/root/.nix-profile/bin",
+    ] {
+        let extra = PathBuf::from(extra);
+        if extra.is_dir() && !paths.contains(&extra) {
+            paths.push(extra);
+        }
+    }
+    env::join_paths(paths).unwrap_or(path)
+}
+
 fn detect_with(config: &DetectConfig) -> Readiness {
     thread::scope(|scope| {
         let docker = scope.spawn(|| docker_status(config));
         let compose = scope.spawn(|| compose_status(config));
         let kubectl = scope.spawn(|| kubectl_status(config));
+        let nix = scope.spawn(|| nix_status(config));
         let nixpacks = scope.spawn(|| nixpacks_status(config));
         Readiness {
             docker: join(docker, DOCKER_INSTALL_COMMAND),
             compose: join(compose, COMPOSE_INSTALL_COMMAND),
             kubectl: join(kubectl, KUBECTL_INSTALL_COMMAND),
+            nix: join(nix, NIX_INSTALL_COMMAND),
             nixpacks: join(nixpacks, NIXPACKS_INSTALL_COMMAND),
         }
     })
@@ -165,6 +187,13 @@ fn kubectl_status(config: &DetectConfig) -> ToolStatus {
     match probe_version(config, "kubectl", &["version", "--client", "-o", "json"]) {
         Some(output) => ready(kubectl_version(&output)),
         None => missing(KUBECTL_INSTALL_COMMAND),
+    }
+}
+
+fn nix_status(config: &DetectConfig) -> ToolStatus {
+    match probe_version(config, "nix", &["--version"]) {
+        Some(version) => ready(version.trim().to_owned()),
+        None => missing(NIX_INSTALL_COMMAND),
     }
 }
 

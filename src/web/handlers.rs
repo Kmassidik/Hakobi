@@ -177,6 +177,18 @@ pub(super) async fn dashboard(
             );
         }
     }
+    let install_running = if agent_online && notice.notice.is_some() {
+        match &agent {
+            Some(agent) => agent
+                .install_status()
+                .await
+                .map(|jobs| jobs.values().any(|job| job.running))
+                .unwrap_or(false),
+            None => false,
+        }
+    } else {
+        false
+    };
     let markup = templates::dashboard(templates::DashboardView {
         base_url: &state.config.base_url,
         csrf_token: &csrf_token,
@@ -187,6 +199,7 @@ pub(super) async fn dashboard(
         notice: notice.notice.as_deref(),
         agent_configured,
         agent_online,
+        install_running,
     });
     let cookies = if existing_csrf.is_none() {
         vec![create_cookie(
@@ -580,7 +593,10 @@ pub(super) async fn install_tool(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if !matches!(tool.as_str(), "docker" | "compose" | "kubectl" | "nixpacks") {
+    if !matches!(
+        tool.as_str(),
+        "docker" | "compose" | "kubectl" | "nix" | "nixpacks"
+    ) {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let Some(agent) = HostAgent::from_env() else {
