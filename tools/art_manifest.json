@@ -50,6 +50,8 @@
   "E1": {
     "out": "static/assets/art/illustrations",
     "size": 512,
+    "columns": 2,
+    "rows": 2,
     "names": [
       "empty-providers",
       "empty-containers",

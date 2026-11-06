@@ -60,4 +60,53 @@
     border: 1px solid color-mix(in srgb, var(--color-lime) 8%, transparent);
     border-radius: 9999px;
   }
+
+  .login-art {
+    object-position: center 42%;
+  }
+
+  .login-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      rgb(10 36 26 / 22%) 0%,
+      rgb(10 36 26 / 38%) 42%,
+      rgb(22 79 59 / 96%) 100%
+    );
+  }
+
+  .login-content {
+    min-height: calc(100vh - 6rem);
+  }
+
+  .login-copy {
+    max-width: 25rem;
+    padding-top: 7rem;
+    padding-bottom: 2rem;
+  }
+
+  .hero-art {
+    object-position: right center;
+  }
+
+  .hero-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      #164f3b 0%,
+      rgb(22 79 59 / 94%) 34%,
+      rgb(22 79 59 / 36%) 72%,
+      rgb(22 79 59 / 8%) 100%
+    );
+  }
+
+  .empty-art {
+    display: block;
+    width: 9rem;
+    height: 9rem;
+    object-fit: contain;
+    margin: 0 auto 1rem;
+  }
 }

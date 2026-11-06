@@ -92,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--names", nargs="+", help="Output names, in cell order")
     parser.add_argument("--out", type=Path, help="Output directory")
     parser.add_argument("--size", type=int, help="Final square size in pixels")
-    parser.add_argument("--columns", type=int, default=3)
-    parser.add_argument("--rows", type=int, default=2)
+    parser.add_argument("--columns", type=int)
+    parser.add_argument("--rows", type=int)
     parser.add_argument("--padding", type=float, default=0.08)
     parser.add_argument("--tolerance", type=int, default=18)
     parser.add_argument(
@@ -112,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     if out is None:
         parser.error("use --out or a preset with an output directory")
     size = args.size or int(preset.get("size", 256))
+    columns = args.columns or int(preset.get("columns", 3))
+    rows = args.rows or int(preset.get("rows", 2))
 
     output_dir = Path(out)
     if not output_dir.is_absolute():
@@ -123,8 +125,8 @@ def main(argv: list[str] | None = None) -> int:
             names,
             output_dir,
             size=size,
-            columns=args.columns,
-            rows=args.rows,
+            columns=columns,
+            rows=rows,
             padding=args.padding,
             tolerance=args.tolerance,
             remove_background=not args.keep_background,
