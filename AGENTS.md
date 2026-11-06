@@ -1,5 +1,19 @@
 # Hakobi execution protocol
 
+## Mandatory language policy
+
+- All agent-authored output MUST be English: chat replies, reasoning summaries,
+  plans, commit messages, PR text, documentation, code comments, and issue text.
+- This rule overrides the language of the user's prompt. If the user writes in
+  Indonesian or any other language, continue in English; do not mirror their
+  language.
+- If a non-English response is generated, treat it as a protocol violation:
+  stop, rewrite the response in English, and do not include the non-English
+  version in the final answer.
+- Do not translate this policy into another language in agent-facing files.
+- Exceptions require an explicit, current instruction from the repository owner
+  to change this policy itself, not merely to request another language.
+
 Follow this order unless the user explicitly overrides it.
 
 1. **Map first**

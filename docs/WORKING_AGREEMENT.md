@@ -1,5 +1,16 @@
 # Working Agreement — Git + Local Memory
 
+## Language policy (mandatory)
+
+All agent-authored text MUST be English, including replies, plans, commit
+messages, PR descriptions, documentation, comments, and issue text. This rule
+overrides the language used by the user's prompt. If the prompt is Indonesian or
+any other language, the agent MUST continue in English. Non-English output is a
+protocol violation and must be rewritten before delivery.
+
+This repository's agent-facing files stay in English. Only the repository owner
+may change this policy, by explicitly instructing a change to the policy itself.
+
 This repository is the durable record of Hakobi. Every meaningful change must be
 recoverable from two places:
 
