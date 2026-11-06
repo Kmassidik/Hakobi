@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "id": "fix-add-bug",
+  "title": "Fix add() returning subtraction",
+  "repo": "../../examples/buggy_app",
+  "prompt": "task.md",
+  "worker": ["python3", "../../workers/reference_worker.py"],
+  "workspace_mode": "snapshot",
+  "max_attempts": 3,
+  "token_budget": 20000,
+  "worker_timeout": 90,
+  "allowed_commands": [
+    ["python3", "-m", "unittest"],
+    ["git", "status"],
+    ["git", "diff"]
+  ],
+  "allowed_files": ["app.py"],
+  "sensitive_patterns": [".env", "*.pem", "*.key"],
+  "checks": [
+    {
+      "type": "command",
+      "id": "unit-tests",
+      "argv": ["python3", "-m", "unittest", "discover", "-s", "tests", "-v"],
+      "baseline": "fail",
+      "expect_output": "FAILED (failures=1)",
+      "timeout": 30
+    },
+    {
+      "type": "diff_scope",
+      "id": "file-fence",
+      "allowed": ["app.py"]
+    },
+    {
+      "type": "diff_check",
+      "id": "diff-clean"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "name": "hakobi-cp1-catalog",
+  "tasks": [
+    "../tasks/hakobi/cp1-catalog/task.json"
+  ]
+}

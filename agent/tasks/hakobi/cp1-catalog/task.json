@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "id": "hakobi-cp1-catalog",
+  "title": "Add persistent SQLite catalog foundation",
+  "repo": "../../../..",
+  "prompt": "task.md",
+  "worker": ["python3", "../../../../agent/workers/omp_worker.py"],
+  "workspace_mode": "snapshot",
+  "max_attempts": 3,
+  "token_budget": 60000,
+  "worker_timeout": 900,
+  "pr_base": "main",
+  "allowed_commands": [
+    ["cargo", "test"],
+    ["cargo", "check"],
+    ["cargo", "clippy"],
+    ["cargo", "fmt"],
+    ["git", "status"],
+    ["git", "diff"],
+    ["git", "log"],
+    ["git", "show"],
+    ["python3"]
+  ],
+  "allowed_files": [
+    "src/lib.rs",
+    "src/catalog.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "migrations/*.sql",
+    "migrations/**/*.sql"
+  ],
+  "sensitive_patterns": ["config.toml", "*.pem", "*.key", ".env", ".env.*"],
+  "checks": [
+    {
+      "type": "command",
+      "id": "catalog-tests",
+      "argv": ["cargo", "test", "--test", "catalog"],
+      "baseline": "fail",
+      "timeout": 300
+    },
+    {
+      "type": "command",
+      "id": "all-tests",
+      "argv": ["cargo", "test"],
+      "baseline": "fail",
+      "timeout": 300
+    },
+    {
+      "type": "command",
+      "id": "clippy",
+      "argv": ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
+      "baseline": "fail",
+      "timeout": 300
+    },
+    {
+      "type": "diff_scope",
+      "id": "file-fence",
+      "allowed": [
+        "src/lib.rs",
+        "src/catalog.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        "migrations/*.sql",
+        "migrations/**/*.sql"
+      ]
+    },
+    {
+      "type": "diff_check",
+      "id": "diff-clean"
+    }
+  ]
+}

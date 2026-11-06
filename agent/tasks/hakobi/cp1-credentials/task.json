@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "id": "hakobi-cp1-credentials",
+  "title": "Encrypt provider credentials and track capability freshness",
+  "repo": "../../../..",
+  "prompt": "task.md",
+  "worker": ["python3", "../../../../agent/workers/omp_worker.py"],
+  "workspace_mode": "snapshot",
+  "max_attempts": 3,
+  "token_budget": 60000,
+  "worker_timeout": 900,
+  "pr_base": "main",
+  "allowed_commands": [
+    ["cargo", "test"],
+    ["cargo", "check"],
+    ["cargo", "clippy"],
+    ["cargo", "fmt"],
+    ["git", "status"],
+    ["git", "diff"],
+    ["git", "log"],
+    ["git", "show"]
+  ],
+  "allowed_files": [
+    "src/catalog.rs",
+    "Cargo.toml",
+    "Cargo.lock"
+  ],
+  "sensitive_patterns": ["config.toml", "*.pem", "*.key", ".env", ".env.*"],
+  "checks": [
+    {
+      "type": "command",
+      "id": "credential-tests",
+      "argv": ["cargo", "test", "--test", "credentials"],
+      "baseline": "fail",
+      "timeout": 300
+    },
+    {
+      "type": "command",
+      "id": "all-tests",
+      "argv": ["cargo", "test"],
+      "baseline": "fail",
+      "timeout": 300
+    },
+    {
+      "type": "command",
+      "id": "clippy",
+      "argv": ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
+      "baseline": "fail",
+      "timeout": 300
+    },
+    {
+      "type": "diff_scope",
+      "id": "file-fence",
+      "allowed": ["src/catalog.rs", "Cargo.toml", "Cargo.lock"]
+    },
+    {
+      "type": "diff_check",
+      "id": "diff-clean"
+    }
+  ]
+}
