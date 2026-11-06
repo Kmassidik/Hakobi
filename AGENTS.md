@@ -18,7 +18,7 @@ Follow this order unless the user explicitly overrides it.
    - Do not rebuild Docker for every visual change. Assets are compiled into the
      binary via `RustEmbed`, so a rebuild is only required when verifying the
      deployable image.
-   - Rebuild the CSS with `npm run build:css` after template/class changes.
+   - Rebuild the CSS with `bun run build:css` after template/class changes.
 
 4. **Verify the real viewport**
    - Screenshot desktop at 1440 px.

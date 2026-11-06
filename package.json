@@ -2,7 +2,7 @@
   "name": "hakobi-frontend",
   "private": true,
   "scripts": {
-    "build:assets": "npm run build:css && node scripts/build-assets.mjs",
+    "build:assets": "bun run build:css && bun scripts/build-assets.mjs",
     "build:css": "tailwindcss -i frontend/app.css -o static/assets/app.css --minify",
     "watch:css": "tailwindcss -i frontend/app.css -o static/assets/app.css --watch"
   },
@@ -11,5 +11,6 @@
     "@tailwindcss/cli": "4.3.4",
     "htmx.org": "2.0.11",
     "tailwindcss": "4.3.4"
-  }
+  },
+  "packageManager": "bun@1.4.4"
 }

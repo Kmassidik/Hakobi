@@ -49,7 +49,7 @@
             cargo-deny
             clippy
             cloudflared
-            nodejs_22
+            bun
             python3
             rust-analyzer
             rustc

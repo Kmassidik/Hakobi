@@ -215,15 +215,15 @@ Local mode does not create Cloudflare resources and uses a loopback-only HTTP li
 
 ### Frontend assets
 
-Frontend development requires Node.js 22 and npm. Browser assets are vendored locally—the app uses no CDN:
+Frontend development requires Bun 1.4.4. Browser assets are vendored locally—the app uses no CDN:
 
 ```sh
-npm ci
-npm run build:assets
-npm run watch:css
+bun install --frozen-lockfile
+bun run build:assets
+bun run watch:css
 ```
 
-`build:assets` compiles Tailwind and copies the pinned HTMX runtime, Font Awesome solid font, CSS, and licenses into `static/assets/`. Generated assets are committed and embedded into the Rust binary. After changing Maud classes or frontend sources, run `npm run build:assets` again.
+`build:assets` compiles Tailwind and copies the pinned HTMX runtime, Font Awesome solid font, CSS, and licenses into `static/assets/`. Generated assets are committed and embedded into the Rust binary. After changing Maud classes or frontend sources, run `bun run build:assets` again.
 
 Font Awesome is intentionally limited to the solid icon set; no external font or script host is allowed by the CSP.
 
