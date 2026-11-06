@@ -104,20 +104,23 @@ pub(super) fn login(
         "Sign in · Hakobi",
         html! {
             main class="grid min-h-screen grid-cols-1 lg:grid-cols-[1.08fr_0.92fr]" {
-                section class="relative flex min-h-screen flex-col justify-between overflow-hidden bg-brand px-8 py-12 text-[#f7f8f1] sm:px-12 lg:px-[clamp(2.5rem,6vw,7rem)] max-lg:min-h-0" aria-labelledby="brand-title" {
-                    img src="/assets/art/mascot/hako-carry.webp" alt="" aria-hidden="true" class="pointer-events-none hidden lg:block" style="position:absolute;right:-2rem;bottom:-2rem;height:38%;width:auto;max-width:42%;object-fit:contain;opacity:.95;";
-                    (brand("Hakobi home"))
-                    div class="max-w-2xl py-16" {
-                        p class=(format!("{EYEBROW} text-lime")) { "Your infrastructure, carried forward" }
-                        h1 id="brand-title" class="my-6 font-display text-[clamp(3.2rem,14vw,5rem)] font-normal leading-[0.98] tracking-[-0.055em] lg:text-[clamp(3.5rem,6vw,6.5rem)]" {
-                            "From commit" br; "to production."
+                section class="relative min-h-screen overflow-hidden bg-brand px-8 py-12 text-[#f7f8f1] sm:px-12 lg:px-[clamp(2.5rem,6vw,7rem)] max-lg:min-h-[44rem]" aria-labelledby="brand-title" {
+                    img src="/assets/art/login-hako.webp" alt="" aria-hidden="true" class="absolute inset-0 h-full w-full object-cover" style="object-position:center 42%;";
+                    div aria-hidden="true" style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,36,26,.22) 0%,rgba(10,36,26,.38) 42%,rgba(22,79,59,.96) 100%);";
+                    div class="relative z-10 flex flex-col justify-between" style="min-height:calc(100vh - 6rem);" {
+                        (brand("Hakobi home"))
+                        div style="max-width:25rem;padding-top:7rem;padding-bottom:2rem;" {
+                            p class=(format!("{EYEBROW} text-lime")) { "Self-hosted delivery" }
+                            h1 id="brand-title" class="my-5 font-display text-[clamp(2.6rem,5vw,4rem)] font-normal leading-[0.98] tracking-[-0.055em]" {
+                                "Ship calmly."
+                            }
+                            p class="max-w-[23rem] text-[1rem] leading-[1.7] text-[#d7e3dc]" {
+                                "Hakobi carries your code from commit to production, without the YAML maze."
+                            }
                         }
-                        p class="max-w-[29rem] text-[1.05rem] leading-[1.7] text-[#c3d2ca]" {
-                            "A quiet control plane for the work that keeps your software moving."
+                        p class="m-0 text-[0.8rem] text-[#d7e3dc] max-lg:hidden" {
+                            "Self-hosted · Private by design"
                         }
-                    }
-                    p class="m-0 text-[0.8rem] text-[#9eb7a9] max-lg:hidden" {
-                        "Self-hosted · Private by design"
                     }
                 }
 
@@ -200,7 +203,8 @@ pub(super) fn dashboard(
                     }
 
                     section class="relative flex min-h-[23rem] items-center overflow-hidden rounded-[1.25rem] bg-brand p-8 text-white sm:p-12 lg:p-[clamp(2.5rem,6vw,5rem)]" aria-labelledby="hello-title" {
-                        img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="pointer-events-none absolute inset-y-0 right-0 h-full w-[72%] object-cover" style="object-position:right center;opacity:.9;";
+                        img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="pointer-events-none absolute inset-0 h-full w-full object-cover" style="object-position:right center;";
+                        div aria-hidden="true" style="position:absolute;inset:0;background:linear-gradient(90deg,#164f3b 0%,rgba(22,79,59,.94) 34%,rgba(22,79,59,.36) 72%,rgba(22,79,59,.08) 100%);";
                         div class="hero-orbit" aria-hidden="true" {}
                         div class="relative z-10 max-w-[39rem]" {
                             p class=(format!("{EYEBROW} text-lime")) { "The first step is live" }
