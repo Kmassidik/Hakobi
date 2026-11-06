@@ -1,0 +1,60 @@
+{
+  "A1": {
+    "out": "static/assets/art/3d",
+    "size": 256,
+    "names": [
+      "source-repo",
+      "build-runner",
+      "container-image",
+      "stack-compose",
+      "deploy",
+      "rollback"
+    ]
+  },
+  "A2": {
+    "out": "static/assets/art/3d",
+    "size": 256,
+    "names": [
+      "logs",
+      "health",
+      "tunnel",
+      "domain",
+      "secret-vault",
+      "webhook"
+    ]
+  },
+  "A3": {
+    "out": "static/assets/art/3d",
+    "size": 256,
+    "names": [
+      "metrics",
+      "audit-trail",
+      "lock-shield",
+      "backup",
+      "cleanup",
+      "alert"
+    ]
+  },
+  "M1": {
+    "out": "static/assets/art/mascot",
+    "size": 512,
+    "names": [
+      "hako-idle",
+      "hako-carry",
+      "hako-connect",
+      "hako-success",
+      "hako-error",
+      "hako-sleep"
+    ]
+  },
+  "E1": {
+    "out": "static/assets/art/illustrations",
+    "size": 512,
+    "names": [
+      "empty-providers",
+      "empty-containers",
+      "empty-stacks",
+      "empty-logs"
+    ]
+  }
+}

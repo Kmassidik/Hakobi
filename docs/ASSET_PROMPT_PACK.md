@@ -272,6 +272,22 @@ ChatGPT PNG
   -> place under static/assets/art/
 ```
 
+Local tools:
+
+```sh
+python3 -m pip install -r tools/requirements.txt
+
+python3 tools/slice_sheets.py raw/A1-build-ship.png --preset A1
+python3 tools/slice_sheets.py raw/A2-operate.png --preset A2
+python3 tools/slice_sheets.py raw/A3-observe-protect.png --preset A3
+python3 tools/slice_sheets.py raw/M1-hako.png --preset M1
+python3 tools/slice_sheets.py raw/E1-empty-states.png --preset E1
+
+python3 tools/cutout.py raw/hero-pipeline.png static/assets/art/hero-pipeline.webp
+```
+
+See `tools/README.md` for details and limitations.
+
 Suggested paths:
 
 ```text
