@@ -104,7 +104,8 @@ pub(super) fn login(
         "Sign in · Hakobi",
         html! {
             main class="grid min-h-screen grid-cols-1 lg:grid-cols-[1.08fr_0.92fr]" {
-                section class="flex min-h-screen flex-col justify-between bg-brand px-8 py-12 text-[#f7f8f1] sm:px-12 lg:px-[clamp(2.5rem,6vw,7rem)] max-lg:min-h-0" aria-labelledby="brand-title" {
+                section class="relative flex min-h-screen flex-col justify-between overflow-hidden bg-brand px-8 py-12 text-[#f7f8f1] sm:px-12 lg:px-[clamp(2.5rem,6vw,7rem)] max-lg:min-h-0" aria-labelledby="brand-title" {
+                    img src="/assets/art/mascot/hako-carry.webp" alt="" aria-hidden="true" class="pointer-events-none hidden lg:block" style="position:absolute;right:-2rem;bottom:-2rem;height:38%;width:auto;max-width:42%;object-fit:contain;opacity:.95;";
                     (brand("Hakobi home"))
                     div class="max-w-2xl py-16" {
                         p class=(format!("{EYEBROW} text-lime")) { "Your infrastructure, carried forward" }
@@ -199,6 +200,7 @@ pub(super) fn dashboard(
                     }
 
                     section class="relative flex min-h-[23rem] items-center overflow-hidden rounded-[1.25rem] bg-brand p-8 text-white sm:p-12 lg:p-[clamp(2.5rem,6vw,5rem)]" aria-labelledby="hello-title" {
+                        img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="pointer-events-none absolute inset-y-0 right-0 h-full w-[72%] object-cover" style="object-position:right center;opacity:.9;";
                         div class="hero-orbit" aria-hidden="true" {}
                         div class="relative z-10 max-w-[39rem]" {
                             p class=(format!("{EYEBROW} text-lime")) { "The first step is live" }
@@ -389,7 +391,10 @@ pub(super) fn providers(
                         }
                     }
                     @if providers.is_empty() {
-                        p class="rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" { "No providers connected yet." }
+                        div class="rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
+                            img src="/assets/art/illustrations/empty-providers.webp" alt="" aria-hidden="true" style="width:9rem;height:9rem;object-fit:contain;margin:0 auto 1rem;";
+                            p class="m-0" { "No providers connected yet." }
+                        }
                     } @else {
                         div class="grid gap-4" {
                             @for provider in providers {
@@ -493,9 +498,12 @@ pub(super) fn containers(
                         p class="mb-6 mt-6 rounded-[0.6rem] border border-line bg-surface/60 px-4 py-3 text-sm" role="status" { (message) }
                     }
                     @if groups.is_empty() {
-                        p class="mt-8 rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
-                            "No enabled Docker providers. "
-                            a class="font-semibold text-brand" href="/providers" { "Connect one first." }
+                        div class="mt-8 rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
+                            img src="/assets/art/illustrations/empty-containers.webp" alt="" aria-hidden="true" style="width:9rem;height:9rem;object-fit:contain;margin:0 auto 1rem;";
+                            p class="m-0" {
+                                "No enabled Docker providers. "
+                                a class="font-semibold text-brand" href="/providers" { "Connect one first." }
+                            }
                         }
                     }
                     @for (provider, result) in groups {
@@ -874,9 +882,12 @@ pub(super) fn stacks(
                     }
                     (delete_stack_dialog(csrf_token))
                     @if groups.is_empty() {
-                        p class="mt-8 rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
-                            "No enabled Docker providers. "
-                            a class="font-semibold text-brand" href="/providers" { "Connect one first." }
+                        div class="mt-8 rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
+                            img src="/assets/art/illustrations/empty-stacks.webp" alt="" aria-hidden="true" style="width:9rem;height:9rem;object-fit:contain;margin:0 auto 1rem;";
+                            p class="m-0" {
+                                "No enabled Docker providers. "
+                                a class="font-semibold text-brand" href="/providers" { "Connect one first." }
+                            }
                         }
                     }
                     @for (provider, result) in groups {
