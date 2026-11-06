@@ -42,6 +42,14 @@ struct ErrorResponse {
     error: String,
 }
 
+#[derive(Debug, Default, Serialize)]
+struct DockerMetrics {
+    containers: usize,
+    cpu_percent: f64,
+    memory_used_bytes: u64,
+    memory_limit_bytes: u64,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -77,6 +85,7 @@ async fn run() -> Result<()> {
     let app = Router::new()
         .route("/healthz", get(health))
         .route("/v1/readiness", get(readiness))
+        .route("/v1/docker/metrics", get(docker_metrics))
         .route("/v1/install/status", get(install_status))
         .route("/v1/install/{tool}", post(install))
         .with_state(state);
@@ -202,6 +211,98 @@ async fn run_installer(script: &'static str) -> Result<String> {
         );
     }
     Ok(if stdout.is_empty() { stderr } else { stdout })
+}
+
+async fn docker_metrics(State(state): State<AgentState>, headers: HeaderMap) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    let mut child = Command::new("docker");
+    child
+        .args(["stats", "--no-stream", "--format", "{{json .}}"])
+        .kill_on_drop(true);
+    let output = match timeout(Duration::from_secs(20), child.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => return error_response(StatusCode::BAD_GATEWAY, error.to_string()),
+        Err(_) => {
+            return error_response(
+                StatusCode::GATEWAY_TIMEOUT,
+                "docker stats exceeded its 20 second limit",
+            );
+        }
+    };
+    if !output.status.success() {
+        return error_response(
+            StatusCode::BAD_GATEWAY,
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        );
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut metrics = DockerMetrics::default();
+    for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let Some(name) = value.get("Name").and_then(|value| value.as_str()) else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        metrics.containers += 1;
+        metrics.cpu_percent += value
+            .get("CPUPerc")
+            .and_then(|value| value.as_str())
+            .and_then(parse_percent)
+            .unwrap_or(0.0);
+        if let Some((used, _)) = value
+            .get("MemUsage")
+            .and_then(|value| value.as_str())
+            .and_then(parse_memory_pair)
+        {
+            metrics.memory_used_bytes = metrics.memory_used_bytes.saturating_add(used);
+        }
+    }
+    if let Some(total) = host_memory_total() {
+        metrics.memory_limit_bytes = total;
+    }
+    Json(metrics).into_response()
+}
+
+fn host_memory_total() -> Option<u64> {
+    let contents = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = contents
+        .lines()
+        .find(|line| line.starts_with("MemTotal:"))?;
+    let kib = line.split_whitespace().nth(1)?.parse::<u64>().ok()?;
+    Some(kib.saturating_mul(1024))
+}
+
+fn parse_percent(value: &str) -> Option<f64> {
+    value.trim().trim_end_matches('%').parse().ok()
+}
+
+fn parse_memory_pair(value: &str) -> Option<(u64, u64)> {
+    let (used, limit) = value.split_once('/')?;
+    Some((parse_memory(used)?, parse_memory(limit)?))
+}
+
+fn parse_memory(value: &str) -> Option<u64> {
+    let value = value.trim();
+    let split = value
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
+        .unwrap_or(value.len());
+    let number = value[..split].parse::<f64>().ok()?;
+    let unit = value[split..].trim().to_ascii_lowercase();
+    let multiplier = match unit.as_str() {
+        "b" | "" => 1.0,
+        "kib" | "kb" => 1024.0,
+        "mib" | "mb" => 1024.0 * 1024.0,
+        "gib" | "gb" => 1024.0 * 1024.0 * 1024.0,
+        "tib" | "tb" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+    Some((number * multiplier) as u64)
 }
 
 async fn install_status(State(state): State<AgentState>, headers: HeaderMap) -> Response {

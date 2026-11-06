@@ -149,6 +149,19 @@
     }
   }
 
+  const updateStamp = () => {
+    document.querySelectorAll("[data-updated]").forEach((element) => {
+      const now = new Date();
+      element.textContent = "Updated " + now.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    });
+  };
+  document.addEventListener("htmx:afterSwap", updateStamp);
+  updateStamp();
+
   const installWatch = document.querySelector('[data-install-watch="true"]');
   if (installWatch) {
     window.setTimeout(() => window.location.reload(), 4000);

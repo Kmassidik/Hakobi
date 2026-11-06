@@ -75,108 +75,14 @@ pub(super) async fn dashboard(
         .unwrap_or_else(random_token);
     let agent = HostAgent::from_env();
     let agent_configured = agent.is_some();
-    let mut agent_online = false;
-    let readiness = if let Some(agent) = &agent {
-        match agent.readiness().await {
-            Ok(readiness) => {
-                agent_online = true;
-                readiness
-            }
-            Err(error) => {
-                tracing::warn!(error = %error, "host agent readiness failed");
-                match tokio::task::spawn_blocking(hakobi::install::detect).await {
-                    Ok(readiness) => readiness,
-                    Err(error) => {
-                        tracing::error!(error = %error, "readiness detection failed");
-                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-                    }
-                }
-            }
-        }
-    } else {
-        match tokio::task::spawn_blocking(hakobi::install::detect).await {
-            Ok(readiness) => readiness,
-            Err(error) => {
-                tracing::error!(error = %error, "readiness detection failed");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
+    let (readiness, agent_online) = match load_readiness(agent.as_ref()).await {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::error!(error = %error, "readiness detection failed");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    let mut metrics = templates::DashboardMetrics::default();
-    match load_providers(&state).await {
-        Ok(providers) => {
-            let mut services = HashSet::new();
-            let mut running_services = HashSet::new();
-            let mut stacks = HashSet::new();
-            for provider in providers.into_iter().filter(|provider| provider.enabled) {
-                let rows = match state.backend.containers(&provider.endpoint).await {
-                    Ok(rows) => rows,
-                    Err(error) => {
-                        tracing::warn!(
-                            provider = %provider.name,
-                            error = %error,
-                            "dashboard provider inventory failed"
-                        );
-                        continue;
-                    }
-                };
-                for row in rows {
-                    let running = row.state == "running";
-                    metrics.containers_total += 1;
-                    if running {
-                        metrics.containers_running += 1;
-                        if row.health.as_deref() != Some("unhealthy") {
-                            metrics.containers_healthy += 1;
-                        }
-                    }
-                    if row.state == "restarting" {
-                        metrics.containers_restarting += 1;
-                    }
-                    if let Some(project) = row
-                        .compose_project
-                        .as_deref()
-                        .filter(|value| !value.is_empty())
-                    {
-                        stacks.insert(project.to_owned());
-                    }
-                    let service = match (
-                        row.compose_project.as_deref(),
-                        row.compose_service.as_deref(),
-                    ) {
-                        (Some(project), Some(service)) => format!("{project}/{service}"),
-                        _ => row.name.clone(),
-                    };
-                    services.insert(service.clone());
-                    if running {
-                        running_services.insert(service);
-                    }
-                }
-            }
-            metrics.services_total = services.len();
-            metrics.services_running = running_services.len();
-            metrics.stacks = stacks.len();
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "dashboard provider list failed");
-        }
-    }
-    if let Some((used, total)) = host_memory() {
-        metrics.memory_used_bytes = Some(used);
-        metrics.memory_total_bytes = Some(total);
-    }
-    if let Some(cpu_count) = std::thread::available_parallelism()
-        .ok()
-        .map(|value| value.get())
-    {
-        metrics.cpu_count = Some(cpu_count);
-        if let Some(load) = host_load_average() {
-            metrics.cpu_percent = Some(
-                ((load / cpu_count as f32) * 100.0)
-                    .round()
-                    .clamp(0.0, 100.0) as u8,
-            );
-        }
-    }
+    let metrics = collect_dashboard_metrics(&state, agent.as_ref()).await;
     let install_running = if agent_online && notice.notice.is_some() {
         match &agent {
             Some(agent) => agent
@@ -581,6 +487,66 @@ impl ContainerAction {
     }
 }
 
+async fn load_readiness(
+    agent: Option<&HostAgent>,
+) -> anyhow::Result<(hakobi::install::Readiness, bool)> {
+    if let Some(agent) = agent {
+        match agent.readiness().await {
+            Ok(readiness) => return Ok((readiness, true)),
+            Err(error) => tracing::warn!(error = %error, "host agent readiness failed"),
+        }
+    }
+    let readiness = tokio::task::spawn_blocking(hakobi::install::detect)
+        .await
+        .context("readiness detection task failed")?;
+    Ok((readiness, false))
+}
+
+pub(super) async fn metrics_partial(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authenticated(&state, &headers).await {
+        return partial_unauthorized();
+    }
+    let agent = HostAgent::from_env();
+    let metrics = collect_dashboard_metrics(&state, agent.as_ref()).await;
+    html_response(
+        StatusCode::OK,
+        templates::metrics_section(&metrics),
+        Vec::new(),
+    )
+}
+
+pub(super) async fn readiness_partial(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return partial_unauthorized();
+    }
+    let agent = HostAgent::from_env();
+    let agent_configured = agent.is_some();
+    let (readiness, agent_online) = match load_readiness(agent.as_ref()).await {
+        Ok(result) => result,
+        Err(error) => {
+            tracing::error!(error = %error, "readiness detection failed");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+    let (csrf_token, cookies) = page_csrf(&state, &headers);
+    html_response(
+        StatusCode::OK,
+        templates::readiness_section(&readiness, &csrf_token, agent_online, agent_configured),
+        cookies,
+    )
+}
+
+fn partial_unauthorized() -> Response {
+    let mut response = StatusCode::UNAUTHORIZED.into_response();
+    response
+        .headers_mut()
+        .insert("hx-redirect", HeaderValue::from_static("/login"));
+    response
+}
+
 pub(super) async fn install_tool(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -921,6 +887,114 @@ async fn enabled_docker_provider(
         .find(|provider| provider.id == provider_id))
 }
 
+async fn collect_dashboard_metrics(
+    state: &AppState,
+    agent: Option<&HostAgent>,
+) -> templates::DashboardMetrics {
+    let mut metrics = templates::DashboardMetrics::default();
+    match load_providers(state).await {
+        Ok(providers) => {
+            let mut services = HashSet::new();
+            let mut running_services = HashSet::new();
+            let mut stacks = HashSet::new();
+            for provider in providers.into_iter().filter(|provider| provider.enabled) {
+                metrics.providers_configured += 1;
+                let rows = match state.backend.containers(&provider.endpoint).await {
+                    Ok(rows) => {
+                        metrics.providers_reachable += 1;
+                        rows
+                    }
+                    Err(error) => {
+                        metrics.providers_failed += 1;
+                        tracing::warn!(
+                            provider = %provider.name,
+                            error = %error,
+                            "dashboard provider inventory failed"
+                        );
+                        continue;
+                    }
+                };
+                for row in rows {
+                    let running = row.state == "running";
+                    metrics.containers_total += 1;
+                    if running {
+                        metrics.containers_running += 1;
+                        if row.health.as_deref() != Some("unhealthy") {
+                            metrics.containers_healthy += 1;
+                        }
+                    }
+                    if row.state == "restarting" {
+                        metrics.containers_restarting += 1;
+                    }
+                    if let Some(project) = row
+                        .compose_project
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                    {
+                        stacks.insert(format!("{}/{project}", provider.id));
+                    }
+                    let service = match (
+                        row.compose_project.as_deref(),
+                        row.compose_service.as_deref(),
+                    ) {
+                        (Some(project), Some(service)) => {
+                            format!("{}/{project}/{service}", provider.id)
+                        }
+                        _ => format!("{}/{}", provider.id, row.name),
+                    };
+                    services.insert(service.clone());
+                    if running {
+                        running_services.insert(service);
+                    }
+                }
+            }
+            metrics.services_total = services.len();
+            metrics.services_running = running_services.len();
+            metrics.stacks = stacks.len();
+        }
+        Err(error) => {
+            metrics.catalog_failed = true;
+            tracing::warn!(error = %error, "dashboard provider list failed");
+        }
+    }
+
+    if let Some(agent) = agent {
+        match agent.docker_metrics().await {
+            Ok(docker) if docker.memory_limit_bytes > 0 || docker.containers > 0 => {
+                metrics.docker_metrics = true;
+                metrics.docker_container_count = Some(docker.containers);
+                metrics.memory_used_bytes = Some(docker.memory_used_bytes);
+                metrics.memory_total_bytes = Some(docker.memory_limit_bytes);
+                metrics.cpu_percent = Some(docker.cpu_percent.clamp(0.0, 999.0));
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::warn!(error = %error, "host docker metrics failed");
+            }
+        }
+    }
+    if !metrics.docker_metrics {
+        if let Some((used, total)) = host_memory() {
+            metrics.memory_used_bytes = Some(used);
+            metrics.memory_total_bytes = Some(total);
+        }
+        if let Some(cpu_count) = std::thread::available_parallelism()
+            .ok()
+            .map(|value| value.get())
+        {
+            metrics.cpu_count = Some(cpu_count);
+            if let Some(load) = host_load_average() {
+                metrics.cpu_percent = Some(
+                    ((load / cpu_count as f32) * 100.0)
+                        .round()
+                        .clamp(0.0, 100.0) as f64,
+                );
+            }
+        }
+    }
+    metrics
+}
+
 fn host_memory() -> Option<(u64, u64)> {
     let contents = fs::read_to_string("/proc/meminfo").ok()?;
     let mut total_kib = None;
@@ -1247,7 +1321,11 @@ pub(super) async fn status(State(state): State<AppState>, headers: HeaderMap) ->
             .insert("hx-redirect", HeaderValue::from_static("/login"));
         return response;
     }
-    html_response(StatusCode::OK, templates::status_badge(), Vec::new())
+    html_response(
+        StatusCode::OK,
+        templates::status_badge("Control plane online", true),
+        Vec::new(),
+    )
 }
 
 #[derive(RustEmbed)]

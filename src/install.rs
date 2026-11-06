@@ -192,9 +192,18 @@ fn kubectl_status(config: &DetectConfig) -> ToolStatus {
 
 fn nix_status(config: &DetectConfig) -> ToolStatus {
     match probe_version(config, "nix", &["--version"]) {
-        Some(version) => ready(version.trim().to_owned()),
+        Some(version) => ready(nix_version(&version)),
         None => missing(NIX_INSTALL_COMMAND),
     }
+}
+
+fn nix_version(output: &str) -> String {
+    output
+        .split_whitespace()
+        .last()
+        .filter(|version| version.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        .unwrap_or(output.trim())
+        .to_owned()
 }
 
 fn nixpacks_status(config: &DetectConfig) -> ToolStatus {

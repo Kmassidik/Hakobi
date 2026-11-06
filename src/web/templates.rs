@@ -38,9 +38,15 @@ pub(super) struct DashboardMetrics {
     pub containers_healthy: usize,
     pub containers_total: usize,
     pub containers_restarting: usize,
+    pub providers_configured: usize,
+    pub providers_reachable: usize,
+    pub providers_failed: usize,
+    pub catalog_failed: bool,
+    pub docker_metrics: bool,
+    pub docker_container_count: Option<usize>,
     pub memory_used_bytes: Option<u64>,
     pub memory_total_bytes: Option<u64>,
-    pub cpu_percent: Option<u8>,
+    pub cpu_percent: Option<f64>,
     pub cpu_count: Option<usize>,
 }
 
@@ -236,6 +242,219 @@ pub(super) fn login(
     )
 }
 
+pub(super) fn readiness_section(
+    readiness: &Readiness,
+    csrf_token: &str,
+    agent_online: bool,
+    agent_configured: bool,
+) -> Markup {
+    let note = if agent_online {
+        "Detected by the host agent. Installs run on the host."
+    } else if agent_configured {
+        "Host agent unreachable. Host installs are disabled."
+    } else {
+        "Detected locally. Nothing is installed automatically."
+    };
+    html! {
+        section id="overview-readiness" aria-labelledby="readiness-title" hx-get="/partials/readiness" hx-trigger="every 30s" hx-swap="outerHTML" {
+            div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
+                h2 id="readiness-title" class="m-0 text-[1.05rem] font-semibold tracking-[-0.02em]" { "Host readiness" }
+                p class="m-0 text-xs text-[#86868b]" { (note) }
+            }
+            div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5" {
+                (readiness_card("Docker", "/assets/art/3d/deploy.webp", "docker", &readiness.docker, csrf_token, agent_online, agent_configured))
+                (readiness_card("Compose", "/assets/art/3d/stack-compose.webp", "compose", &readiness.compose, csrf_token, agent_online, agent_configured))
+                (readiness_card("kubectl", "/assets/art/3d/domain.webp", "kubectl", &readiness.kubectl, csrf_token, agent_online, agent_configured))
+                (readiness_card("Nix", "/assets/art/3d/source-repo.webp", "nix", &readiness.nix, csrf_token, agent_online, agent_configured))
+                (readiness_card("Nixpacks", "/assets/art/3d/build-runner.webp", "nixpacks", &readiness.nixpacks, csrf_token, agent_online, agent_configured))
+            }
+        }
+    }
+}
+
+pub(super) fn metrics_section(metrics: &DashboardMetrics) -> Markup {
+    let inventory_known = metrics.providers_reachable > 0;
+    let no_provider = metrics.providers_configured == 0;
+    let all_failed = metrics.providers_configured > 0 && metrics.providers_reachable == 0;
+    let services_value = if inventory_known {
+        format!("{} Running", metrics.services_running)
+    } else {
+        "—".to_owned()
+    };
+    let containers_value = if inventory_known {
+        format!(
+            "{} / {} Healthy",
+            metrics.containers_running, metrics.containers_healthy
+        )
+    } else {
+        "—".to_owned()
+    };
+    let inventory_note = if metrics.catalog_failed {
+        "Provider catalog unavailable".to_owned()
+    } else if no_provider {
+        "No Docker provider connected".to_owned()
+    } else if all_failed {
+        format!(
+            "{} provider{} unreachable",
+            metrics.providers_failed,
+            if metrics.providers_failed == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )
+    } else if metrics.providers_failed > 0 {
+        format!(
+            "Partial data · {} provider{} failed",
+            metrics.providers_failed,
+            if metrics.providers_failed == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )
+    } else {
+        String::new()
+    };
+    let services_foot = if inventory_known {
+        format!(
+            "{} stacks · {} tracked{}",
+            metrics.stacks,
+            metrics.services_total,
+            if metrics.providers_failed > 0 {
+                " · partial"
+            } else {
+                ""
+            }
+        )
+    } else {
+        inventory_note.clone()
+    };
+    let containers_foot = if inventory_known {
+        format!(
+            "{} restarting · {} total{}",
+            metrics.containers_restarting,
+            metrics.containers_total,
+            if metrics.providers_failed > 0 {
+                " · partial"
+            } else {
+                ""
+            }
+        )
+    } else {
+        inventory_note.clone()
+    };
+    let memory_value = match (metrics.memory_used_bytes, metrics.memory_total_bytes) {
+        (Some(used), Some(total)) => format!("{} / {}", format_bytes(used), format_bytes(total)),
+        _ => "—".to_owned(),
+    };
+    let memory_percent = metrics.memory_percent();
+    let memory_bar = memory_percent.unwrap_or(0);
+    let memory_label = match memory_percent {
+        Some(0) if metrics.memory_used_bytes.unwrap_or(0) > 0 => "<1%".to_owned(),
+        Some(percent) => format!("{percent}%"),
+        None => "—".to_owned(),
+    };
+    let memory_foot = if metrics.docker_metrics {
+        "Docker containers"
+    } else {
+        "Host memory"
+    };
+    let cpu_value = metrics
+        .cpu_percent
+        .map(|percent| {
+            if percent > 0.0 && percent < 1.0 {
+                "<1% Load".to_owned()
+            } else {
+                format!("{percent:.0}% Load")
+            }
+        })
+        .unwrap_or_else(|| "—".to_owned());
+    let cpu_bar = metrics.cpu_percent.unwrap_or(0.0).min(100.0);
+    let cpu_foot = if metrics.docker_metrics {
+        format!(
+            "Docker · {} containers",
+            metrics.docker_container_count.unwrap_or(0)
+        )
+    } else if let Some(count) = metrics.cpu_count {
+        format!("Host · {count} vCPU")
+    } else {
+        "Metrics unavailable".to_owned()
+    };
+    html! {
+        section id="overview-metrics" class="mb-6" aria-label="System status" hx-get="/partials/metrics" hx-trigger="every 15s" hx-swap="outerHTML" {
+            div class="mb-2 flex justify-end" {
+                span class="text-[0.68rem] text-[#86868b]" data-updated { "Live" }
+            }
+            @if no_provider || all_failed {
+                div class="mb-3 flex flex-col justify-between gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-[0_1px_3px_rgba(0,0,0,0.04)] sm:flex-row sm:items-center" {
+                    span { (inventory_note) ". Container and service metrics are unknown." }
+                    a class="font-semibold text-amber-900 underline-offset-2 hover:underline" href="/providers" { "Connect a provider →" }
+                }
+            } @else if metrics.providers_failed > 0 {
+                p class="mb-3 text-xs font-medium text-amber-700" { (inventory_note) ". Counts may be incomplete." }
+            }
+            div class="grid grid-cols-2 gap-4 xl:grid-cols-4" {
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href=(if inventory_known { "/stacks" } else { "/providers" }) {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Running services" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (services_value) }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" aria-hidden="true" {
+                            img src="/assets/art/3d/stack-compose.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    p class="mb-0 mt-3 text-xs text-[#86868b]" { (services_foot) }
+                }
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href=(if inventory_known { "/containers" } else { "/providers" }) {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Active containers" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (containers_value) }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" aria-hidden="true" {
+                            img src="/assets/art/3d/container-image.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    p class="mb-0 mt-3 text-xs text-[#86868b]" { (containers_foot) }
+                }
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="/containers" {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Memory usage" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (memory_value) }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" aria-hidden="true" {
+                            img src="/assets/art/3d/metrics.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    div class="mt-3 flex items-center gap-3" {
+                        progress class="metric-progress" value=(memory_bar) max="100" aria-label="Memory usage" {}
+                        span class="shrink-0 text-xs font-semibold text-[#86868b]" { (memory_label) }
+                    }
+                    p class="mb-0 mt-2 text-[0.68rem] text-[#86868b]" { (memory_foot) }
+                }
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="/containers" {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "CPU load" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (cpu_value) }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" aria-hidden="true" {
+                            img src="/assets/art/3d/health.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    div class="mt-3 flex items-center gap-3" {
+                        progress class="metric-progress" value=(cpu_bar) max="100" aria-label="CPU load" {}
+                        span class="shrink-0 text-xs font-semibold text-[#86868b]" { (cpu_foot) }
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
     let DashboardView {
         base_url,
@@ -249,27 +468,15 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
         agent_online,
         install_running,
     } = view;
-    let readiness_note = if agent_online {
-        "Detected by the host agent. Installs run on the host."
-    } else if agent_configured {
-        "Host agent unreachable. Showing container-local detection."
+    let control_healthy = !(agent_configured && !agent_online)
+        && metrics.providers_failed == 0
+        && !metrics.catalog_failed;
+    let control_label = if agent_configured && !agent_online {
+        "Host agent offline"
+    } else if metrics.catalog_failed || metrics.providers_failed > 0 {
+        "Control plane degraded"
     } else {
-        "Detected locally. Nothing is installed automatically."
-    };
-    let memory_value = match (metrics.memory_used_bytes, metrics.memory_total_bytes) {
-        (Some(used), Some(total)) => format!("{} / {}", format_bytes(used), format_bytes(total)),
-        _ => "—".to_owned(),
-    };
-    let memory_percent = metrics.memory_percent();
-    let memory_bar = memory_percent.unwrap_or(0);
-    let cpu_value = metrics
-        .cpu_percent
-        .map(|percent| format!("{percent}% Avg"))
-        .unwrap_or_else(|| "—".to_owned());
-    let cpu_bar = metrics.cpu_percent.unwrap_or(0);
-    let cpu_foot = match (metrics.cpu_percent, metrics.cpu_count) {
-        (Some(_), Some(count)) => format!("{count} vCPU · 1m load"),
-        _ => "Metrics unavailable".to_owned(),
+        "Control plane online"
     };
     page(
         "Dashboard · Hakobi",
@@ -311,71 +518,10 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
                                 "Good to see you, " (username) "."
                             }
                         }
-                        (status_badge())
+                        (status_badge(control_label, control_healthy))
                     }
 
-                    section class="mb-6 grid grid-cols-2 gap-4 xl:grid-cols-4" aria-label="System status" {
-                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
-                            div class="pr-10" {
-                                div {
-                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Total services" }
-                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (metrics.services_running) " Running" }
-                                }
-                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
-                                    i class="fa-solid fa-cubes" {}
-                                }
-                            }
-                            p class="mb-0 mt-3 text-xs text-[#86868b]" { "Across " (metrics.stacks) " stacks · " (metrics.services_total) " tracked" }
-                        }
-                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
-                            div class="pr-10" {
-                                div {
-                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Active containers" }
-                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" {
-                                        (metrics.containers_running) " / " (metrics.containers_healthy) " Healthy"
-                                    }
-                                }
-                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
-                                    i class="fa-solid fa-box-open" {}
-                                }
-                            }
-                            p class="mb-0 mt-3 text-xs text-[#86868b]" {
-                                (metrics.containers_restarting) " restarting · " (metrics.containers_total) " total"
-                            }
-                        }
-                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
-                            div class="pr-10" {
-                                div {
-                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Memory usage" }
-                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (memory_value) }
-                                }
-                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
-                                    i class="fa-solid fa-memory" {}
-                                }
-                            }
-                            div class="mt-3 flex items-center gap-3" {
-                                progress class="metric-progress" value=(memory_bar) max="100" aria-label="Memory usage" {}
-                                span class="shrink-0 text-xs font-semibold text-[#86868b]" {
-                                    @if let Some(percent) = memory_percent { (percent) "%" } @else { "—" }
-                                }
-                            }
-                        }
-                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
-                            div class="pr-10" {
-                                div {
-                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "CPU load" }
-                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (cpu_value) }
-                                }
-                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
-                                    i class="fa-solid fa-microchip" {}
-                                }
-                            }
-                            div class="mt-3 flex items-center gap-3" {
-                                progress class="metric-progress" value=(cpu_bar) max="100" aria-label="CPU load" {}
-                                span class="shrink-0 text-xs font-semibold text-[#86868b]" { (cpu_foot) }
-                            }
-                        }
-                    }
+                    (metrics_section(metrics))
 
                     section class="relative mb-6 flex min-h-[22rem] items-center overflow-hidden rounded-2xl bg-[#0f382c] px-8 py-10 text-white sm:px-12 lg:px-14 lg:py-14" aria-labelledby="hello-title" {
                         img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="hero-art pointer-events-none absolute inset-0 h-full w-full object-cover";
@@ -391,19 +537,7 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
                         }
                     }
 
-                    section aria-labelledby="readiness-title" {
-                        div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
-                            h2 id="readiness-title" class="m-0 text-[1.05rem] font-semibold tracking-[-0.02em]" { "Host readiness" }
-                            p class="m-0 text-xs text-[#86868b]" { (readiness_note) }
-                        }
-                        div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5" {
-                            (readiness_card("Docker", "fa-solid fa-cube", "docker", &readiness.docker, csrf_token, agent_online, agent_configured))
-                            (readiness_card("Compose", "fa-solid fa-layer-group", "compose", &readiness.compose, csrf_token, agent_online, agent_configured))
-                            (readiness_card("kubectl", "fa-solid fa-dharmachakra", "kubectl", &readiness.kubectl, csrf_token, agent_online, agent_configured))
-                            (readiness_card("Nix", "fa-solid fa-boxes-stacked", "nix", &readiness.nix, csrf_token, agent_online, agent_configured))
-                            (readiness_card("Nixpacks", "fa-solid fa-box", "nixpacks", &readiness.nixpacks, csrf_token, agent_online, agent_configured))
-                        }
-                    }
+                    (readiness_section(readiness, csrf_token, agent_online, agent_configured))
 
                     section class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3" aria-label="Instance details" {
                         article class="min-w-0 rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
@@ -455,7 +589,7 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
 
 fn readiness_card(
     label: &str,
-    icon: &str,
+    art: &str,
     tool: &str,
     status: &ToolStatus,
     csrf_token: &str,
@@ -465,8 +599,8 @@ fn readiness_card(
     html! {
         article class="rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
             div class="flex items-center gap-3" {
-                span class="grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
-                    i class=(format!("fa-solid {icon}")) {}
+                span class="grid size-9 place-items-center rounded-lg bg-brand/10" aria-hidden="true" {
+                    img src=(art) alt="" class="size-7 object-contain" loading="lazy";
                 }
                 h3 class="m-0 text-[0.95rem] font-semibold" { (label) }
             }
@@ -475,7 +609,7 @@ fn readiness_card(
                     p class="mb-0 mt-3 flex items-center gap-2 text-xs text-slate-500" {
                         span class="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" {}
                         "Ready · "
-                        code class="font-mono text-slate-700" { (version) }
+                        code class="min-w-0 truncate font-mono text-slate-700" title=(version) { (version) }
                     }
                 },
                 ToolStatus::Missing { install_command } => {
@@ -1630,11 +1764,16 @@ pub(super) fn infrastructure(
     )
 }
 
-pub(super) fn status_badge() -> Markup {
+pub(super) fn status_badge(label: &str, healthy: bool) -> Markup {
+    let dot = if healthy {
+        "size-2 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_0_4px] shadow-emerald-500/10"
+    } else {
+        "size-2 rounded-full bg-amber-400 shadow-[0_0_0_4px] shadow-amber-400/10"
+    };
     html! {
-        span id="control-status" class="inline-flex items-center gap-2 whitespace-nowrap text-xs font-medium text-[#6e6e73]" hx-get="/partials/status" hx-trigger="every 30s" hx-swap="outerHTML" {
-            span class="size-2 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_0_4px] shadow-emerald-500/10" aria-hidden="true" {}
-            "Control plane online"
+        span id="control-status" class="inline-flex items-center gap-2 whitespace-nowrap text-xs font-medium text-[#6e6e73]" {
+            span class=(dot) aria-hidden="true" {}
+            (label)
         }
     }
 }

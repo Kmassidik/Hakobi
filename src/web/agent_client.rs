@@ -15,6 +15,14 @@ struct AgentError {
     error: String,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(super) struct DockerMetrics {
+    pub containers: usize,
+    pub cpu_percent: f64,
+    pub memory_used_bytes: u64,
+    pub memory_limit_bytes: u64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(super) struct InstallJob {
     pub running: bool,
@@ -78,6 +86,26 @@ impl HostAgent {
             anyhow::bail!("{message}");
         }
         Ok(())
+    }
+
+    pub(super) async fn docker_metrics(&self) -> anyhow::Result<DockerMetrics> {
+        let response = self
+            .client
+            .get(format!("{}/v1/docker/metrics", self.url))
+            .bearer_auth(&self.token)
+            .timeout(Duration::from_secs(25))
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            let message = response
+                .json::<AgentError>()
+                .await
+                .map(|error| error.error)
+                .unwrap_or_else(|_| format!("host agent returned {status}"));
+            anyhow::bail!("{message}");
+        }
+        Ok(response.json::<DockerMetrics>().await?)
     }
 
     pub(super) async fn install_status(&self) -> anyhow::Result<HashMap<String, InstallJob>> {

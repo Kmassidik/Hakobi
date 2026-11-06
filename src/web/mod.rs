@@ -64,6 +64,8 @@ pub fn router_with_backend(
         .route("/providers/{id}/delete", post(handlers::delete_provider))
         .route("/containers", get(handlers::containers))
         .route("/host/install/{tool}", post(handlers::install_tool))
+        .route("/partials/metrics", get(handlers::metrics_partial))
+        .route("/partials/readiness", get(handlers::readiness_partial))
         .route(
             "/containers/new",
             get(handlers::container_new).post(handlers::container_create),
