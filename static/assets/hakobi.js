@@ -148,4 +148,23 @@
       bindConfirmDialog(dialog);
     }
   }
+
+  const passwordToggle = document.querySelector("[data-password-toggle]");
+  if (passwordToggle) {
+    const password = document.getElementById("password");
+    passwordToggle.addEventListener("click", () => {
+      if (!(password instanceof HTMLInputElement)) {
+        return;
+      }
+      const showing = password.type === "text";
+      password.type = showing ? "password" : "text";
+      passwordToggle.setAttribute("aria-pressed", showing ? "false" : "true");
+      passwordToggle.setAttribute("aria-label", showing ? "Show password" : "Hide password");
+      const icon = passwordToggle.querySelector("i");
+      if (icon) {
+        icon.classList.toggle("fa-eye", showing);
+        icon.classList.toggle("fa-eye-slash", !showing);
+      }
+    });
+  }
 })();

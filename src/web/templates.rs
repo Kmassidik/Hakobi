@@ -95,7 +95,7 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
 }
 
 pub(super) fn login(
-    base_url: &str,
+    _base_url: &str,
     csrf_token: &str,
     error: Option<&str>,
     username: &str,
@@ -103,53 +103,55 @@ pub(super) fn login(
     page(
         "Sign in · Hakobi",
         html! {
-            main class="grid min-h-screen grid-cols-1 lg:grid-cols-[1.08fr_0.92fr]" {
-                section class="relative min-h-screen overflow-hidden bg-brand px-8 py-12 text-[#f7f8f1] sm:px-12 lg:px-[clamp(2.5rem,6vw,7rem)] max-lg:min-h-[44rem]" aria-labelledby="brand-title" {
-                    img src="/assets/art/login-hako.webp" alt="" aria-hidden="true" class="login-art absolute inset-0 h-full w-full object-cover";
-                    div aria-hidden="true" class="login-scrim";
-                    div class="login-content relative z-10 flex flex-col justify-between" {
-                        (brand("Hakobi home"))
+            main class="login-page" {
+                div class="login-shell" {
+                    section class="login-brand" aria-labelledby="brand-title" {
+                        div class="login-brand-top" {
+                            (brand("Hakobi home"))
+                            span class="login-badge" { "Self-hosted · Private by design" }
+                        }
                         div class="login-copy" {
-                            p class=(format!("{EYEBROW} text-lime")) { "Self-hosted delivery" }
-                            h1 id="brand-title" class="my-5 font-display text-[clamp(2.6rem,5vw,4rem)] font-normal leading-[0.98] tracking-[-0.055em]" {
-                                "Ship calmly."
-                            }
-                            p class="max-w-[23rem] text-[1rem] leading-[1.7] text-[#d7e3dc]" {
+                            p class="login-kicker" { "Self-hosted delivery" }
+                            h1 id="brand-title" class="login-title" { "Ship calmly." }
+                            p class="login-subtitle" {
                                 "Hakobi carries your code from commit to production, without the YAML maze."
                             }
                         }
-                        p class="m-0 text-[0.8rem] text-[#d7e3dc] max-lg:hidden" {
-                            "Self-hosted · Private by design"
-                        }
+                        img src="/assets/art/mascot/hako-carry.webp" alt="" aria-hidden="true" class="login-illustration";
                     }
-                }
 
-                section class="grid place-items-center px-6 py-16 lg:p-8" aria-labelledby="login-title" {
-                    div class="w-full max-w-[26rem]" {
-                        p class=(format!("{EYEBROW} text-brand-bright")) { "Control plane access" }
-                        h2 id="login-title" class="mb-2.5 mt-3 font-display text-[2.8rem] font-normal leading-none tracking-[-0.04em]" {
-                            "Welcome back."
-                        }
-                        p class="mb-9 mt-0 text-muted" { "Sign in to your Hakobi dashboard." }
+                    section class="login-form" aria-labelledby="login-title" {
+                        div class="login-form-inner" {
+                            p class="login-overline" { "Control plane access" }
+                            h2 id="login-title" class="login-heading" { "Welcome back." }
+                            p class="login-intro" { "Sign in to your Hakobi dashboard." }
 
-                        @if let Some(message) = error {
-                            p class="mb-5 border-l-[3px] border-danger bg-danger/5 px-4 py-3.5 text-sm leading-normal text-danger" role="alert" {
-                                (message)
+                            @if let Some(message) = error {
+                                p class="login-error" role="alert" { (message) }
                             }
-                        }
 
-                        form method="post" action="/login" class="flex flex-col" {
-                            input type="hidden" name="csrf_token" value=(csrf_token);
-                            label for="username" class="mb-2 mt-[1.15rem] text-[0.8rem] font-bold" { "Username" }
-                            input id="username" name="username" type="text" value=(username) autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required autofocus class=(FIELD);
-                            label for="password" class="mb-2 mt-[1.15rem] text-[0.8rem] font-bold" { "Password" }
-                            input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" required class=(FIELD);
-                            button type="submit" class="mt-7 flex items-center justify-between rounded-[0.6rem] bg-brand px-4 py-3.5 font-bold text-white transition hover:bg-[#0f4130]" {
-                                "Sign in"
-                                i class="fa-solid fa-arrow-right-to-bracket" aria-hidden="true" {}
+                            form method="post" action="/login" class="login-fields" {
+                                input type="hidden" name="csrf_token" value=(csrf_token);
+                                label for="username" class="login-label" { "Username" }
+                                div class="login-field" {
+                                    i class="fa-solid fa-user login-field-icon" aria-hidden="true" {}
+                                    input id="username" name="username" type="text" value=(username) placeholder="Your username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required autofocus class="login-input";
+                                }
+                                label for="password" class="login-label" { "Password" }
+                                div class="login-field" {
+                                    i class="fa-solid fa-lock login-field-icon" aria-hidden="true" {}
+                                    input id="password" name="password" type="password" placeholder="Your password" autocomplete="current-password" maxlength="128" required class="login-input";
+                                    button type="button" class="login-toggle" data-password-toggle aria-label="Show password" aria-pressed="false" {
+                                        i class="fa-solid fa-eye" aria-hidden="true" {}
+                                    }
+                                }
+                                button type="submit" class="login-submit" {
+                                    span { "Sign in" }
+                                    i class="fa-solid fa-arrow-right" aria-hidden="true" {}
+                                }
                             }
+                            p class="login-footer" { "Hakobi · Self-hosted control plane" }
                         }
-                        p class="mt-8 truncate text-center text-[0.72rem] text-muted" { (base_url) }
                     }
                 }
             }
