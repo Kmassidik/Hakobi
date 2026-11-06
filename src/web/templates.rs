@@ -122,6 +122,7 @@ pub(super) fn login(
 
                     section class="login-form" aria-labelledby="login-title" {
                         div class="login-form-inner" {
+                            div class="login-mobile-brand" { (brand("Hakobi home")) }
                             p class="login-overline" { "Control plane access" }
                             h2 id="login-title" class="login-heading" { "Welcome back." }
                             p class="login-intro" { "Sign in to your Hakobi dashboard." }
