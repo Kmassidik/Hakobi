@@ -1,5 +1,15 @@
-FROM rust:1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS build
+FROM rust:1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS chef
+RUN cargo install cargo-chef --locked
 WORKDIR /build
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY static ./static
