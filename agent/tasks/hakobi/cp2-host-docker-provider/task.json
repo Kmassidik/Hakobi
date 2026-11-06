@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "id": "hakobi-cp2-host-docker-provider",
+  "title": "Add typed agent-backed local Docker provider",
+  "repo": "../../../..",
+  "prompt": "prompt.md",
+  "worker": ["python3", "../../../../agent/workers/omp_worker.py"],
+  "workspace_mode": "snapshot",
+  "max_attempts": 3,
+  "token_budget": 90000,
+  "worker_timeout": 1200,
+  "pr_base": "main",
+  "allowed_commands": [
+    ["cargo", "test"],
+    ["cargo", "check"],
+    ["cargo", "clippy"],
+    ["cargo", "fmt"],
+    ["git", "status"],
+    ["git", "diff"],
+    ["git", "log"],
+    ["git", "show"],
+    ["python3"]
+  ],
+  "allowed_files": [
+    "src/**",
+    "Cargo.toml",
+    "Cargo.lock"
+  ],
+  "sensitive_patterns": ["config.toml", "*.pem", "*.key", ".env", ".env.*"],
+  "checks": [
+    {
+      "type": "command",
+      "id": "all-tests",
+      "argv": ["cargo", "test"],
+      "baseline": "pass",
+      "timeout": 600
+    },
+    {
+      "type": "command",
+      "id": "clippy",
+      "argv": ["cargo", "clippy", "--all-targets", "--", "-D", "warnings"],
+      "baseline": "pass",
+      "timeout": 600
+    },
+    {
+      "type": "command",
+      "id": "fmt",
+      "argv": ["cargo", "fmt", "--check"],
+      "baseline": "pass",
+      "timeout": 120
+    },
+    {
+      "type": "diff_scope",
+      "id": "file-fence",
+      "allowed": ["src/**", "Cargo.toml", "Cargo.lock"]
+    },
+    {
+      "type": "diff_check",
+      "id": "diff-clean"
+    }
+  ]
+}
