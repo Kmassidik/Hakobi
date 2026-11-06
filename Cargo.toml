@@ -1,0 +1,47 @@
+[package]
+name = "hakobi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Self-hosted DevOps control plane"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+argon2 = "0.5"
+async-trait = "0.1"
+axum = "0.8"
+base64 = "0.22"
+bollard = "0.21"
+chacha20poly1305 = "0.10"
+clap = { version = "4.5", features = ["derive"] }
+dialoguer = "0.11"
+directories = "6.0"
+http = "1.0"
+maud = "0.27"
+mime_guess = "2.0"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+rust-embed = "8.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+subtle = "2.6"
+tokio = { version = "1.44", features = ["macros", "process", "rt-multi-thread", "signal", "sync", "time"] }
+toml = "0.8"
+tower-http = { version = "0.6", features = ["catch-panic", "limit", "set-header", "timeout", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+url = "2.5"
+uuid = { version = "1.16", features = ["serde", "v4"] }
+zeroize = { version = "1.8", features = ["derive"] }
+tempfile = "3.19"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

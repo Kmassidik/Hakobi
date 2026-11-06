@@ -1,0 +1,11 @@
+/target
+/node_modules
+/agent/runs
+__pycache__/
+*.pyc
+/result
+/result-*
+/data
+.env
+*.tmp
+.DS_Store

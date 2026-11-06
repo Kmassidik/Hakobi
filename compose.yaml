@@ -1,0 +1,22 @@
+services:
+  hakobi:
+    build: .
+    init: true
+    restart: unless-stopped
+    environment:
+      HAKOBI_DATA_DIR: /data
+      PORT: "${PORT:-3000}"
+      RUST_LOG: hakobi=info,tower_http=info
+    volumes:
+      - hakobi-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+
+volumes:
+  hakobi-data:

@@ -1,0 +1,15 @@
+.git
+.gitignore
+.dockerignore
+Dockerfile
+compose.yaml
+target
+node_modules
+frontend
+scripts
+package.json
+package-lock.json
+result
+result-*
+data
+*.toml.tmp
