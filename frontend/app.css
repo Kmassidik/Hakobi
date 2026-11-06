@@ -4,7 +4,7 @@
 @theme {
   --color-ink: #18211d;
   --color-muted: #68716c;
-  --color-paper: #f4f3ed;
+  --color-paper: #f5f5f7;
   --color-surface: #ffffff;
   --color-line: #dcded7;
   --color-brand: #164f3b;
@@ -384,11 +384,36 @@
     inset: 0;
     background: linear-gradient(
       90deg,
-      #164f3b 0%,
-      rgb(22 79 59 / 94%) 34%,
-      rgb(22 79 59 / 36%) 72%,
-      rgb(22 79 59 / 8%) 100%
+      #0f382c 0%,
+      rgb(15 56 44 / 94%) 34%,
+      rgb(15 56 44 / 36%) 72%,
+      rgb(15 56 44 / 8%) 100%
     );
+  }
+
+  .metric-progress {
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border: 0;
+    border-radius: 999px;
+    overflow: hidden;
+    background: #ececf0;
+  }
+
+  .metric-progress::-webkit-progress-bar {
+    border-radius: 999px;
+    background: #ececf0;
+  }
+
+  .metric-progress::-webkit-progress-value {
+    border-radius: 999px;
+    background: #164f3b;
+  }
+
+  .metric-progress::-moz-progress-bar {
+    border-radius: 999px;
+    background: #164f3b;
   }
 
   .empty-art {

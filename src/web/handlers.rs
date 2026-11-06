@@ -1,4 +1,4 @@
-use std::{fmt::Write as _, sync::LazyLock};
+use std::{collections::HashSet, fmt::Write as _, fs, sync::LazyLock};
 
 use anyhow::Context;
 use axum::{
@@ -75,12 +75,88 @@ pub(super) async fn dashboard(State(state): State<AppState>, headers: HeaderMap)
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    let mut metrics = templates::DashboardMetrics::default();
+    match load_providers(&state).await {
+        Ok(providers) => {
+            let mut services = HashSet::new();
+            let mut running_services = HashSet::new();
+            let mut stacks = HashSet::new();
+            for provider in providers.into_iter().filter(|provider| provider.enabled) {
+                let rows = match state.backend.containers(&provider.endpoint).await {
+                    Ok(rows) => rows,
+                    Err(error) => {
+                        tracing::warn!(
+                            provider = %provider.name,
+                            error = %error,
+                            "dashboard provider inventory failed"
+                        );
+                        continue;
+                    }
+                };
+                for row in rows {
+                    let running = row.state == "running";
+                    metrics.containers_total += 1;
+                    if running {
+                        metrics.containers_running += 1;
+                        if row.health.as_deref() != Some("unhealthy") {
+                            metrics.containers_healthy += 1;
+                        }
+                    }
+                    if row.state == "restarting" {
+                        metrics.containers_restarting += 1;
+                    }
+                    if let Some(project) = row
+                        .compose_project
+                        .as_deref()
+                        .filter(|value| !value.is_empty())
+                    {
+                        stacks.insert(project.to_owned());
+                    }
+                    let service = match (
+                        row.compose_project.as_deref(),
+                        row.compose_service.as_deref(),
+                    ) {
+                        (Some(project), Some(service)) => format!("{project}/{service}"),
+                        _ => row.name.clone(),
+                    };
+                    services.insert(service.clone());
+                    if running {
+                        running_services.insert(service);
+                    }
+                }
+            }
+            metrics.services_total = services.len();
+            metrics.services_running = running_services.len();
+            metrics.stacks = stacks.len();
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "dashboard provider list failed");
+        }
+    }
+    if let Some((used, total)) = host_memory() {
+        metrics.memory_used_bytes = Some(used);
+        metrics.memory_total_bytes = Some(total);
+    }
+    if let Some(cpu_count) = std::thread::available_parallelism()
+        .ok()
+        .map(|value| value.get())
+    {
+        metrics.cpu_count = Some(cpu_count);
+        if let Some(load) = host_load_average() {
+            metrics.cpu_percent = Some(
+                ((load / cpu_count as f32) * 100.0)
+                    .round()
+                    .clamp(0.0, 100.0) as u8,
+            );
+        }
+    }
     let markup = templates::dashboard(
         &state.config.base_url,
         &csrf_token,
         state.config.tunnel_enabled,
         &state.config.username,
         &readiness,
+        &metrics,
     );
     let cookies = if existing_csrf.is_none() {
         vec![create_cookie(
@@ -749,6 +825,35 @@ async fn enabled_docker_provider(
         .await?
         .into_iter()
         .find(|provider| provider.id == provider_id))
+}
+
+fn host_memory() -> Option<(u64, u64)> {
+    let contents = fs::read_to_string("/proc/meminfo").ok()?;
+    let mut total_kib = None;
+    let mut available_kib = None;
+    for line in contents.lines() {
+        if let Some(value) = line.strip_prefix("MemTotal:") {
+            total_kib = first_u64(value);
+        } else if let Some(value) = line.strip_prefix("MemAvailable:") {
+            available_kib = first_u64(value);
+        }
+    }
+    let total = total_kib?.saturating_mul(1024);
+    let available = available_kib?.saturating_mul(1024);
+    Some((total.saturating_sub(available), total))
+}
+
+fn first_u64(value: &str) -> Option<u64> {
+    value.split_whitespace().next()?.parse().ok()
+}
+
+fn host_load_average() -> Option<f32> {
+    fs::read_to_string("/proc/loadavg")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
 }
 
 fn containers_notice(message: &str) -> String {

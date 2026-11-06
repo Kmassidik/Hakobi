@@ -16,6 +16,39 @@ const CONTENT_WIDTH: &str = "mx-auto w-[90%] max-w-[78rem]";
 const EYEBROW: &str = "eyebrow";
 const FIELD: &str = "w-full rounded-[0.6rem] border border-line bg-surface px-4 py-3.5 text-ink outline-none transition focus:border-brand-bright focus:ring-[3px] focus:ring-brand-bright/15";
 
+#[derive(Debug, Clone, Default)]
+pub(super) struct DashboardMetrics {
+    pub services_running: usize,
+    pub services_total: usize,
+    pub stacks: usize,
+    pub containers_running: usize,
+    pub containers_healthy: usize,
+    pub containers_total: usize,
+    pub containers_restarting: usize,
+    pub memory_used_bytes: Option<u64>,
+    pub memory_total_bytes: Option<u64>,
+    pub cpu_percent: Option<u8>,
+    pub cpu_count: Option<usize>,
+}
+
+impl DashboardMetrics {
+    fn memory_percent(&self) -> Option<u8> {
+        let used = self.memory_used_bytes?;
+        let total = self.memory_total_bytes.filter(|total| *total > 0)?;
+        Some(((used.saturating_mul(100) / total).min(100)) as u8)
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    const MIB: f64 = 1024.0 * 1024.0;
+    if bytes as f64 >= GIB {
+        format!("{:.1} GB", bytes as f64 / GIB)
+    } else {
+        format!("{:.0} MB", bytes as f64 / MIB)
+    }
+}
+
 pub(super) fn page(title: &str, content: Markup) -> Markup {
     html! {
         (DOCTYPE)
@@ -48,9 +81,9 @@ fn brand(home_label: &str) -> Markup {
 
 fn nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str) -> Markup {
     let class = if active == key {
-        "flex items-center gap-3 rounded-xl bg-brand px-3.5 py-2.5 text-sm font-semibold text-white no-underline shadow-sm"
+        "relative flex items-center gap-3 rounded-lg bg-slate-100 px-3.5 py-2.5 text-sm font-semibold text-slate-900 no-underline before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-brand"
     } else {
-        "flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-semibold text-muted no-underline transition hover:bg-surface hover:text-ink"
+        "flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-slate-500 no-underline transition hover:bg-slate-50 hover:text-slate-900"
     };
     html! {
         a class=(class) href=(href) aria-current=(if active == key { "page" } else { "false" }) {
@@ -62,9 +95,9 @@ fn nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str) -> Mar
 
 fn mobile_nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str) -> Markup {
     let class = if active == key {
-        "flex min-w-0 flex-col items-center gap-1 rounded-lg bg-brand/10 px-1 py-2 text-[0.62rem] font-bold text-brand no-underline"
+        "flex min-w-0 flex-col items-center gap-1 rounded-lg bg-slate-100 px-1 py-2 text-[0.62rem] font-bold text-slate-900 no-underline"
     } else {
-        "flex min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-2 text-[0.62rem] font-semibold text-muted no-underline transition hover:bg-surface hover:text-ink"
+        "flex min-w-0 flex-col items-center gap-1 rounded-lg px-1 py-2 text-[0.62rem] font-semibold text-slate-500 no-underline transition hover:bg-slate-50 hover:text-slate-900"
     };
     html! {
         a class=(class) href=(href) aria-current=(if active == key { "page" } else { "false" }) {
@@ -76,40 +109,47 @@ fn mobile_nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str)
 
 fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Markup {
     html! {
-        aside class="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-line bg-[#faf9f4] px-5 py-6 lg:flex" aria-label="Sidebar" {
+        aside class="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-white px-5 py-6 lg:flex" aria-label="Sidebar" {
             div class="px-1" { (brand("Hakobi dashboard")) }
-            nav class="mt-10 flex flex-col gap-1" aria-label="Primary" {
-                (nav_item(active, "overview", "/", "fa-gauge-high", "Overview"))
+            nav class="mt-9 flex flex-col gap-1" aria-label="Primary" {
+                (nav_item(active, "overview", "/", "fa-square-poll-vertical", "Overview"))
                 (nav_item(active, "stacks", "/stacks", "fa-layer-group", "Stacks"))
-                (nav_item(active, "containers", "/containers", "fa-cubes", "Containers"))
+                (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infrastructure"))
                 (nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
             }
-            div class="mt-auto border-t border-line pt-5" {
-                (status_badge())
-                div class="mt-4 flex items-center gap-3 px-1" {
-                    span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-xs font-bold uppercase text-white" aria-hidden="true" {
-                        (username.chars().next().unwrap_or('H'))
+            div class="mt-auto" {
+                div class="rounded-xl bg-[#f5f5f7] p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    div class="flex items-center gap-3" {
+                        span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-xs font-bold uppercase text-white" aria-hidden="true" {
+                            (username.chars().next().unwrap_or('H'))
+                        }
+                        div class="min-w-0" {
+                            p class="m-0 truncate text-sm font-semibold text-slate-900" { (username) }
+                            p class="m-0 truncate text-[0.68rem] text-slate-500" { (base_url.trim_start_matches("https://").trim_start_matches("http://")) }
+                        }
                     }
-                    div class="min-w-0" {
-                        p class="m-0 truncate text-sm font-semibold" { (username) }
-                        p class="m-0 truncate text-[0.68rem] text-muted" { (base_url) }
-                    }
-                }
-                form method="post" action="/logout" class="m-0 mt-4" {
-                    input type="hidden" name="csrf_token" value=(csrf_token);
-                    button class="flex w-full items-center gap-3 rounded-xl border border-line bg-transparent px-3.5 py-2.5 text-left text-sm font-semibold text-ink transition hover:bg-surface" type="submit" {
-                        i class="fa-solid fa-arrow-right-from-bracket w-4 text-center" aria-hidden="true" {}
-                        "Sign out"
+                    div class="mt-3 flex items-center justify-between gap-2" {
+                        span class="inline-flex items-center gap-1.5 text-[0.68rem] font-medium text-slate-500" {
+                            span class="size-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden="true" {}
+                            "Online"
+                        }
+                        form method="post" action="/logout" class="m-0" {
+                            input type="hidden" name="csrf_token" value=(csrf_token);
+                            button class="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[0.7rem] font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900" type="submit" {
+                                i class="fa-solid fa-right-from-bracket" aria-hidden="true" {}
+                                "Sign out"
+                            }
+                        }
                     }
                 }
             }
         }
-        nav class="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-paper/95 px-2 pb-2 pt-1.5 backdrop-blur lg:hidden" aria-label="Mobile primary" {
+        nav class="fixed inset-x-0 bottom-0 z-40 bg-white/95 px-2 pb-2 pt-1.5 shadow-[0_-1px_3px_rgba(0,0,0,0.04)] backdrop-blur lg:hidden" aria-label="Mobile primary" {
             div class="mx-auto grid max-w-md grid-cols-5 gap-0.5" {
-                (mobile_nav_item(active, "overview", "/", "fa-gauge-high", "Overview"))
+                (mobile_nav_item(active, "overview", "/", "fa-square-poll-vertical", "Overview"))
                 (mobile_nav_item(active, "stacks", "/stacks", "fa-layer-group", "Stacks"))
-                (mobile_nav_item(active, "containers", "/containers", "fa-cubes", "Containers"))
+                (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (mobile_nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infra"))
                 (mobile_nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
             }
@@ -189,27 +229,37 @@ pub(super) fn dashboard(
     tunnel_enabled: bool,
     username: &str,
     readiness: &Readiness,
+    metrics: &DashboardMetrics,
 ) -> Markup {
+    let memory_value = match (metrics.memory_used_bytes, metrics.memory_total_bytes) {
+        (Some(used), Some(total)) => format!("{} / {}", format_bytes(used), format_bytes(total)),
+        _ => "—".to_owned(),
+    };
+    let memory_percent = metrics.memory_percent();
+    let memory_bar = memory_percent.unwrap_or(0);
+    let cpu_value = metrics
+        .cpu_percent
+        .map(|percent| format!("{percent}% Avg"))
+        .unwrap_or_else(|| "—".to_owned());
+    let cpu_bar = metrics.cpu_percent.unwrap_or(0);
+    let cpu_foot = match (metrics.cpu_percent, metrics.cpu_count) {
+        (Some(_), Some(count)) => format!("{count} vCPU · 1m load"),
+        _ => "Metrics unavailable".to_owned(),
+    };
     page(
         "Dashboard · Hakobi",
         html! {
-            div class="min-h-screen lg:pl-64" {
+            div class="min-h-screen bg-[#f5f5f7] lg:pl-64" {
                 (sidebar("overview", base_url, username, csrf_token))
-                header class="lg:hidden border-b border-line bg-paper/95" {
-                    div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between")) {
+                header class="bg-[#f5f5f7]/90 backdrop-blur lg:hidden" {
+                    div class=(format!("{CONTENT_WIDTH} flex h-[5rem] items-center justify-between")) {
                         (brand("Hakobi dashboard"))
-                        nav class="flex items-center gap-1 text-[0.8rem] font-semibold max-md:hidden" aria-label="Primary" {
-                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/" { "Overview" }
-                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/stacks" { "Stacks" }
-                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/containers" { "Containers" }
-                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/infrastructure" { "Infrastructure" }
-                        }
-                        div class="flex items-center gap-4" {
+                        div class="flex items-center gap-3" {
                             span class="text-sm text-muted max-sm:hidden" aria-label={"Signed in as " (username)} { (username) }
                             form method="post" action="/logout" class="m-0" {
                                 input type="hidden" name="csrf_token" value=(csrf_token);
-                                button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink transition hover:bg-surface" type="submit" {
-                                    i class="fa-solid fa-arrow-right-from-bracket mr-2" aria-hidden="true" {}
+                                button class="rounded-full bg-white px-3.5 py-2 text-[0.78rem] font-semibold text-ink shadow-sm" type="submit" {
+                                    i class="fa-solid fa-right-from-bracket mr-2" aria-hidden="true" {}
                                     "Sign out"
                                 }
                             }
@@ -217,41 +267,100 @@ pub(super) fn dashboard(
                     }
                 }
 
-                main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
-                    div class="mb-8 flex flex-col items-start gap-4 lg:flex-row lg:items-end lg:justify-between lg:gap-8" {
+                main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
+                    div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between" {
                         div {
-                            p class=(format!("{EYEBROW} mb-3 text-brand-bright")) { "Overview" }
-                            h1 class="m-0 font-display text-[clamp(2rem,4vw,3.3rem)] font-normal tracking-[-0.04em]" {
+                            p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]" { "Overview" }
+                            h1 class="m-0 font-sans text-[clamp(1.9rem,3vw,2.6rem)] font-semibold tracking-[-0.045em]" {
                                 "Good to see you, " (username) "."
                             }
                         }
                         (status_badge())
                     }
 
-                    section class="relative flex min-h-[23rem] items-center overflow-hidden rounded-[1.25rem] bg-brand p-8 text-white sm:p-12 lg:p-[clamp(2.5rem,6vw,5rem)]" aria-labelledby="hello-title" {
-                        img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="hero-art pointer-events-none absolute inset-0 h-full w-full object-cover";
-                        div aria-hidden="true" class="hero-scrim";
-                        div class="hero-orbit" aria-hidden="true" {}
-                        div class="relative z-10 max-w-[39rem]" {
-                            p class=(format!("{EYEBROW} text-lime")) { "The first step is live" }
-                            h2 id="hello-title" class="my-4 font-display text-[clamp(3.8rem,8vw,7rem)] font-normal leading-none tracking-[-0.06em]" {
-                                "Hello, world."
+                    section class="mb-6 grid grid-cols-2 gap-4 xl:grid-cols-4" aria-label="System status" {
+                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                            div class="pr-10" {
+                                div {
+                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Total services" }
+                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (metrics.services_running) " Running" }
+                                }
+                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
+                                    i class="fa-solid fa-cubes" {}
+                                }
                             }
-                            p class="mt-6 max-w-[34rem] leading-[1.7] text-[#c3d2ca]" {
-                                "Your self-hosted control plane is running. Authentication and secure delivery are in place—ready for whatever you ship next."
+                            p class="mb-0 mt-3 text-xs text-[#86868b]" { "Across " (metrics.stacks) " stacks · " (metrics.services_total) " tracked" }
+                        }
+                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                            div class="pr-10" {
+                                div {
+                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Active containers" }
+                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" {
+                                        (metrics.containers_running) " / " (metrics.containers_healthy) " Healthy"
+                                    }
+                                }
+                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
+                                    i class="fa-solid fa-box-open" {}
+                                }
+                            }
+                            p class="mb-0 mt-3 text-xs text-[#86868b]" {
+                                (metrics.containers_restarting) " restarting · " (metrics.containers_total) " total"
                             }
                         }
-                        span class="absolute -bottom-14 -right-4 font-display text-[clamp(12rem,28vw,24rem)] leading-none text-white/5" aria-hidden="true" {
-                            "運び"
+                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                            div class="pr-10" {
+                                div {
+                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Memory usage" }
+                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (memory_value) }
+                                }
+                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
+                                    i class="fa-solid fa-memory" {}
+                                }
+                            }
+                            div class="mt-3 flex items-center gap-3" {
+                                progress class="metric-progress" value=(memory_bar) max="100" aria-label="Memory usage" {}
+                                span class="shrink-0 text-xs font-semibold text-[#86868b]" {
+                                    @if let Some(percent) = memory_percent { (percent) "%" } @else { "—" }
+                                }
+                            }
+                        }
+                        article class="relative rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                            div class="pr-10" {
+                                div {
+                                    p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "CPU load" }
+                                    p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (cpu_value) }
+                                }
+                                span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
+                                    i class="fa-solid fa-microchip" {}
+                                }
+                            }
+                            div class="mt-3 flex items-center gap-3" {
+                                progress class="metric-progress" value=(cpu_bar) max="100" aria-label="CPU load" {}
+                                span class="shrink-0 text-xs font-semibold text-[#86868b]" { (cpu_foot) }
+                            }
                         }
                     }
 
-                    section class="mt-5" aria-labelledby="readiness-title" {
-                        div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
-                            h2 id="readiness-title" class="m-0 text-[1.2rem] font-bold" { "Host readiness" }
-                            p class="m-0 text-xs text-muted" { "Detected locally. Nothing is installed automatically." }
+                    section class="relative mb-6 flex min-h-[22rem] items-center overflow-hidden rounded-2xl bg-[#0f382c] px-8 py-10 text-white sm:px-12 lg:px-14 lg:py-14" aria-labelledby="hello-title" {
+                        img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="hero-art pointer-events-none absolute inset-0 h-full w-full object-cover";
+                        div aria-hidden="true" class="hero-scrim" {}
+                        div class="relative z-10 max-w-[36rem]" {
+                            p class="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#d8f078]" { "The first step is live" }
+                            h2 id="hello-title" class="m-0 font-sans text-[clamp(2.6rem,5vw,4.6rem)] font-semibold leading-none tracking-[-0.05em]" {
+                                "Hello, world."
+                            }
+                            p class="mt-5 max-w-[31rem] text-[0.95rem] leading-[1.65] text-[#c3d2ca]" {
+                                "Your self-hosted control plane is running. Authentication and secure delivery are in place—ready for whatever you ship next."
+                            }
                         }
-                        div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4" {
+                    }
+
+                    section aria-labelledby="readiness-title" {
+                        div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
+                            h2 id="readiness-title" class="m-0 text-[1.05rem] font-semibold tracking-[-0.02em]" { "Host readiness" }
+                            p class="m-0 text-xs text-[#86868b]" { "Detected locally. Nothing is installed automatically." }
+                        }
+                        div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" {
                             (readiness_card("Docker", "fa-solid fa-cube", &readiness.docker))
                             (readiness_card("Compose", "fa-solid fa-layer-group", &readiness.compose))
                             (readiness_card("kubectl", "fa-solid fa-dharmachakra", &readiness.kubectl))
@@ -259,16 +368,16 @@ pub(super) fn dashboard(
                         }
                     }
 
-                    section class="mt-5 grid grid-cols-1 gap-5 md:grid-cols-3" aria-label="Instance details" {
-                        article class="min-w-0 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
-                            p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-muted")) {
+                    section class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3" aria-label="Instance details" {
+                        article class="min-w-0 rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                            p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-[#86868b]")) {
                                 i class="fa-solid fa-globe" aria-hidden="true" {}
                                 "Public address"
                             }
                             a class="block truncate text-[0.88rem] font-semibold no-underline" href=(base_url) { (base_url) }
                         }
-                        article class="min-w-0 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
-                            p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-muted")) {
+                        article class="min-w-0 rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                            p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-[#86868b]")) {
                                 i class="fa-solid fa-cloud" aria-hidden="true" {}
                                 "Delivery"
                             }
@@ -284,8 +393,8 @@ pub(super) fn dashboard(
                                 }
                             }
                         }
-                        article class="min-w-0 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
-                            p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-muted")) {
+                        article class="min-w-0 rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                            p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-[#86868b]")) {
                                 i class="fa-solid fa-shield-halved" aria-hidden="true" {}
                                 "Session"
                             }
@@ -298,7 +407,7 @@ pub(super) fn dashboard(
                     (install_dialog())
                 }
 
-                footer class=(format!("{CONTENT_WIDTH} flex flex-col gap-4 border-t border-line py-6 text-[0.65rem] tracking-[0.1em] text-muted sm:flex-row sm:justify-between")) {
+                footer class=(format!("{CONTENT_WIDTH} flex flex-col gap-4 py-6 text-[0.65rem] tracking-[0.1em] text-[#86868b] sm:flex-row sm:justify-between")) {
                     span { "Hakobi / 運び" }
                     span { "Your infra. Your data." }
                 }
@@ -309,23 +418,27 @@ pub(super) fn dashboard(
 
 fn readiness_card(label: &str, icon: &str, status: &ToolStatus) -> Markup {
     html! {
-        article class="rounded-[0.85rem] border border-line bg-surface/45 p-5" {
+        article class="rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
             div class="flex items-center gap-3" {
-                span class="grid size-9 place-items-center rounded-full bg-brand-bright/10 text-brand" aria-hidden="true" {
+                span class="grid size-9 place-items-center rounded-lg bg-brand/10 text-brand" aria-hidden="true" {
                     i class=(format!("fa-solid {icon}")) {}
                 }
-                h3 class="m-0 text-[1rem] font-bold" { (label) }
+                h3 class="m-0 text-[0.95rem] font-semibold" { (label) }
             }
             @match status {
                 ToolStatus::Ready { version } => {
-                    p class="mb-0 mt-3 text-xs text-muted" {
+                    p class="mb-0 mt-3 flex items-center gap-2 text-xs text-slate-500" {
+                        span class="size-1.5 rounded-full bg-emerald-500" aria-hidden="true" {}
                         "Ready · "
-                        code class="font-mono text-ink" { (version) }
+                        code class="font-mono text-slate-700" { (version) }
                     }
                 },
                 ToolStatus::Missing { install_command } => {
-                    p class="mb-0 mt-3 text-xs text-muted" { "Missing" }
-                    button type="button" class="mt-3 rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink transition hover:bg-surface" data-dialog-open="install-tool" data-install-title=(label) data-install-command=(install_command) {
+                    p class="mb-0 mt-3 flex items-center gap-2 text-xs text-slate-500" {
+                        span class="size-1.5 rounded-full bg-amber-400" aria-hidden="true" {}
+                        "Missing"
+                    }
+                    button type="button" class="mt-3 rounded-lg bg-slate-100 px-3 py-1.5 text-[0.72rem] font-semibold text-slate-700 transition hover:bg-slate-200" data-dialog-open="install-tool" data-install-title=(label) data-install-command=(install_command) {
                         "Install"
                     }
                 },
@@ -1463,8 +1576,8 @@ pub(super) fn infrastructure(
 
 pub(super) fn status_badge() -> Markup {
     html! {
-        span id="control-status" class="inline-flex items-center gap-2 whitespace-nowrap pb-2 text-xs text-muted" hx-get="/partials/status" hx-trigger="every 30s" hx-swap="outerHTML" {
-            span class="size-1.5 rounded-full bg-brand-bright shadow-[0_0_0_4px] shadow-brand-bright/10" aria-hidden="true" {}
+        span id="control-status" class="inline-flex items-center gap-2 whitespace-nowrap text-xs font-medium text-[#6e6e73]" hx-get="/partials/status" hx-trigger="every 30s" hx-swap="outerHTML" {
+            span class="size-2 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_0_4px] shadow-emerald-500/10" aria-hidden="true" {}
             "Control plane online"
         }
     }
