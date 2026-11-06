@@ -1,0 +1,20 @@
+[Unit]
+Description=Hakobi host agent
+Documentation=https://github.com/Kmassidik/Hakobi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hakobi-agent
+Environment=HAKOBI_AGENT_ADDR=127.0.0.1:8787
+Environment=HAKOBI_AGENT_TOKEN_FILE=/etc/hakobi/agent.token
+Restart=on-failure
+RestartSec=3
+UMask=0077
+# The agent installs host packages, so it intentionally runs as root. It has no
+# arbitrary-shell endpoint and only accepts the fixed installers in its source.
+User=root
+
+[Install]
+WantedBy=multi-user.target

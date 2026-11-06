@@ -16,6 +16,18 @@ const CONTENT_WIDTH: &str = "mx-auto w-[90%] max-w-[78rem]";
 const EYEBROW: &str = "eyebrow";
 const FIELD: &str = "w-full rounded-[0.6rem] border border-line bg-surface px-4 py-3.5 text-ink outline-none transition focus:border-brand-bright focus:ring-[3px] focus:ring-brand-bright/15";
 
+pub(super) struct DashboardView<'a> {
+    pub base_url: &'a str,
+    pub csrf_token: &'a str,
+    pub tunnel_enabled: bool,
+    pub username: &'a str,
+    pub readiness: &'a Readiness,
+    pub metrics: &'a DashboardMetrics,
+    pub notice: Option<&'a str>,
+    pub agent_configured: bool,
+    pub agent_online: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct DashboardMetrics {
     pub services_running: usize,
@@ -223,14 +235,25 @@ pub(super) fn login(
     )
 }
 
-pub(super) fn dashboard(
-    base_url: &str,
-    csrf_token: &str,
-    tunnel_enabled: bool,
-    username: &str,
-    readiness: &Readiness,
-    metrics: &DashboardMetrics,
-) -> Markup {
+pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
+    let DashboardView {
+        base_url,
+        csrf_token,
+        tunnel_enabled,
+        username,
+        readiness,
+        metrics,
+        notice,
+        agent_configured,
+        agent_online,
+    } = view;
+    let readiness_note = if agent_online {
+        "Detected by the host agent. Installs run on the host."
+    } else if agent_configured {
+        "Host agent unreachable. Showing container-local detection."
+    } else {
+        "Detected locally. Nothing is installed automatically."
+    };
     let memory_value = match (metrics.memory_used_bytes, metrics.memory_total_bytes) {
         (Some(used), Some(total)) => format!("{} / {}", format_bytes(used), format_bytes(total)),
         _ => "—".to_owned(),
@@ -268,6 +291,11 @@ pub(super) fn dashboard(
                 }
 
                 main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
+                    @if let Some(notice) = notice {
+                        div class="mb-4 rounded-xl bg-white px-4 py-3 text-sm text-slate-700 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" role="status" {
+                            (notice)
+                        }
+                    }
                     div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between" {
                         div {
                             p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]" { "Overview" }
@@ -358,13 +386,13 @@ pub(super) fn dashboard(
                     section aria-labelledby="readiness-title" {
                         div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
                             h2 id="readiness-title" class="m-0 text-[1.05rem] font-semibold tracking-[-0.02em]" { "Host readiness" }
-                            p class="m-0 text-xs text-[#86868b]" { "Detected locally. Nothing is installed automatically." }
+                            p class="m-0 text-xs text-[#86868b]" { (readiness_note) }
                         }
                         div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" {
-                            (readiness_card("Docker", "fa-solid fa-cube", &readiness.docker))
-                            (readiness_card("Compose", "fa-solid fa-layer-group", &readiness.compose))
-                            (readiness_card("kubectl", "fa-solid fa-dharmachakra", &readiness.kubectl))
-                            (readiness_card("Nixpacks", "fa-solid fa-box", &readiness.nixpacks))
+                            (readiness_card("Docker", "fa-solid fa-cube", "docker", &readiness.docker, csrf_token, agent_online))
+                            (readiness_card("Compose", "fa-solid fa-layer-group", "compose", &readiness.compose, csrf_token, agent_online))
+                            (readiness_card("kubectl", "fa-solid fa-dharmachakra", "kubectl", &readiness.kubectl, csrf_token, agent_online))
+                            (readiness_card("Nixpacks", "fa-solid fa-box", "nixpacks", &readiness.nixpacks, csrf_token, agent_online))
                         }
                     }
 
@@ -416,7 +444,14 @@ pub(super) fn dashboard(
     )
 }
 
-fn readiness_card(label: &str, icon: &str, status: &ToolStatus) -> Markup {
+fn readiness_card(
+    label: &str,
+    icon: &str,
+    tool: &str,
+    status: &ToolStatus,
+    csrf_token: &str,
+    can_install: bool,
+) -> Markup {
     html! {
         article class="rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
             div class="flex items-center gap-3" {
@@ -438,8 +473,17 @@ fn readiness_card(label: &str, icon: &str, status: &ToolStatus) -> Markup {
                         span class="size-1.5 rounded-full bg-amber-400" aria-hidden="true" {}
                         "Missing"
                     }
-                    button type="button" class="mt-3 rounded-lg bg-slate-100 px-3 py-1.5 text-[0.72rem] font-semibold text-slate-700 transition hover:bg-slate-200" data-dialog-open="install-tool" data-install-title=(label) data-install-command=(install_command) {
-                        "Install"
+                    @if can_install {
+                        form method="post" action=(format!("/host/install/{tool}")) class="mt-3" {
+                            input type="hidden" name="csrf_token" value=(csrf_token);
+                            button class="rounded-lg bg-brand px-3 py-1.5 text-[0.72rem] font-semibold text-white transition hover:bg-[#0f4130]" type="submit" {
+                                "Install on host"
+                            }
+                        }
+                    } @else {
+                        button type="button" class="mt-3 rounded-lg bg-slate-100 px-3 py-1.5 text-[0.72rem] font-semibold text-slate-700 transition hover:bg-slate-200" data-dialog-open="install-tool" data-install-title=(label) data-install-command=(install_command) {
+                            "Show install command"
+                        }
                     }
                 },
             }

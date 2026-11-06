@@ -1,3 +1,4 @@
+mod agent_client;
 pub mod auth;
 mod handlers;
 mod stacks_admin;
@@ -62,6 +63,7 @@ pub fn router_with_backend(
         .route("/providers/{id}/toggle", post(handlers::toggle_provider))
         .route("/providers/{id}/delete", post(handlers::delete_provider))
         .route("/containers", get(handlers::containers))
+        .route("/host/install/{tool}", post(handlers::install_tool))
         .route(
             "/containers/new",
             get(handlers::container_new).post(handlers::container_create),

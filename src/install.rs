@@ -13,6 +13,7 @@
 //! Missing tools carry a distro-neutral, display-only installation hint. The
 //! hint is never executed.
 
+use serde::{Deserialize, Serialize};
 use std::{
     env,
     ffi::{OsStr, OsString},
@@ -51,7 +52,8 @@ const KUBECTL_INSTALL_COMMAND: &str =
 const NIXPACKS_INSTALL_COMMAND: &str = "curl -sSL https://nixpacks.com/install.sh | bash";
 
 /// Availability of a single host tool.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum ToolStatus {
     /// The tool answered its version probe.
     Ready {
@@ -66,7 +68,7 @@ pub enum ToolStatus {
 }
 
 /// Readiness of every tool the stack lifecycle features can use.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Readiness {
     pub docker: ToolStatus,
     pub compose: ToolStatus,

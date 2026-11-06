@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use super::{
+    agent_client::HostAgent,
     auth::{self, clear_cookie, cookie_value, create_cookie, csrf_is_valid},
     templates, AppState,
 };
@@ -58,7 +59,11 @@ pub struct ProviderNotice {
     notice: Option<String>,
 }
 
-pub(super) async fn dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(super) async fn dashboard(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(notice): Query<ProviderNotice>,
+) -> Response {
     let session = cookie_value(&headers, state.config.session_cookie_name());
     if !state.sessions.is_valid(session).await {
         return Redirect::to("/login").into_response();
@@ -68,11 +73,33 @@ pub(super) async fn dashboard(State(state): State<AppState>, headers: HeaderMap)
     let csrf_token = existing_csrf
         .map(str::to_owned)
         .unwrap_or_else(random_token);
-    let readiness = match tokio::task::spawn_blocking(hakobi::install::detect).await {
-        Ok(readiness) => readiness,
-        Err(error) => {
-            tracing::error!(error = %error, "readiness detection failed");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    let agent = HostAgent::from_env();
+    let agent_configured = agent.is_some();
+    let mut agent_online = false;
+    let readiness = if let Some(agent) = &agent {
+        match agent.readiness().await {
+            Ok(readiness) => {
+                agent_online = true;
+                readiness
+            }
+            Err(error) => {
+                tracing::warn!(error = %error, "host agent readiness failed");
+                match tokio::task::spawn_blocking(hakobi::install::detect).await {
+                    Ok(readiness) => readiness,
+                    Err(error) => {
+                        tracing::error!(error = %error, "readiness detection failed");
+                        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                    }
+                }
+            }
+        }
+    } else {
+        match tokio::task::spawn_blocking(hakobi::install::detect).await {
+            Ok(readiness) => readiness,
+            Err(error) => {
+                tracing::error!(error = %error, "readiness detection failed");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
         }
     };
     let mut metrics = templates::DashboardMetrics::default();
@@ -150,14 +177,17 @@ pub(super) async fn dashboard(State(state): State<AppState>, headers: HeaderMap)
             );
         }
     }
-    let markup = templates::dashboard(
-        &state.config.base_url,
-        &csrf_token,
-        state.config.tunnel_enabled,
-        &state.config.username,
-        &readiness,
-        &metrics,
-    );
+    let markup = templates::dashboard(templates::DashboardView {
+        base_url: &state.config.base_url,
+        csrf_token: &csrf_token,
+        tunnel_enabled: state.config.tunnel_enabled,
+        username: &state.config.username,
+        readiness: &readiness,
+        metrics: &metrics,
+        notice: notice.notice.as_deref(),
+        agent_configured,
+        agent_online,
+    });
     let cookies = if existing_csrf.is_none() {
         vec![create_cookie(
             &state.config,
@@ -536,6 +566,54 @@ impl ContainerAction {
             ContainerAction::Restart => format!("Container {name} restarted."),
         }
     }
+}
+
+pub(super) async fn install_tool(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(tool): Path<String>,
+    Form(form): Form<CsrfForm>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !matches!(tool.as_str(), "docker" | "compose" | "kubectl" | "nixpacks") {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(agent) = HostAgent::from_env() else {
+        return redirect_dashboard_notice("Host agent is not configured.");
+    };
+    if let Err(error) = agent.install(&tool).await {
+        return redirect_dashboard_notice(&format!("{tool} install failed to start: {error}"));
+    }
+    let mut message = format!("{tool} installation is running on the host.");
+    for _ in 0..15 {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let Ok(jobs) = agent.install_status().await else {
+            continue;
+        };
+        let Some(job) = jobs.get(&tool) else {
+            continue;
+        };
+        if job.running {
+            continue;
+        }
+        message = if job.success {
+            format!("{tool} installed on the host.")
+        } else {
+            format!("{tool} install failed: {}", truncate(&job.output, 400))
+        };
+        break;
+    }
+    redirect_dashboard_notice(&message)
+}
+
+fn redirect_dashboard_notice(message: &str) -> Response {
+    let encoded: String = url::form_urlencoded::byte_serialize(message.as_bytes()).collect();
+    redirect_response(&format!("/?notice={encoded}"), Vec::new())
 }
 
 pub(super) async fn container_new(State(state): State<AppState>, headers: HeaderMap) -> Response {
