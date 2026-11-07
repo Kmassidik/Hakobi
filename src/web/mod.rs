@@ -6,7 +6,11 @@ mod templates;
 #[cfg(test)]
 mod tests;
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use axum::{
     http::{
@@ -25,7 +29,10 @@ use tower_http::{
 
 use self::auth::{LoginLimiter, Sessions};
 use crate::config::PublicConfig;
-use hakobi::providers::{ContainerBackend, RoutingBackend};
+use hakobi::{
+    catalog::Catalog,
+    providers::{ContainerBackend, RoutingBackend},
+};
 
 #[derive(Clone)]
 pub(super) struct AppState {
@@ -43,7 +50,16 @@ pub(super) struct AppState {
 /// `HAKOBI_AGENT_URL` and `HAKOBI_AGENT_TOKEN` are configured; every other
 /// endpoint keeps using the direct Docker backend.
 pub fn router(config: PublicConfig, catalog_path: PathBuf) -> Router {
-    router_with_backend(config, catalog_path, Arc::new(RoutingBackend::from_env()))
+    let backend = match Catalog::open(&catalog_path) {
+        Ok(catalog) => Arc::new(RoutingBackend::from_env_with_catalog(Arc::new(Mutex::new(
+            catalog,
+        )))),
+        Err(error) => {
+            tracing::error!(error = %error, "catalog unavailable for host-agent routing");
+            Arc::new(RoutingBackend::from_env())
+        }
+    };
+    router_with_backend(config, catalog_path, backend)
 }
 
 pub fn router_with_backend(
@@ -106,6 +122,10 @@ pub fn router_with_backend(
         )
         .route("/stacks/runtime/{provider}/{name}", get(handlers::stack_detail))
         .route("/infrastructure", get(handlers::infrastructure))
+        .route("/hosts", get(handlers::hosts_list).post(handlers::hosts_create))
+        .route("/hosts/{id}/test", post(handlers::hosts_test))
+        .route("/hosts/{id}/toggle", post(handlers::hosts_toggle))
+        .route("/hosts/{id}/delete", post(handlers::hosts_delete))
         .route(
             "/login",
             get(handlers::login_page).post(handlers::login),

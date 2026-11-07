@@ -5,7 +5,7 @@
 //! agent's typed Docker endpoints instead. Everything else keeps talking to
 //! Docker directly, which is what [`RoutingBackend`] decides per request.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -20,7 +20,7 @@ use super::docker::{
 };
 use crate::catalog::Catalog;
 use crate::host_agent::{
-    self, AgentEndpoint, AgentErrorBody, DockerContainerPort, DockerContainerRow,
+    self, AgentEndpoint, AgentErrorBody, AgentHost, DockerContainerPort, DockerContainerRow,
     DockerContainersResponse, DockerHostInfo, DockerImageRow, DockerNetworkRow,
     DockerSnapshotResponse, DockerVersion, DockerVolumeRow, RunContainerRequest,
     RunContainerResponse, LOCAL_PROVIDER_KIND, LOCAL_PROVIDER_NAME,
@@ -50,6 +50,18 @@ impl AgentBackend {
             .build()
             .context("build the host agent HTTP client")?;
         Ok(Self { endpoint, client })
+    }
+    /// Builds a backend from an `AgentHost` resolved from the catalog.
+    pub fn from_host(host: AgentHost) -> Result<Self> {
+        let client = reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .timeout(QUERY_TIMEOUT)
+            .build()
+            .context("build the host agent HTTP client")?;
+        Ok(Self {
+            endpoint: AgentEndpoint::from_host(host),
+            client,
+        })
     }
 
     /// Builds a backend from `HAKOBI_AGENT_URL` and `HAKOBI_AGENT_TOKEN`.
@@ -211,22 +223,22 @@ impl ContainerBackend for AgentBackend {
 pub struct RoutingBackend {
     agent: Option<Arc<dyn ContainerBackend>>,
     docker: Arc<dyn ContainerBackend>,
+    catalog: Option<Arc<Mutex<Catalog>>>,
 }
-
 impl RoutingBackend {
-    pub fn new(
-        docker: Arc<dyn ContainerBackend>,
-        agent: Option<Arc<dyn ContainerBackend>>,
-    ) -> Self {
-        Self { agent, docker }
-    }
-
     /// Builds the production backend: Docker over sockets plus the host agent
     /// backend when `HAKOBI_AGENT_URL` and `HAKOBI_AGENT_TOKEN` are configured.
     pub fn from_env() -> Self {
         let agent =
             AgentBackend::from_env().map(|backend| Arc::new(backend) as Arc<dyn ContainerBackend>);
-        Self::new(Arc::new(DockerBackend), agent)
+        Self::new(Arc::new(DockerBackend), agent, None)
+    }
+
+    /// Builds the production backend with catalog-backed per-host resolution.
+    pub fn from_env_with_catalog(catalog: Arc<Mutex<Catalog>>) -> Self {
+        let agent =
+            AgentBackend::from_env().map(|backend| Arc::new(backend) as Arc<dyn ContainerBackend>);
+        Self::new(Arc::new(DockerBackend), agent, Some(catalog))
     }
 
     /// Builds the production backend with an explicitly supplied agent client.
@@ -235,52 +247,115 @@ impl RoutingBackend {
         Ok(Self::new(
             Arc::new(DockerBackend),
             Some(Arc::new(agent) as Arc<dyn ContainerBackend>),
+            None,
         ))
     }
 
-    fn select(&self, endpoint: &str) -> Result<&dyn ContainerBackend> {
-        if host_agent::is_local_endpoint(endpoint) {
-            self.agent.as_deref().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "the host agent is not configured; set HAKOBI_AGENT_URL and HAKOBI_AGENT_TOKEN"
-                )
-            })
-        } else {
-            Ok(&*self.docker)
+    /// Builds the production backend with a catalog for per-host resolution.
+    pub fn with_agent_and_catalog(
+        endpoint: AgentEndpoint,
+        catalog: Arc<Mutex<Catalog>>,
+    ) -> Result<Self> {
+        let agent = AgentBackend::new(endpoint)?;
+        Ok(Self::new(
+            Arc::new(DockerBackend),
+            Some(Arc::new(agent) as Arc<dyn ContainerBackend>),
+            Some(catalog),
+        ))
+    }
+
+    pub fn new(
+        docker: Arc<dyn ContainerBackend>,
+        agent: Option<Arc<dyn ContainerBackend>>,
+        catalog: Option<Arc<Mutex<Catalog>>>,
+    ) -> Self {
+        Self {
+            agent,
+            docker,
+            catalog,
         }
+    }
+
+    async fn select(&self, endpoint: &str) -> Result<Arc<dyn ContainerBackend>> {
+        let endpoint = endpoint.trim();
+        if endpoint == host_agent::LOCAL_ENDPOINT {
+            return self
+                .agent
+                .as_ref()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "the host agent is not configured; set HAKOBI_AGENT_URL and HAKOBI_AGENT_TOKEN"
+                    )
+                })
+                .map(Arc::clone);
+        }
+        if let Some((_scheme, authority)) = endpoint.split_once("://") {
+            if endpoint.starts_with("agent://") && !authority.is_empty() {
+                if let Some(catalog) = &self.catalog {
+                    let catalog = catalog.lock().unwrap();
+                    let host_id = authority.to_string();
+                    let token = catalog.host_agent_token(&host_id)?;
+                    let agent_url = catalog
+                        .list_host_agents()?
+                        .into_iter()
+                        .find(|ha| ha.id == host_id)
+                        .map(|ha| ha.agent_url)
+                        .ok_or_else(|| anyhow::anyhow!("host agent {host_id} not found"))?;
+                    let host = AgentHost::new(host_id.clone(), agent_url, token)
+                        .ok_or_else(|| anyhow::anyhow!("invalid host agent {host_id}"))?;
+                    let backend = AgentBackend::from_host(host)?;
+                    return Ok(Arc::new(backend));
+                }
+                // Compatibility for injected backends (and a catalog-open
+                // failure): a configured agent serves the scheme.
+                if let Some(agent) = &self.agent {
+                    return Ok(Arc::clone(agent));
+                }
+                anyhow::bail!("the host agent catalog is not configured");
+            }
+        }
+        Ok(Arc::clone(&self.docker))
     }
 }
 
 #[async_trait]
 impl ContainerBackend for RoutingBackend {
     async fn test(&self, endpoint: &str) -> Result<String> {
-        self.select(endpoint)?.test(endpoint).await
+        self.select(endpoint).await?.test(endpoint).await
     }
 
     async fn containers(&self, endpoint: &str) -> Result<Vec<ContainerRow>> {
-        self.select(endpoint)?.containers(endpoint).await
+        self.select(endpoint).await?.containers(endpoint).await
     }
 
     async fn snapshot(&self, endpoint: &str) -> Result<DockerSnapshot> {
-        self.select(endpoint)?.snapshot(endpoint).await
+        self.select(endpoint).await?.snapshot(endpoint).await
     }
 
     async fn start_container(&self, endpoint: &str, name: &str) -> Result<()> {
-        self.select(endpoint)?.start_container(endpoint, name).await
+        self.select(endpoint)
+            .await?
+            .start_container(endpoint, name)
+            .await
     }
 
     async fn stop_container(&self, endpoint: &str, name: &str) -> Result<()> {
-        self.select(endpoint)?.stop_container(endpoint, name).await
+        self.select(endpoint)
+            .await?
+            .stop_container(endpoint, name)
+            .await
     }
 
     async fn restart_container(&self, endpoint: &str, name: &str) -> Result<()> {
-        self.select(endpoint)?
+        self.select(endpoint)
+            .await?
             .restart_container(endpoint, name)
             .await
     }
 
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()> {
-        self.select(endpoint)?
+        self.select(endpoint)
+            .await?
             .remove_container(endpoint, name)
             .await
     }
@@ -292,7 +367,8 @@ impl ContainerBackend for RoutingBackend {
         name: &str,
         container_port: u16,
     ) -> Result<RunResult> {
-        self.select(endpoint)?
+        self.select(endpoint)
+            .await?
             .run_container(endpoint, image, name, container_port)
             .await
     }
@@ -688,6 +764,7 @@ mod tests {
         RoutingBackend::new(
             Arc::new(StubBackend("docker")),
             agent.map(|label| Arc::new(StubBackend(label)) as Arc<dyn ContainerBackend>),
+            None,
         )
     }
 

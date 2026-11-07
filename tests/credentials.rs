@@ -13,7 +13,7 @@ fn provider_credentials_are_encrypted_rotated_and_revoked() {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("catalog.sqlite3");
     let mut catalog = Catalog::open(&path).expect("open catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 3);
+    assert_eq!(catalog.schema_version().expect("schema version"), 4);
 
     let connection_id = catalog
         .create_provider_connection(

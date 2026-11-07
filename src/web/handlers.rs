@@ -24,6 +24,7 @@ use super::{
 use crate::{config::PublicConfig, utils::random::random_token};
 use hakobi::{
     catalog::{Catalog, ProviderConnection},
+    host_agent::AgentEndpoint,
     providers::{
         docker::{validate_container_name, validate_endpoint, validate_image_reference},
         ContainerInventory, DockerSnapshot,
@@ -57,6 +58,14 @@ pub struct ProviderForm {
 #[derive(Debug, Deserialize)]
 pub struct ProviderNotice {
     notice: Option<String>,
+}
+#[derive(Debug, Deserialize)]
+pub struct HostsCreateForm {
+    name: String,
+    agent_url: String,
+    token: String,
+    #[serde(default)]
+    csrf_token: String,
 }
 
 pub(super) async fn dashboard(
@@ -407,6 +416,165 @@ pub(super) async fn delete_provider(
     .await;
     match result {
         Ok(()) => redirect_response("/providers?notice=Provider+deleted", Vec::new()),
+        Err(error) => internal_error(error),
+    }
+}
+pub(super) async fn hosts_list(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/login").into_response();
+    }
+    let hosts = match with_catalog(&state, |catalog| catalog.list_host_agents()).await {
+        Ok(hosts) => hosts,
+        Err(error) => return internal_error(error),
+    };
+    let markup = templates::hosts(
+        &state.config.base_url,
+        &state.config.username,
+        &page_csrf(&state, &headers).0,
+        &hosts,
+    );
+    html_response(StatusCode::OK, markup, Vec::new())
+}
+
+pub(super) async fn hosts_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<HostsCreateForm>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let name = form.name.trim();
+    if name.is_empty() || name.len() > 64 {
+        return (StatusCode::BAD_REQUEST, "name must be 1–64 characters").into_response();
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "name must contain only ASCII letters, digits, '-', '_', or '.'",
+        )
+            .into_response();
+    }
+    if form.agent_url.len() > 512 {
+        return (StatusCode::BAD_REQUEST, "agent URL is too long").into_response();
+    }
+    if form.token.len() > 4096 {
+        return (StatusCode::BAD_REQUEST, "token is too long").into_response();
+    }
+    let name = name.to_owned();
+    let agent_url = form.agent_url.trim().to_owned();
+    let token = form.token.trim().to_owned();
+    if AgentEndpoint::new(agent_url.clone(), token.clone()).is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "agent URL and bearer token are invalid",
+        )
+            .into_response();
+    }
+
+    let result = with_catalog(&state, move |catalog| {
+        catalog.create_host_agent_with_provider(&name, &agent_url, &token)
+    })
+    .await;
+    match result {
+        Ok(_host_id) => redirect_response("/hosts?notice=Host+registered", Vec::new()),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub(super) async fn hosts_test(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(form): Form<CsrfForm>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let hosts = match with_catalog(&state, |catalog| catalog.list_host_agents()).await {
+        Ok(hosts) => hosts,
+        Err(error) => return internal_error(error),
+    };
+    let Some(host) = hosts.iter().find(|h| h.id == id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let test_endpoint = format!("agent://{}", host.id);
+    let result = state.backend.test(&test_endpoint).await;
+    let error = result.as_ref().err().map(|e| truncate(&e.to_string(), 500));
+    let id = host.id.clone();
+    let record = with_catalog(&state, move |catalog| {
+        catalog.record_host_agent_health(&id, error.as_deref())
+    })
+    .await;
+    if let Err(error) = record {
+        return internal_error(error);
+    }
+    let notice = if result.is_ok() {
+        "Connection+OK"
+    } else {
+        "Connection+failed"
+    };
+    redirect_response(&format!("/hosts?notice={notice}"), Vec::new())
+}
+
+pub(super) async fn hosts_toggle(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(form): Form<CsrfForm>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let hosts = match with_catalog(&state, |catalog| catalog.list_host_agents()).await {
+        Ok(hosts) => hosts,
+        Err(error) => return internal_error(error),
+    };
+    let Some(host) = hosts.iter().find(|h| h.id == id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let enabled = !host.enabled;
+    let id = host.id.clone();
+    let result = with_catalog(&state, move |catalog| {
+        catalog.set_host_agent_enabled(&id, enabled)
+    })
+    .await;
+    match result {
+        Ok(()) => redirect_response("/hosts?notice=Host+updated", Vec::new()),
+        Err(error) => internal_error(error),
+    }
+}
+
+pub(super) async fn hosts_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Form(form): Form<CsrfForm>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let result = with_catalog(&state, move |catalog| catalog.delete_host_agent(&id)).await;
+    match result {
+        Ok(()) => redirect_response("/hosts?notice=Host+deleted", Vec::new()),
+        Err(error) if error.to_string().contains("not found") => {
+            StatusCode::NOT_FOUND.into_response()
+        }
         Err(error) => internal_error(error),
     }
 }

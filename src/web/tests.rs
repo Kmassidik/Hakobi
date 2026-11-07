@@ -1211,6 +1211,7 @@ async fn agent_endpoint_providers_are_served_by_the_agent_backend() {
         Arc::new(RoutingBackend::new(
             Arc::new(UnroutableBackend),
             Some(Arc::new(FakeBackend)),
+            None,
         )),
     );
     let (authenticated, csrf) = sign_in(&app).await;
@@ -1271,4 +1272,516 @@ async fn agent_endpoint_providers_are_served_by_the_agent_backend() {
     let body = body_text(infrastructure, 64 * 1024).await;
     assert!(body.contains("fedora-test"));
     assert!(!body.contains("the direct Docker backend was used"));
+}
+
+// ─── Host enrollment tests ────────────────────────────────────────────────
+
+#[tokio::test]
+async fn host_create_and_provider_creation_are_atomic() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+
+    // Create a host via the UI.
+    let create = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=staging&agent_url=https%3A%2F%2Fstaging-agent.example.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+
+    // Verify both the host agent row and the provider row were created.
+    let catalog = Catalog::open(&path).unwrap();
+    let hosts = catalog.list_host_agents().unwrap();
+    assert_eq!(hosts.len(), 1);
+    let host = &hosts[0];
+    assert_eq!(host.name, "staging");
+    assert_eq!(host.agent_url, "https://staging-agent.example.com");
+    assert!(host.enabled);
+    drop(catalog);
+
+    // Verify the provider row exists with the agent:// endpoint.
+    let catalog = Catalog::open(&path).unwrap();
+    let providers = catalog.list_provider_connections().unwrap();
+    let agent_provider = providers
+        .iter()
+        .find(|p| p.kind == "docker" && p.endpoint.starts_with("agent://"))
+        .expect("agent provider row should exist");
+    assert!(agent_provider.enabled);
+    assert!(agent_provider.endpoint.starts_with("agent://"));
+    drop(catalog);
+
+    // Toggle the host to disabled.
+    let toggle = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/hosts/{}/toggle", host.id))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(toggle.status(), StatusCode::SEE_OTHER);
+
+    let catalog = Catalog::open(&path).unwrap();
+    let host = catalog.list_host_agents().unwrap().remove(0);
+    assert!(!host.enabled);
+    drop(catalog);
+
+    // Delete the host and verify both rows are gone.
+    let delete = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/hosts/{}/delete", host.id))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated)
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(delete.status(), StatusCode::SEE_OTHER);
+
+    let catalog = Catalog::open(&path).unwrap();
+    assert!(catalog.list_host_agents().unwrap().is_empty());
+    let providers = catalog.list_provider_connections().unwrap();
+    assert!(providers
+        .iter()
+        .all(|p| !p.endpoint.starts_with("agent://")));
+}
+
+#[tokio::test]
+async fn duplicate_name_or_url_are_rejected() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+
+    // Create first host.
+    let first = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=staging&agent_url=https%3A%2F%2Fstaging-agent.example.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.status(), StatusCode::SEE_OTHER);
+
+    // Duplicate name should fail.
+    let duplicate_name = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=staging&agent_url=https%3A%2F%2Fother.example.com&token=zyxwvutsrqponmlkjihgfedc&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate_name.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    // Duplicate URL should fail.
+    let duplicate_url = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=other&agent_url=https%3A%2F%2Fstaging-agent.example.com&token=zyxwvutsrqponmlkjihgfedc&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate_url.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    // Verify exactly one host was created.
+    let catalog = Catalog::open(&path).unwrap();
+    assert_eq!(catalog.list_host_agents().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn host_dashboard_does_not_expose_tokens() {
+    let (data, app) = app();
+    let (authenticated, _csrf) = sign_in(&app).await;
+
+    let path = data.path().join("catalog.sqlite3");
+    {
+        let mut catalog = Catalog::open(&path).unwrap();
+        catalog
+            .create_host_agent_with_provider(
+                "staging",
+                "https://staging-agent.example.com",
+                "my-secret-token-abcdef1234567890",
+            )
+            .unwrap();
+    }
+
+    let hosts_page = app
+        .clone()
+        .oneshot(
+            Request::get("/hosts")
+                .header(COOKIE, authenticated)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hosts_page.status(), StatusCode::OK);
+    let body = to_bytes(hosts_page.into_body(), 64 * 1024).await.unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("staging"));
+    assert!(body.contains("staging-agent.example.com"));
+    assert!(body.contains("agent://"));
+    // The plaintext token must NOT appear in the HTML.
+    assert!(!body.contains("my-secret-token-abcdef1234567890"));
+}
+
+#[tokio::test]
+async fn host_test_records_health() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+
+    // Create a host.
+    let create = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=staging&agent_url=https%3A%2F%2Fstaging-agent.example.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+
+    let catalog = Catalog::open(&path).unwrap();
+    let host = catalog.list_host_agents().unwrap().remove(0);
+    drop(catalog);
+
+    // Test the host (will fail since FakeBackend doesn't serve agent:// URLs).
+    let test = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/hosts/{}/test", host.id))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(test.status(), StatusCode::SEE_OTHER);
+
+    // Verify health was recorded.
+    let catalog = Catalog::open(&path).unwrap();
+    let host = catalog.list_host_agents().unwrap().remove(0);
+    assert!(host.last_checked_at.is_some());
+    // FakeBackend returns Ok for agent://local; for agent://{uuid} it falls
+    // back to the routing backend which uses FakeBackend.
+    assert!(host.last_error.is_none());
+}
+
+#[tokio::test]
+async fn host_toggle_preserves_provider_rows() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+
+    // Create a host.
+    let create = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=staging&agent_url=https%3A%2F%2Fstaging-agent.example.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+
+    let catalog = Catalog::open(&path).unwrap();
+    let host = catalog.list_host_agents().unwrap().remove(0);
+    drop(catalog);
+
+    // Toggle to disabled.
+    let toggle = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/hosts/{}/toggle", host.id))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(toggle.status(), StatusCode::SEE_OTHER);
+
+    // Verify the provider row still exists and is disabled.
+    let catalog = Catalog::open(&path).unwrap();
+    let providers = catalog.list_provider_connections().unwrap();
+    let agent_provider = providers
+        .iter()
+        .find(|p| p.endpoint.starts_with("agent://"))
+        .expect("agent provider should still exist");
+    assert!(!agent_provider.enabled);
+    drop(catalog);
+
+    // Toggle back to enabled.
+    let toggle = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/hosts/{}/toggle", host.id))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(toggle.status(), StatusCode::SEE_OTHER);
+
+    let catalog = Catalog::open(&path).unwrap();
+    let providers = catalog.list_provider_connections().unwrap();
+    let agent_provider = providers
+        .iter()
+        .find(|p| p.endpoint.starts_with("agent://"))
+        .expect("agent provider should still exist");
+    assert!(agent_provider.enabled);
+}
+
+#[tokio::test]
+async fn host_delete_removes_both_host_and_provider_rows() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+
+    // Create a host.
+    let create = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=staging&agent_url=https%3A%2F%2Fstaging-agent.example.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+
+    let catalog = Catalog::open(&path).unwrap();
+    let host = catalog.list_host_agents().unwrap().remove(0);
+    drop(catalog);
+
+    // Delete the host.
+    let delete = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/hosts/{}/delete", host.id))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(delete.status(), StatusCode::SEE_OTHER);
+
+    // Verify both rows are gone.
+    let catalog = Catalog::open(&path).unwrap();
+    assert!(catalog.list_host_agents().unwrap().is_empty());
+    let providers = catalog.list_provider_connections().unwrap();
+    assert!(providers
+        .iter()
+        .all(|p| !p.endpoint.starts_with("agent://")));
+}
+
+#[tokio::test]
+async fn host_delete_unknown_id_returns_not_found() {
+    let (_data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+
+    let delete = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts/nonexistent-id/delete")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated)
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(delete.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn empty_or_long_fields_are_rejected() {
+    let (_data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+
+    // Empty name.
+    let empty_name = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=&agent_url=https%3A%2F%2Fexample.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(empty_name.status(), StatusCode::BAD_REQUEST);
+
+    // Name too long (65 chars).
+    let long_name = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name={}&agent_url=https%3A%2F%2Fexample.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}",
+                    "a".repeat(65)
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(long_name.status(), StatusCode::BAD_REQUEST);
+
+    // Token too short (23 chars, MIN_TOKEN_LEN is 24).
+    let short_token = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=test&agent_url=https%3A%2F%2Fexample.com&token=abcdefghijklmnopqrstuvw&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(short_token.status(), StatusCode::BAD_REQUEST);
+
+    // Invalid URL (no scheme).
+    let bad_url = app
+        .clone()
+        .oneshot(
+            Request::post("/hosts")
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!(
+                    "name=test&agent_url=example.com&token=abcdefghijklmnopqrstuvwx&csrf_token={csrf}"
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bad_url.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn host_create_with_agent_backend_routed() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("catalog.sqlite3");
+
+    // Create a host agent row.
+    let host_id = {
+        let mut catalog = Catalog::open(&path).unwrap();
+        catalog
+            .create_host_agent_with_provider(
+                "staging",
+                "https://staging-agent.example.com",
+                "abcdefghijklmnopqrstuvwx",
+            )
+            .unwrap()
+    };
+
+    // Build a RoutingBackend with a FakeBackend for agent:// endpoints.
+    let app = router_with_backend(
+        config(),
+        path.clone(),
+        Arc::new(RoutingBackend::new(
+            Arc::new(UnroutableBackend),
+            Some(Arc::new(FakeBackend)),
+            None,
+        )),
+    );
+    let (authenticated, csrf) = sign_in(&app).await;
+
+    // Test the host via agent://{host_id}.
+    let test = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/hosts/{}/test", host_id))
+                .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(ORIGIN, "null")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::from(format!("csrf_token={csrf}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(test.status(), StatusCode::SEE_OTHER);
+
+    // Verify health was recorded.
+    let catalog = Catalog::open(&path).unwrap();
+    let host = catalog.list_host_agents().unwrap().remove(0);
+    assert!(host.last_checked_at.is_some());
+    assert!(host.last_error.is_none());
 }

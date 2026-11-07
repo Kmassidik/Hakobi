@@ -1,7 +1,7 @@
 use maud::{html, Markup, DOCTYPE};
 
 use hakobi::{
-    catalog::ProviderConnection,
+    catalog::{HostAgent, ProviderConnection},
     install::{Readiness, ToolStatus},
     providers::{ContainerInventory, ContainerRow, DockerSnapshot, StackGroup},
     stacks::{StackDefinition, StackKind},
@@ -135,7 +135,7 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
                 (nav_item(active, "stacks", "/stacks", "fa-layer-group", "Stacks"))
                 (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infrastructure"))
-                (nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
+                (nav_item(active, "hosts", "/hosts", "fa-network-wired", "Hosts"))
             }
             div class="mt-auto" {
                 div class="rounded-xl bg-[#f5f5f7] p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
@@ -165,12 +165,12 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
             }
         }
         nav class="fixed inset-x-0 bottom-0 z-40 bg-white/95 px-2 pb-2 pt-1.5 shadow-[0_-1px_3px_rgba(0,0,0,0.04)] backdrop-blur lg:hidden" aria-label="Mobile primary" {
-            div class="mx-auto grid max-w-md grid-cols-5 gap-0.5" {
+            div class="mx-auto grid max-w-md grid-cols-6 gap-0.5" {
                 (mobile_nav_item(active, "overview", "/", "fa-square-poll-vertical", "Overview"))
                 (mobile_nav_item(active, "stacks", "/stacks", "fa-layer-group", "Stacks"))
                 (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (mobile_nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infra"))
-                (mobile_nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
+                (mobile_nav_item(active, "hosts", "/hosts", "fa-network-wired", "Hosts"))
             }
         }
     }
@@ -1781,4 +1781,120 @@ pub(super) fn status_badge(label: &str, healthy: bool) -> Markup {
             (label)
         }
     }
+}
+pub(super) fn hosts(
+    base_url: &str,
+    username: &str,
+    csrf_token: &str,
+    hosts: &[HostAgent],
+) -> Markup {
+    page(
+        "Hosts · Hakobi",
+        html! {
+            div class="min-h-screen lg:pl-64" {
+                (sidebar("hosts", base_url, username, csrf_token))
+                header class="lg:hidden border-b border-line bg-paper/95" {
+                    div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
+                        (brand("Hakobi dashboard"))
+                        div class="flex items-center gap-4" {
+                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/" { "Back to overview" }
+                            span class="text-sm text-muted max-sm:hidden" { (username) }
+                            form method="post" action="/logout" class="m-0" {
+                                input type="hidden" name="csrf_token" value=(csrf_token);
+                                button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink" type="submit" { "Sign out" }
+                            }
+                        }
+                    }
+                }
+                main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
+                    div class="mb-8" {
+                        p class=(format!("{EYEBROW} mb-3 text-brand-bright")) { "Multi-host management" }
+                        h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Hosts" }
+                        p class="mt-4 max-w-[44rem] leading-[1.7] text-muted" {
+                            "Register remote agents that Hakobi can test, inspect, and operate. Each host gets its own provider row and encrypted credentials."
+                        }
+                    }
+                    section class="mb-8 rounded-[0.85rem] border border-line bg-surface/45 p-6" aria-labelledby="add-host-title" {
+                        h2 id="add-host-title" class="mb-4 mt-0 font-display text-[1.6rem] font-normal" { "Register a remote agent" }
+                        form method="post" action="/hosts" class="grid gap-4 md:grid-cols-3" {
+                            input type="hidden" name="csrf_token" value=(csrf_token);
+                            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
+                                "Name"
+                                input class=(FIELD) name="name" type="text" value="" maxlength="64" required;
+                            }
+                            label class="flex flex-col gap-2 text-[0.8rem] font-bold md:col-span-2" {
+                                "Agent URL"
+                                input class=(FIELD) name="agent_url" type="text" value="" placeholder="https://agent.example.com" maxlength="512" required;
+                            }
+                            label class="flex flex-col gap-2 text-[0.8rem] font-bold md:col-span-3" {
+                                "Bearer token"
+                                input class=(FIELD) name="token" type="password" autocomplete="off" maxlength="4096" required;
+                            }
+                            div class="md:col-span-3" {
+                                button class="rounded-[0.6rem] bg-brand px-4 py-3 font-bold text-white transition hover:bg-[#0f4130]" type="submit" {
+                                    i class="fa-solid fa-plus mr-2" aria-hidden="true" {}
+                                    "Register host"
+                                }
+                            }
+                        }
+                        p class="mb-0 mt-4 text-xs leading-relaxed text-muted" {
+                            "The token is encrypted at rest and never exposed in the dashboard."
+                        }
+                    }
+                    @if hosts.is_empty() {
+                        div class="rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
+                            img src="/assets/art/illustrations/empty-providers.webp" alt="" aria-hidden="true" class="empty-art";
+                            p class="m-0" { "No hosts registered yet." }
+                        }
+                    } @else {
+                        div class="grid gap-4" {
+                            @for host in hosts {
+                                article class="rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+                                    div class="flex flex-col justify-between gap-3 sm:flex-row sm:items-start" {
+                                        div {
+                                            h2 class="m-0 text-[1.1rem] font-bold" { (host.name) }
+                                            p class="mb-0 mt-1 break-all font-mono text-xs text-muted" { (host.agent_url) }
+                                            p class="m-0 mt-1 text-xs text-muted" { "Provider: " span class="font-semibold text-ink" { ("agent://".to_owned() + &host.id) } }
+                                        }
+                                        span class=(if host.enabled { "inline-flex w-fit items-center gap-2 rounded-full bg-brand-bright/10 px-3 py-1 text-xs font-semibold text-brand" } else { "inline-flex w-fit items-center gap-2 rounded-full bg-line/40 px-3 py-1 text-xs font-semibold text-muted" }) {
+                                            span class=(if host.enabled { "size-1.5 rounded-full bg-brand-bright" } else { "size-1.5 rounded-full bg-muted" }) aria-hidden="true" {}
+                                            (if host.enabled { "Enabled" } else { "Disabled" })
+                                        }
+                                    }
+                                    div class="mt-4 grid gap-2 text-xs text-muted sm:grid-cols-2" {
+                                        p class="m-0" {
+                                            "Last check: " span class="font-semibold text-ink" { (host.last_checked_at.as_deref().unwrap_or("never")) }
+                                        }
+                                        @if let Some(error) = &host.last_error {
+                                            p class="m-0 text-danger sm:col-span-2" { "Last error: " (error) }
+                                        }
+                                    }
+                                    div class="mt-5 flex flex-wrap gap-2" {
+                                        form method="post" action=(format!("/hosts/{}/test", host.id)) class="m-0" {
+                                            input type="hidden" name="csrf_token" value=(csrf_token);
+                                            button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold" type="submit" {
+                                                i class="fa-solid fa-plug mr-2" aria-hidden="true" {}
+                                                "Test"
+                                            }
+                                        }
+                                        form method="post" action=(format!("/hosts/{}/toggle", host.id)) class="m-0" {
+                                            input type="hidden" name="csrf_token" value=(csrf_token);
+                                            button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold" type="submit" {
+                                                (if host.enabled { "Disable" } else { "Enable" })
+                                            }
+                                        }
+                                        form method="post" action=(format!("/hosts/{}/delete", host.id)) class="m-0" {
+                                            input type="hidden" name="csrf_token" value=(csrf_token);
+                                            button class="rounded-lg border border-danger/40 bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-danger" type="submit" { "Delete" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    p class="mt-8 text-xs text-muted" { "Dashboard endpoint: " (base_url) }
+                }
+            }
+        },
+    )
 }
