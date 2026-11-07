@@ -23,7 +23,6 @@ pub(super) struct DashboardView<'a> {
     pub username: &'a str,
     pub readiness: &'a Readiness,
     pub metrics: &'a DashboardMetrics,
-    pub system: Option<&'a hakobi::host_agent::SystemMetrics>,
     pub notice: Option<&'a str>,
     pub agent_configured: bool,
     pub agent_online: bool,
@@ -43,20 +42,6 @@ pub(super) struct DashboardMetrics {
     pub providers_reachable: usize,
     pub providers_failed: usize,
     pub catalog_failed: bool,
-    pub docker_metrics: bool,
-    pub docker_container_count: Option<usize>,
-    pub memory_used_bytes: Option<u64>,
-    pub memory_total_bytes: Option<u64>,
-    pub cpu_percent: Option<f64>,
-    pub cpu_count: Option<usize>,
-}
-
-impl DashboardMetrics {
-    fn memory_percent(&self) -> Option<u8> {
-        let used = self.memory_used_bytes?;
-        let total = self.memory_total_bytes.filter(|total| *total > 0)?;
-        Some(((used.saturating_mul(100) / total).min(100)) as u8)
-    }
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -136,7 +121,8 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
                 (nav_item(active, "stacks", "/stacks", "fa-layer-group", "Stacks"))
                 (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infrastructure"))
-                (nav_item(active, "hosts", "/hosts", "fa-network-wired", "Hosts"))
+                (nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
+                (nav_item(active, "deployment", "/hosts", "fa-rocket", "Deployment"))
             }
             div class="mt-auto" {
                 div class="rounded-xl bg-[#f5f5f7] p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
@@ -171,7 +157,8 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
                 (mobile_nav_item(active, "stacks", "/stacks", "fa-layer-group", "Stacks"))
                 (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (mobile_nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infra"))
-                (mobile_nav_item(active, "hosts", "/hosts", "fa-network-wired", "Hosts"))
+                (mobile_nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
+                (mobile_nav_item(active, "deployment", "/hosts", "fa-rocket", "Deploy"))
             }
         }
     }
@@ -273,10 +260,7 @@ pub(super) fn readiness_section(
     }
 }
 
-pub(super) fn metrics_section(
-    metrics: &DashboardMetrics,
-    system: Option<&hakobi::host_agent::SystemMetrics>,
-) -> Markup {
+pub(super) fn metrics_section(metrics: &DashboardMetrics) -> Markup {
     let inventory_known = metrics.providers_reachable > 0;
     let no_provider = metrics.providers_configured == 0;
     let all_failed = metrics.providers_configured > 0 && metrics.providers_reachable == 0;
@@ -353,81 +337,6 @@ pub(super) fn metrics_section(
     } else {
         inventory_note.clone()
     };
-    let memory_value = if let Some(system) = system {
-        format!(
-            "{} / {}",
-            format_bytes(system.memory_used_bytes),
-            format_bytes(system.memory_total_bytes)
-        )
-    } else {
-        match (metrics.memory_used_bytes, metrics.memory_total_bytes) {
-            (Some(used), Some(total)) => {
-                format!("{} / {}", format_bytes(used), format_bytes(total))
-            }
-            _ => "—".to_owned(),
-        }
-    };
-    let memory_percent = if let Some(system) = system {
-        Some(host_percent(
-            system.memory_used_bytes,
-            system.memory_total_bytes,
-        ))
-    } else {
-        metrics.memory_percent()
-    };
-    let memory_bar = memory_percent.unwrap_or(0);
-    let memory_label = match memory_percent {
-        Some(0)
-            if system
-                .map(|system| system.memory_used_bytes > 0)
-                .unwrap_or_else(|| metrics.memory_used_bytes.unwrap_or(0) > 0) =>
-        {
-            "<1%".to_owned()
-        }
-        Some(percent) => format!("{percent}%"),
-        None => "—".to_owned(),
-    };
-    let memory_foot = if system.is_some() {
-        "Host memory"
-    } else if metrics.docker_metrics {
-        "Docker containers"
-    } else {
-        "Host memory"
-    };
-    let cpu_value = if let Some(system) = system {
-        if system.cpu_usage_percent > 0.0 && system.cpu_usage_percent < 1.0 {
-            "<1% Load".to_owned()
-        } else {
-            format!("{:.0}% Load", system.cpu_usage_percent)
-        }
-    } else {
-        metrics
-            .cpu_percent
-            .map(|percent| {
-                if percent > 0.0 && percent < 1.0 {
-                    "<1% Load".to_owned()
-                } else {
-                    format!("{percent:.0}% Load")
-                }
-            })
-            .unwrap_or_else(|| "—".to_owned())
-    };
-    let cpu_bar = system
-        .map(|system| system.cpu_usage_percent.min(100.0) as f64)
-        .or(metrics.cpu_percent.map(|percent| percent.min(100.0)))
-        .unwrap_or(0.0);
-    let cpu_foot = if let Some(system) = system {
-        format!("Host · {} cores", system.cpu_count)
-    } else if metrics.docker_metrics {
-        format!(
-            "Docker · {} containers",
-            metrics.docker_container_count.unwrap_or(0)
-        )
-    } else if let Some(count) = metrics.cpu_count {
-        format!("Host · {count} vCPU")
-    } else {
-        "Metrics unavailable".to_owned()
-    };
     html! {
         section id="overview-metrics" class="mb-6" aria-label="System status" hx-get="/partials/metrics" hx-trigger="every 15s" hx-swap="outerHTML" {
             div class="mb-2 flex justify-end" {
@@ -441,7 +350,7 @@ pub(super) fn metrics_section(
             } @else if metrics.providers_failed > 0 {
                 p class="mb-3 text-xs font-medium text-amber-700" { (inventory_note) ". Counts may be incomplete." }
             }
-            div class="grid grid-cols-2 gap-4 xl:grid-cols-4" {
+            div class="grid grid-cols-2 gap-4" {
                 a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href=(if inventory_known { "/stacks" } else { "/providers" }) {
                     div class="pr-10" {
                         div {
@@ -466,37 +375,6 @@ pub(super) fn metrics_section(
                     }
                     p class="mb-0 mt-3 text-xs text-[#86868b]" { (containers_foot) }
                 }
-                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="/containers" {
-                    div class="pr-10" {
-                        div {
-                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Memory usage" }
-                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (memory_value) }
-                        }
-                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" aria-hidden="true" {
-                            img src="/assets/art/3d/metrics.webp" alt="" class="size-8 object-contain";
-                        }
-                    }
-                    div class="mt-3 flex items-center gap-3" {
-                        progress class="metric-progress" value=(memory_bar) max="100" aria-label="Memory usage" {}
-                        span class="shrink-0 text-xs font-semibold text-[#86868b]" { (memory_label) }
-                    }
-                    p class="mb-0 mt-2 text-[0.68rem] text-[#86868b]" { (memory_foot) }
-                }
-                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="/containers" {
-                    div class="pr-10" {
-                        div {
-                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "CPU load" }
-                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (cpu_value) }
-                        }
-                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" aria-hidden="true" {
-                            img src="/assets/art/3d/health.webp" alt="" class="size-8 object-contain";
-                        }
-                    }
-                    div class="mt-3 flex items-center gap-3" {
-                        progress class="metric-progress" value=(cpu_bar) max="100" aria-label="CPU load" {}
-                        span class="shrink-0 text-xs font-semibold text-[#86868b]" { (cpu_foot) }
-                    }
-                }
             }
         }
     }
@@ -510,7 +388,6 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
         username,
         readiness,
         metrics,
-        system,
         notice,
         agent_configured,
         agent_online,
@@ -574,7 +451,7 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
                     }
                     }
 
-                    (metrics_section(metrics, system))
+                    (metrics_section(metrics))
 
                     section class="relative mb-6 flex min-h-[22rem] items-center overflow-hidden rounded-2xl bg-[#0f382c] px-8 py-10 text-white sm:px-12 lg:px-14 lg:py-14" aria-labelledby="hello-title" {
                         img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="hero-art pointer-events-none absolute inset-0 h-full w-full object-cover";
@@ -2076,12 +1953,12 @@ pub(super) fn host_resources(
         format!("{host_label} resources · Hakobi").as_str(),
         html! {
             div class="min-h-screen lg:pl-64" {
-                (sidebar("hosts", base_url, username, csrf_token))
+                (sidebar("deployment", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
                         (brand("Hakobi dashboard"))
                         div class="flex items-center gap-4" {
-                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/hosts" { "Hosts" }
+                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/hosts" { "Deployment" }
                             span class="text-sm text-muted max-sm:hidden" { (username) }
                             form method="post" action="/logout" class="m-0" {
                                 input type="hidden" name="csrf_token" value=(csrf_token);
@@ -2093,14 +1970,14 @@ pub(super) fn host_resources(
                 main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
                     div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between" {
                         div {
-                            p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]" { "Hosts / " (host_label) }
+                            p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]" { "Resources / " (host_label) }
                             h1 class="m-0 font-sans text-[clamp(1.9rem,3vw,2.6rem)] font-semibold tracking-[-0.045em]" { "Host resources." }
                             p class="mt-3 text-xs text-[#86868b]" {
                                 (system.cpu_count) " vCPU · " (format_bytes(system.memory_total_bytes)) " RAM · " (system.kernel_version) " · up " (host_uptime(system.uptime_seconds))
                             }
                         }
                         div class="flex items-center gap-2" {
-                            a class="rounded-full bg-white px-3.5 py-2 text-[0.75rem] font-semibold text-ink no-underline shadow-sm" href="/hosts" { "All hosts" }
+                            a class="rounded-full bg-white px-3.5 py-2 text-[0.75rem] font-semibold text-ink no-underline shadow-sm" href="/hosts" { "Deployment" }
                             span class="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-2 text-[0.75rem] font-semibold text-[#6e6e73] shadow-sm" {
                                 span class="size-2 animate-pulse rounded-full bg-emerald-500" {}
                                 "Live · 5s"
@@ -2121,10 +1998,10 @@ pub(super) fn hosts(
     hosts: &[HostAgent],
 ) -> Markup {
     page(
-        "Hosts · Hakobi",
+        "Deployment · Hakobi",
         html! {
             div class="min-h-screen lg:pl-64" {
-                (sidebar("hosts", base_url, username, csrf_token))
+                (sidebar("deployment", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
                         (brand("Hakobi dashboard"))
@@ -2140,12 +2017,11 @@ pub(super) fn hosts(
                 }
                 main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
                     div class="mb-8" {
-                        p class=(format!("{EYEBROW} mb-3 text-brand-bright")) { "Multi-host management" }
-                        h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Hosts" }
+                        p class=(format!("{EYEBROW} mb-3 text-brand-bright")) { "Deployment" }
+                        h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Deployment" }
                         p class="mt-4 max-w-[44rem] leading-[1.7] text-muted" {
                             "Register remote agents that Hakobi can test, inspect, and operate. Each host gets its own provider row and encrypted credentials."
                         }
-                        a class="mt-4 inline-flex rounded-full bg-white px-4 py-2 text-[0.78rem] font-semibold text-ink no-underline shadow-sm" href="/hosts/local/resources" { "View local host resources →" }
                     }
                     section class="mb-8 rounded-[0.85rem] border border-line bg-surface/45 p-6" aria-labelledby="add-host-title" {
                         h2 id="add-host-title" class="mb-4 mt-0 font-display text-[1.6rem] font-normal" { "Register a remote agent" }

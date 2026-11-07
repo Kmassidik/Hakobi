@@ -1,8 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
-use hakobi::host_agent::{
-    AgentEndpoint, AgentErrorBody, AgentHost, DockerMetrics, InstallJob, SystemMetrics,
-};
+use hakobi::host_agent::{AgentEndpoint, AgentErrorBody, AgentHost, InstallJob, SystemMetrics};
 use hakobi::install::Readiness;
 
 #[derive(Clone)]
@@ -87,26 +85,6 @@ impl HostAgent {
             anyhow::bail!("{message}");
         }
         Ok(response.json::<SystemMetrics>().await?)
-    }
-
-    pub(super) async fn docker_metrics(&self) -> anyhow::Result<DockerMetrics> {
-        let response = self
-            .client
-            .get(format!("{}/v1/docker/metrics", self.endpoint.url()))
-            .bearer_auth(self.endpoint.token())
-            .timeout(Duration::from_secs(25))
-            .send()
-            .await?;
-        let status = response.status();
-        if !status.is_success() {
-            let message = response
-                .json::<AgentErrorBody>()
-                .await
-                .map(|error| error.error)
-                .unwrap_or_else(|_| format!("host agent returned {status}"));
-            anyhow::bail!("{message}");
-        }
-        Ok(response.json::<DockerMetrics>().await?)
     }
 
     pub(super) async fn install_status(&self) -> anyhow::Result<HashMap<String, InstallJob>> {

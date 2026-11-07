@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Write as _, fs, sync::LazyLock};
+use std::{collections::HashSet, fmt::Write as _, sync::LazyLock};
 
 use anyhow::Context;
 use axum::{
@@ -91,15 +91,7 @@ pub(super) async fn dashboard(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    let system = if agent_online {
-        match &agent {
-            Some(agent) => agent.system_metrics().await.ok(),
-            None => None,
-        }
-    } else {
-        None
-    };
-    let metrics = collect_dashboard_metrics(&state, agent.as_ref()).await;
+    let metrics = collect_dashboard_metrics(&state).await;
     let install_running = if agent_online && notice.notice.is_some() {
         match &agent {
             Some(agent) => agent
@@ -119,7 +111,6 @@ pub(super) async fn dashboard(
         username: &state.config.username,
         readiness: &readiness,
         metrics: &metrics,
-        system: system.as_ref(),
         notice: notice.notice.as_deref(),
         agent_configured,
         agent_online,
@@ -800,15 +791,10 @@ pub(super) async fn metrics_partial(State(state): State<AppState>, headers: Head
     if !authenticated(&state, &headers).await {
         return partial_unauthorized();
     }
-    let agent = HostAgent::from_env();
-    let system = match &agent {
-        Some(agent) => agent.system_metrics().await.ok(),
-        None => None,
-    };
-    let metrics = collect_dashboard_metrics(&state, agent.as_ref()).await;
+    let metrics = collect_dashboard_metrics(&state).await;
     html_response(
         StatusCode::OK,
-        templates::metrics_section(&metrics, system.as_ref()),
+        templates::metrics_section(&metrics),
         Vec::new(),
     )
 }
@@ -1185,10 +1171,7 @@ async fn enabled_docker_provider(
         .find(|provider| provider.id == provider_id))
 }
 
-async fn collect_dashboard_metrics(
-    state: &AppState,
-    agent: Option<&HostAgent>,
-) -> templates::DashboardMetrics {
+async fn collect_dashboard_metrics(state: &AppState) -> templates::DashboardMetrics {
     let mut metrics = templates::DashboardMetrics::default();
     match load_providers(state).await {
         Ok(providers) => {
@@ -1256,70 +1239,7 @@ async fn collect_dashboard_metrics(
         }
     }
 
-    if let Some(agent) = agent {
-        match agent.docker_metrics().await {
-            Ok(docker) if docker.memory_limit_bytes > 0 || docker.containers > 0 => {
-                metrics.docker_metrics = true;
-                metrics.docker_container_count = Some(docker.containers);
-                metrics.memory_used_bytes = Some(docker.memory_used_bytes);
-                metrics.memory_total_bytes = Some(docker.memory_limit_bytes);
-                metrics.cpu_percent = Some(docker.cpu_percent.clamp(0.0, 999.0));
-            }
-            Ok(_) => {}
-            Err(error) => {
-                tracing::warn!(error = %error, "host docker metrics failed");
-            }
-        }
-    }
-    if !metrics.docker_metrics {
-        if let Some((used, total)) = host_memory() {
-            metrics.memory_used_bytes = Some(used);
-            metrics.memory_total_bytes = Some(total);
-        }
-        if let Some(cpu_count) = std::thread::available_parallelism()
-            .ok()
-            .map(|value| value.get())
-        {
-            metrics.cpu_count = Some(cpu_count);
-            if let Some(load) = host_load_average() {
-                metrics.cpu_percent = Some(
-                    ((load / cpu_count as f32) * 100.0)
-                        .round()
-                        .clamp(0.0, 100.0) as f64,
-                );
-            }
-        }
-    }
     metrics
-}
-
-fn host_memory() -> Option<(u64, u64)> {
-    let contents = fs::read_to_string("/proc/meminfo").ok()?;
-    let mut total_kib = None;
-    let mut available_kib = None;
-    for line in contents.lines() {
-        if let Some(value) = line.strip_prefix("MemTotal:") {
-            total_kib = first_u64(value);
-        } else if let Some(value) = line.strip_prefix("MemAvailable:") {
-            available_kib = first_u64(value);
-        }
-    }
-    let total = total_kib?.saturating_mul(1024);
-    let available = available_kib?.saturating_mul(1024);
-    Some((total.saturating_sub(available), total))
-}
-
-fn first_u64(value: &str) -> Option<u64> {
-    value.split_whitespace().next()?.parse().ok()
-}
-
-fn host_load_average() -> Option<f32> {
-    fs::read_to_string("/proc/loadavg")
-        .ok()?
-        .split_whitespace()
-        .next()?
-        .parse()
-        .ok()
 }
 
 fn containers_notice(message: &str) -> String {
