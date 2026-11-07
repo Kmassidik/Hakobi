@@ -23,6 +23,7 @@ pub(super) struct DashboardView<'a> {
     pub username: &'a str,
     pub readiness: &'a Readiness,
     pub metrics: &'a DashboardMetrics,
+    pub system: Option<&'a hakobi::host_agent::SystemMetrics>,
     pub notice: Option<&'a str>,
     pub agent_configured: bool,
     pub agent_online: bool,
@@ -272,7 +273,10 @@ pub(super) fn readiness_section(
     }
 }
 
-pub(super) fn metrics_section(metrics: &DashboardMetrics) -> Markup {
+pub(super) fn metrics_section(
+    metrics: &DashboardMetrics,
+    system: Option<&hakobi::host_agent::SystemMetrics>,
+) -> Markup {
     let inventory_known = metrics.providers_reachable > 0;
     let no_provider = metrics.providers_configured == 0;
     let all_failed = metrics.providers_configured > 0 && metrics.providers_reachable == 0;
@@ -349,34 +353,72 @@ pub(super) fn metrics_section(metrics: &DashboardMetrics) -> Markup {
     } else {
         inventory_note.clone()
     };
-    let memory_value = match (metrics.memory_used_bytes, metrics.memory_total_bytes) {
-        (Some(used), Some(total)) => format!("{} / {}", format_bytes(used), format_bytes(total)),
-        _ => "—".to_owned(),
+    let memory_value = if let Some(system) = system {
+        format!(
+            "{} / {}",
+            format_bytes(system.memory_used_bytes),
+            format_bytes(system.memory_total_bytes)
+        )
+    } else {
+        match (metrics.memory_used_bytes, metrics.memory_total_bytes) {
+            (Some(used), Some(total)) => {
+                format!("{} / {}", format_bytes(used), format_bytes(total))
+            }
+            _ => "—".to_owned(),
+        }
     };
-    let memory_percent = metrics.memory_percent();
+    let memory_percent = if let Some(system) = system {
+        Some(host_percent(
+            system.memory_used_bytes,
+            system.memory_total_bytes,
+        ))
+    } else {
+        metrics.memory_percent()
+    };
     let memory_bar = memory_percent.unwrap_or(0);
     let memory_label = match memory_percent {
-        Some(0) if metrics.memory_used_bytes.unwrap_or(0) > 0 => "<1%".to_owned(),
+        Some(0)
+            if system
+                .map(|system| system.memory_used_bytes > 0)
+                .unwrap_or_else(|| metrics.memory_used_bytes.unwrap_or(0) > 0) =>
+        {
+            "<1%".to_owned()
+        }
         Some(percent) => format!("{percent}%"),
         None => "—".to_owned(),
     };
-    let memory_foot = if metrics.docker_metrics {
+    let memory_foot = if system.is_some() {
+        "Host memory"
+    } else if metrics.docker_metrics {
         "Docker containers"
     } else {
         "Host memory"
     };
-    let cpu_value = metrics
-        .cpu_percent
-        .map(|percent| {
-            if percent > 0.0 && percent < 1.0 {
-                "<1% Load".to_owned()
-            } else {
-                format!("{percent:.0}% Load")
-            }
-        })
-        .unwrap_or_else(|| "—".to_owned());
-    let cpu_bar = metrics.cpu_percent.unwrap_or(0.0).min(100.0);
-    let cpu_foot = if metrics.docker_metrics {
+    let cpu_value = if let Some(system) = system {
+        if system.cpu_usage_percent > 0.0 && system.cpu_usage_percent < 1.0 {
+            "<1% Load".to_owned()
+        } else {
+            format!("{:.0}% Load", system.cpu_usage_percent)
+        }
+    } else {
+        metrics
+            .cpu_percent
+            .map(|percent| {
+                if percent > 0.0 && percent < 1.0 {
+                    "<1% Load".to_owned()
+                } else {
+                    format!("{percent:.0}% Load")
+                }
+            })
+            .unwrap_or_else(|| "—".to_owned())
+    };
+    let cpu_bar = system
+        .map(|system| system.cpu_usage_percent.min(100.0) as f64)
+        .or(metrics.cpu_percent.map(|percent| percent.min(100.0)))
+        .unwrap_or(0.0);
+    let cpu_foot = if let Some(system) = system {
+        format!("Host · {} cores", system.cpu_count)
+    } else if metrics.docker_metrics {
         format!(
             "Docker · {} containers",
             metrics.docker_container_count.unwrap_or(0)
@@ -468,6 +510,7 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
         username,
         readiness,
         metrics,
+        system,
         notice,
         agent_configured,
         agent_online,
@@ -523,10 +566,15 @@ pub(super) fn dashboard(view: DashboardView<'_>) -> Markup {
                                 "Good to see you, " (username) "."
                             }
                         }
+                        div class="flex items-center gap-3" {
+                        @if agent_online {
+                            a class="rounded-full bg-white px-3.5 py-2 text-[0.72rem] font-semibold text-ink no-underline shadow-sm" href="/hosts/local/resources" { "Host resources →" }
+                        }
                         (status_badge(control_label, control_healthy))
                     }
+                    }
 
-                    (metrics_section(metrics))
+                    (metrics_section(metrics, system))
 
                     section class="relative mb-6 flex min-h-[22rem] items-center overflow-hidden rounded-2xl bg-[#0f382c] px-8 py-10 text-white sm:px-12 lg:px-14 lg:py-14" aria-labelledby="hello-title" {
                         img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="hero-art pointer-events-none absolute inset-0 h-full w-full object-cover";
@@ -1782,6 +1830,290 @@ pub(super) fn status_badge(label: &str, healthy: bool) -> Markup {
         }
     }
 }
+fn host_uptime(seconds: u64) -> String {
+    let days = seconds / 86_400;
+    let hours = (seconds % 86_400) / 3_600;
+    if days > 0 {
+        format!("{days}d {hours}h")
+    } else {
+        format!("{hours}h")
+    }
+}
+
+fn host_percent(value: u64, total: u64) -> u8 {
+    value
+        .saturating_mul(100)
+        .checked_div(total)
+        .unwrap_or(0)
+        .min(100) as u8
+}
+
+pub(super) fn host_resources_live(
+    system: &hakobi::host_agent::SystemMetrics,
+    containers: &[ContainerRow],
+    live_url: &str,
+) -> Markup {
+    let memory_percent = host_percent(system.memory_used_bytes, system.memory_total_bytes);
+    let swap_percent = host_percent(system.swap_used_bytes, system.swap_total_bytes);
+    let root_disk = system
+        .disks
+        .iter()
+        .find(|disk| disk.mount == "/")
+        .or_else(|| system.disks.first());
+    let disk_percent = root_disk
+        .map(|disk| host_percent(disk.total_bytes - disk.available_bytes, disk.total_bytes))
+        .unwrap_or(0);
+    let network_rx: u64 = system
+        .networks
+        .iter()
+        .filter(|network| network.name != "lo")
+        .map(|network| network.received_bytes_per_second)
+        .sum();
+    let network_tx: u64 = system
+        .networks
+        .iter()
+        .filter(|network| network.name != "lo")
+        .map(|network| network.transmitted_bytes_per_second)
+        .sum();
+    let network_name = system
+        .networks
+        .iter()
+        .filter(|network| network.name != "lo")
+        .max_by_key(|network| network.total_received_bytes)
+        .map(|network| network.name.as_str())
+        .unwrap_or("—");
+    let cpu_usage = system.cpu_usage_percent;
+    html! {
+        div id="host-resources-live" hx-get=(live_url) hx-trigger="every 5s" hx-swap="outerHTML" {
+            section class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Host totals" {
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="#cpu" {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "CPU" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" { (format!("{cpu_usage:.1}%")) }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" {
+                            img src="/assets/art/3d/health.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    p class="mb-0 mt-3 text-xs text-[#86868b]" {
+                        "Load " (format!("{:.2} / {:.2} / {:.2}", system.load_1, system.load_5, system.load_15))
+                    }
+                }
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="#memory" {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Memory" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" {
+                                (format_bytes(system.memory_used_bytes)) " / " (format_bytes(system.memory_total_bytes))
+                            }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" {
+                            img src="/assets/art/3d/metrics.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    progress class="metric-progress mt-3" value=(memory_percent) max="100" aria-label="Memory usage" {}
+                    p class="mb-0 mt-2 text-[0.68rem] text-[#86868b]" { (memory_percent) "% used · swap " (format_bytes(system.swap_used_bytes)) }
+                }
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="#disks" {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Disk" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" {
+                                @if let Some(disk) = root_disk {
+                                    (format_bytes(disk.total_bytes - disk.available_bytes)) " / " (format_bytes(disk.total_bytes))
+                                } @else { "—" }
+                            }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" {
+                            img src="/assets/art/3d/backup.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    progress class="metric-progress mt-3" value=(disk_percent) max="100" aria-label="Disk usage" {}
+                    p class="mb-0 mt-2 text-[0.68rem] text-[#86868b]" { (disk_percent) "% used · " (root_disk.map(|disk| disk.mount.as_str()).unwrap_or("no mounts")) }
+                }
+                a class="relative block rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:shadow-md" href="#network" {
+                    div class="pr-10" {
+                        div {
+                            p class="m-0 text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868b]" { "Network" }
+                            p class="m-0 mt-2 text-[17px] font-semibold leading-tight tracking-[-0.04em] sm:text-[24px]" {
+                                (format_bytes(network_rx + network_tx)) "/s"
+                            }
+                        }
+                        span class="absolute right-4 top-4 grid size-9 place-items-center rounded-lg bg-brand/10" {
+                            img src="/assets/art/3d/tunnel.webp" alt="" class="size-8 object-contain";
+                        }
+                    }
+                    p class="mb-0 mt-3 text-xs text-[#86868b]" { (network_name) " · RX " (format_bytes(network_rx)) "/s · TX " (format_bytes(network_tx)) "/s" }
+                }
+            }
+
+            div class="mb-4 grid grid-cols-1 gap-4 xl:grid-cols-[1.45fr_0.9fr]" {
+                section id="cpu" class="rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" aria-labelledby="host-cpu-title" {
+                    div class="mb-4 flex items-start justify-between gap-4" {
+                        div {
+                            h2 id="host-cpu-title" class="m-0 text-[14px] font-semibold" { "CPU" }
+                            p class="m-0 mt-1 text-xs text-[#86868b]" { (system.cpu_model) " · " (system.cpu_count) " cores" }
+                        }
+                        span class="text-[11px] text-[#86868b]" { "5s sample" }
+                    }
+                    div class="flex flex-wrap items-end justify-between gap-4" {
+                        p class="m-0 text-[38px] font-semibold leading-none tracking-[-0.05em]" { (format!("{cpu_usage:.1}%")) }
+                        p class="m-0 text-xs text-[#86868b]" { "load 1m " (format!("{:.2}", system.load_1)) " · 5m " (format!("{:.2}", system.load_5)) " · 15m " (format!("{:.2}", system.load_15)) }
+                    }
+                    div class="mt-5 grid grid-cols-8 gap-1.5" {
+                        @for (index, usage) in system.cpu_per_core.iter().enumerate() {
+                            div class="rounded bg-[#f5f5f7] p-1" title=(format!("CPU {index}: {usage:.1}%")) {
+                                span class="mb-1 block text-[7px] text-[#a1a1aa]" { (index) }
+                                progress class="metric-progress" value=(usage.min(100.0).round() as u8) max="100" aria-label=(format!("CPU {index}")) {}
+                            }
+                        }
+                    }
+                }
+                section id="memory" class="rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" aria-labelledby="host-memory-title" {
+                    div class="mb-4 flex items-start justify-between gap-4" {
+                        div {
+                            h2 id="host-memory-title" class="m-0 text-[14px] font-semibold" { "Memory" }
+                            p class="m-0 mt-1 text-xs text-[#86868b]" { "physical + swap" }
+                        }
+                        span class="text-[11px] text-[#86868b]" { (memory_percent) "%" }
+                    }
+                    div class="grid gap-3 text-xs" {
+                        div class="flex justify-between" { span class="text-[#86868b]" { "Used" } strong { (format_bytes(system.memory_used_bytes)) } }
+                        div class="flex justify-between" { span class="text-[#86868b]" { "Available" } strong { (format_bytes(system.memory_available_bytes)) } }
+                        div class="flex justify-between" { span class="text-[#86868b]" { "Swap" } strong { (format_bytes(system.swap_used_bytes)) " / " (format_bytes(system.swap_total_bytes)) } }
+                    }
+                    progress class="metric-progress mt-4" value=(memory_percent) max="100" aria-label="Memory usage" {}
+                    progress class="metric-progress mt-2" value=(swap_percent) max="100" aria-label="Swap usage" {}
+                    p class="mb-0 mt-4 text-[11px] text-[#86868b]" { "Uptime " (host_uptime(system.uptime_seconds)) " · " (system.os_name) " " (system.os_version) }
+                }
+            }
+
+            div class="mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2" {
+                section id="network" class="rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    div class="mb-3 flex items-start justify-between gap-4" {
+                        div { h2 class="m-0 text-[14px] font-semibold" { "Network" } p class="m-0 mt-1 text-xs text-[#86868b]" { "per-interface throughput" } }
+                        span class="text-[11px] text-[#86868b]" { "RX " (format_bytes(network_rx)) "/s" }
+                    }
+                    table class="w-full border-collapse text-[11px]" {
+                        thead { tr { th class="pb-2 text-left text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "Interface" } th class="pb-2 text-right text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "RX/s" } th class="pb-2 text-right text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "TX/s" } } }
+                        tbody {
+                            @for network in system.networks.iter().filter(|network| {
+                                network.name != "lo"
+                                    && network.total_received_bytes.saturating_add(network.total_transmitted_bytes) > 0
+                            }).take(5) {
+                                tr { td class="border-t border-[#f2f2f5] py-2 font-semibold" { (network.name) } td class="border-t border-[#f2f2f5] py-2 text-right" { (format_bytes(network.received_bytes_per_second)) "/s" } td class="border-t border-[#f2f2f5] py-2 text-right" { (format_bytes(network.transmitted_bytes_per_second)) "/s" } }
+                            }
+                        }
+                    }
+                }
+                section id="disks" class="rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    div class="mb-3 flex items-start justify-between gap-4" {
+                        div { h2 class="m-0 text-[14px] font-semibold" { "Storage" } p class="m-0 mt-1 text-xs text-[#86868b]" { "mounted filesystems" } }
+                    }
+                    table class="w-full border-collapse text-[11px]" {
+                        thead { tr { th class="pb-2 text-left text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "Mount" } th class="pb-2 text-right text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "Used" } th class="pb-2 text-right text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "Free" } } }
+                        tbody {
+                            @for disk in system.disks.iter().take(4) {
+                                tr { td class="border-t border-[#f2f2f5] py-2 font-semibold" { (disk.mount) } td class="border-t border-[#f2f2f5] py-2 text-right" { (format_bytes(disk.total_bytes - disk.available_bytes)) } td class="border-t border-[#f2f2f5] py-2 text-right" { (format_bytes(disk.available_bytes)) } }
+                            }
+                        }
+                    }
+                }
+            }
+
+            div class="grid grid-cols-1 gap-4 lg:grid-cols-2" {
+                section class="rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    div class="mb-3 flex items-start justify-between gap-4" {
+                        div { h2 class="m-0 text-[14px] font-semibold" { "Processes" } p class="m-0 mt-1 text-xs text-[#86868b]" { "top by CPU" } }
+                        span class="text-[11px] text-[#86868b]" { (system.process_count) " total" }
+                    }
+                    table class="w-full border-collapse text-[11px]" {
+                        thead { tr { th class="pb-2 text-left text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "PID / command" } th class="pb-2 text-right text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "CPU" } th class="pb-2 text-right text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "MEM" } } }
+                        tbody {
+                            @for process in system.processes.iter().take(10) {
+                                tr {
+                                    td class="border-t border-[#f2f2f5] py-2 font-semibold" { (process.pid) " · " (process.command) }
+                                    td class="border-t border-[#f2f2f5] py-2 text-right" { (format!("{:.1}%", process.cpu_percent)) }
+                                    td class="border-t border-[#f2f2f5] py-2 text-right" { (format!("{:.1}%", process.memory_percent)) }
+                                }
+                            }
+                        }
+                    }
+                }
+                section class="rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    div class="mb-3 flex items-start justify-between gap-4" {
+                        div { h2 class="m-0 text-[14px] font-semibold" { "Containers" } p class="m-0 mt-1 text-xs text-[#86868b]" { "local Docker" } }
+                        span class="text-[11px] text-[#86868b]" { (containers.len()) " total" }
+                    }
+                    table class="w-full border-collapse text-[11px]" {
+                        thead { tr { th class="pb-2 text-left text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "Name" } th class="pb-2 text-right text-[9px] uppercase tracking-[0.07em] text-[#86868b]" { "State" } } }
+                        tbody {
+                            @for container in containers.iter().take(10) {
+                                tr { td class="border-t border-[#f2f2f5] py-2 font-semibold" { (container.name) } td class="border-t border-[#f2f2f5] py-2 text-right" { (container.state) } }
+                            }
+                            @if containers.is_empty() {
+                                tr { td class="border-t border-[#f2f2f5] py-2 text-[#86868b]" colspan="2" { "No containers." } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(super) fn host_resources(
+    base_url: &str,
+    username: &str,
+    host_label: &str,
+    csrf_token: &str,
+    system: &hakobi::host_agent::SystemMetrics,
+    containers: &[ContainerRow],
+    live_url: &str,
+) -> Markup {
+    page(
+        format!("{host_label} resources · Hakobi").as_str(),
+        html! {
+            div class="min-h-screen lg:pl-64" {
+                (sidebar("hosts", base_url, username, csrf_token))
+                header class="lg:hidden border-b border-line bg-paper/95" {
+                    div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
+                        (brand("Hakobi dashboard"))
+                        div class="flex items-center gap-4" {
+                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/hosts" { "Hosts" }
+                            span class="text-sm text-muted max-sm:hidden" { (username) }
+                            form method="post" action="/logout" class="m-0" {
+                                input type="hidden" name="csrf_token" value=(csrf_token);
+                                button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink" type="submit" { "Sign out" }
+                            }
+                        }
+                    }
+                }
+                main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
+                    div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between" {
+                        div {
+                            p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]" { "Hosts / " (host_label) }
+                            h1 class="m-0 font-sans text-[clamp(1.9rem,3vw,2.6rem)] font-semibold tracking-[-0.045em]" { "Host resources." }
+                            p class="mt-3 text-xs text-[#86868b]" {
+                                (system.cpu_count) " vCPU · " (format_bytes(system.memory_total_bytes)) " RAM · " (system.kernel_version) " · up " (host_uptime(system.uptime_seconds))
+                            }
+                        }
+                        div class="flex items-center gap-2" {
+                            a class="rounded-full bg-white px-3.5 py-2 text-[0.75rem] font-semibold text-ink no-underline shadow-sm" href="/hosts" { "All hosts" }
+                            span class="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-2 text-[0.75rem] font-semibold text-[#6e6e73] shadow-sm" {
+                                span class="size-2 animate-pulse rounded-full bg-emerald-500" {}
+                                "Live · 5s"
+                            }
+                        }
+                    }
+                    (host_resources_live(system, containers, live_url))
+                }
+            }
+        },
+    )
+}
+
 pub(super) fn hosts(
     base_url: &str,
     username: &str,
@@ -1813,6 +2145,7 @@ pub(super) fn hosts(
                         p class="mt-4 max-w-[44rem] leading-[1.7] text-muted" {
                             "Register remote agents that Hakobi can test, inspect, and operate. Each host gets its own provider row and encrypted credentials."
                         }
+                        a class="mt-4 inline-flex rounded-full bg-white px-4 py-2 text-[0.78rem] font-semibold text-ink no-underline shadow-sm" href="/hosts/local/resources" { "View local host resources →" }
                     }
                     section class="mb-8 rounded-[0.85rem] border border-line bg-surface/45 p-6" aria-labelledby="add-host-title" {
                         h2 id="add-host-title" class="mb-4 mt-0 font-display text-[1.6rem] font-normal" { "Register a remote agent" }
@@ -1870,6 +2203,7 @@ pub(super) fn hosts(
                                         }
                                     }
                                     div class="mt-5 flex flex-wrap gap-2" {
+                                        a class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink no-underline" href=(format!("/hosts/{}/resources", host.id)) { "Resources" }
                                         form method="post" action=(format!("/hosts/{}/test", host.id)) class="m-0" {
                                             input type="hidden" name="csrf_token" value=(csrf_token);
                                             button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold" type="submit" {

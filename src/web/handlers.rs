@@ -24,7 +24,7 @@ use super::{
 use crate::{config::PublicConfig, utils::random::random_token};
 use hakobi::{
     catalog::{Catalog, ProviderConnection},
-    host_agent::AgentEndpoint,
+    host_agent::{AgentEndpoint, AgentHost},
     providers::{
         docker::{validate_container_name, validate_endpoint, validate_image_reference},
         ContainerInventory, DockerSnapshot,
@@ -91,6 +91,14 @@ pub(super) async fn dashboard(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    let system = if agent_online {
+        match &agent {
+            Some(agent) => agent.system_metrics().await.ok(),
+            None => None,
+        }
+    } else {
+        None
+    };
     let metrics = collect_dashboard_metrics(&state, agent.as_ref()).await;
     let install_running = if agent_online && notice.notice.is_some() {
         match &agent {
@@ -111,6 +119,7 @@ pub(super) async fn dashboard(
         username: &state.config.username,
         readiness: &readiness,
         metrics: &metrics,
+        system: system.as_ref(),
         notice: notice.notice.as_deref(),
         agent_configured,
         agent_online,
@@ -488,6 +497,123 @@ pub(super) async fn hosts_create(
     }
 }
 
+async fn resolve_host_agent(
+    state: &AppState,
+    id: &str,
+) -> std::result::Result<(String, HostAgent), StatusCode> {
+    if id == "local" {
+        let agent = HostAgent::from_env().ok_or(StatusCode::NOT_FOUND)?;
+        return Ok(("Local host".to_owned(), agent));
+    }
+    let hosts = with_catalog(state, |catalog| catalog.list_host_agents())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let host = hosts
+        .into_iter()
+        .find(|host| host.id == id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let host_id = host.id.clone();
+    let token = with_catalog(state, move |catalog| catalog.host_agent_token(&host_id))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let agent_host = AgentHost::new(host.id.clone(), host.agent_url, token)
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let agent = HostAgent::from_host(agent_host).ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok((host.name, agent))
+}
+
+pub(super) async fn host_resources(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return Redirect::to("/login").into_response();
+    }
+    let (label, agent) = match resolve_host_agent(&state, &id).await {
+        Ok(result) => result,
+        Err(status) => return status.into_response(),
+    };
+    let system = match agent.system_metrics().await {
+        Ok(system) => system,
+        Err(error) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "Host agent metrics failed: {}",
+                    truncate(&error.to_string(), 300)
+                ),
+            )
+                .into_response();
+        }
+    };
+    let endpoint = if id == "local" {
+        "agent://local".to_owned()
+    } else {
+        format!("agent://{id}")
+    };
+    let containers = state
+        .backend
+        .containers(&endpoint)
+        .await
+        .unwrap_or_default();
+    let (csrf_token, cookies) = page_csrf(&state, &headers);
+    let live_url = format!("/hosts/{id}/resources/partial");
+    let markup = templates::host_resources(
+        &state.config.base_url,
+        &state.config.username,
+        &label,
+        &csrf_token,
+        &system,
+        &containers,
+        &live_url,
+    );
+    html_response(StatusCode::OK, markup, cookies)
+}
+
+pub(super) async fn host_resources_partial(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return partial_unauthorized();
+    }
+    let (_label, agent) = match resolve_host_agent(&state, &id).await {
+        Ok(result) => result,
+        Err(status) => return status.into_response(),
+    };
+    let system = match agent.system_metrics().await {
+        Ok(system) => system,
+        Err(error) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "Host agent metrics failed: {}",
+                    truncate(&error.to_string(), 300)
+                ),
+            )
+                .into_response();
+        }
+    };
+    let endpoint = if id == "local" {
+        "agent://local".to_owned()
+    } else {
+        format!("agent://{id}")
+    };
+    let containers = state
+        .backend
+        .containers(&endpoint)
+        .await
+        .unwrap_or_default();
+    let live_url = format!("/hosts/{id}/resources/partial");
+    html_response(
+        StatusCode::OK,
+        templates::host_resources_live(&system, &containers, &live_url),
+        Vec::new(),
+    )
+}
+
 pub(super) async fn hosts_test(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -675,10 +801,14 @@ pub(super) async fn metrics_partial(State(state): State<AppState>, headers: Head
         return partial_unauthorized();
     }
     let agent = HostAgent::from_env();
+    let system = match &agent {
+        Some(agent) => agent.system_metrics().await.ok(),
+        None => None,
+    };
     let metrics = collect_dashboard_metrics(&state, agent.as_ref()).await;
     html_response(
         StatusCode::OK,
-        templates::metrics_section(&metrics),
+        templates::metrics_section(&metrics, system.as_ref()),
         Vec::new(),
     )
 }

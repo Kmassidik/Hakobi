@@ -1,6 +1,8 @@
 use std::{collections::HashMap, time::Duration};
 
-use hakobi::host_agent::{AgentEndpoint, AgentErrorBody, DockerMetrics, InstallJob};
+use hakobi::host_agent::{
+    AgentEndpoint, AgentErrorBody, AgentHost, DockerMetrics, InstallJob, SystemMetrics,
+};
 use hakobi::install::Readiness;
 
 #[derive(Clone)]
@@ -12,6 +14,14 @@ pub(super) struct HostAgent {
 impl HostAgent {
     pub(super) fn from_env() -> Option<Self> {
         let endpoint = AgentEndpoint::from_env()?;
+        Self::from_endpoint(endpoint)
+    }
+
+    pub(super) fn from_host(host: AgentHost) -> Option<Self> {
+        Self::from_endpoint(AgentEndpoint::from_host(host))
+    }
+
+    fn from_endpoint(endpoint: AgentEndpoint) -> Option<Self> {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(3))
             .timeout(Duration::from_secs(900))
@@ -57,6 +67,26 @@ impl HostAgent {
             anyhow::bail!("{message}");
         }
         Ok(())
+    }
+
+    pub(super) async fn system_metrics(&self) -> anyhow::Result<SystemMetrics> {
+        let response = self
+            .client
+            .get(format!("{}/v1/system/metrics", self.endpoint.url()))
+            .bearer_auth(self.endpoint.token())
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            let message = response
+                .json::<AgentErrorBody>()
+                .await
+                .map(|error| error.error)
+                .unwrap_or_else(|_| format!("host agent returned {status}"));
+            anyhow::bail!("{message}");
+        }
+        Ok(response.json::<SystemMetrics>().await?)
     }
 
     pub(super) async fn docker_metrics(&self) -> anyhow::Result<DockerMetrics> {

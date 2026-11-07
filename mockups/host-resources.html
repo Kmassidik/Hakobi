@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host resources mockup · Hakobi</title>
+<style>
+  :root{
+    --bg:#f5f5f7; --surface:#fff; --ink:#18211d; --muted:#86868b; --line:#ececf0;
+    --brand:#164f3b; --lime:#d8f078; --emerald:#10b981; --amber:#f59e0b; --blue:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+  .app{min-height:100vh;display:grid;grid-template-columns:232px 1fr}
+  .sidebar{background:var(--surface);padding:24px 18px;display:flex;flex-direction:column;gap:28px}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:800;font-size:17px;letter-spacing:-.03em}
+  .mark{width:36px;height:36px;border-radius:10px;background:var(--lime);display:grid;place-items:center;color:var(--brand);font-weight:900}
+  nav{display:grid;gap:6px}
+  .nav{display:flex;align-items:center;gap:12px;padding:11px 13px;border-radius:10px;color:#68716c;font-weight:600;font-size:13px}
+  .nav.active{background:#f1f1f4;color:#111;box-shadow:inset 3px 0 0 var(--brand)}
+  .nav .ico{width:18px;text-align:center;opacity:.8}
+  .profile{margin-top:auto;background:var(--bg);border-radius:14px;padding:12px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .profile-top{display:flex;align-items:center;gap:10px}
+  .avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;font-weight:800;font-size:11px}
+  .profile b{display:block;font-size:12px}
+  .profile small{display:block;color:var(--muted);font-size:10px;margin-top:2px}
+  .online{display:flex;align-items:center;gap:6px;margin-top:12px;color:var(--muted);font-size:10px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--emerald)}
+  main{padding:30px 34px 44px;min-width:0}
+  .top{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:22px}
+  .eyebrow{font-size:10px;font-weight:750;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 7px}
+  h1{font-size:34px;line-height:1.05;letter-spacing:-.045em;margin:0;font-weight:650}
+  .sub{color:var(--muted);font-size:12px;margin-top:8px}
+  .top-right{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11px;white-space:nowrap}
+  .pill{display:inline-flex;align-items:center;gap:7px;background:#fff;padding:8px 11px;border-radius:999px;box-shadow:0 1px 3px rgba(0,0,0,.04);font-weight:600;color:#4b5563}
+  .sample{background:#fff7e6;color:#9a6700}
+  .grid{display:grid;gap:14px}
+  .metrics{grid-template-columns:repeat(4,1fr);margin-bottom:14px}
+  .card{background:var(--surface);border-radius:14px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .metric label{display:block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .metric .value{font-size:25px;font-weight:650;letter-spacing:-.04em;margin-top:8px;line-height:1}
+  .metric .subline{font-size:11px;color:var(--muted);margin-top:9px}
+  .metric-head{display:flex;justify-content:space-between;align-items:flex-start}
+  .art{width:34px;height:34px;object-fit:contain}
+  .bar{height:5px;border-radius:999px;background:#ececf0;overflow:hidden;margin-top:11px}
+  .bar span{display:block;height:100%;border-radius:999px;background:var(--brand)}
+  .wide{display:grid;grid-template-columns:1.45fr .9fr;gap:14px;margin-bottom:14px}
+  .section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px}
+  .section-head h2{font-size:14px;letter-spacing:-.02em;margin:0}
+  .section-head small{font-size:11px;color:var(--muted)}
+  .cpu-wrap{display:grid;grid-template-columns:1.3fr .85fr;gap:18px}
+  .cpu-number{font-size:38px;font-weight:650;letter-spacing:-.05em;line-height:.95}
+  .cpu-number small{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:0}
+  .chart{width:100%;height:90px;display:block;margin-top:12px}
+  .cores{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+  .core{background:#f5f5f7;border-radius:5px;padding:5px 4px 4px}
+  .core .n{font-size:8px;color:#a1a1aa;margin-bottom:4px}
+  .core .track{height:26px;display:flex;align-items:flex-end;border-radius:3px;background:#e9e9ee;overflow:hidden}
+  .core .fill{width:100%;background:linear-gradient(180deg,#2e7457,#164f3b);border-radius:3px}
+  .core .p{font-size:8px;color:var(--muted);margin-top:3px}
+  .legend{display:flex;gap:14px;font-size:10px;color:var(--muted);flex-wrap:wrap;margin-top:8px}
+  .legend i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px}
+  .mem-row{display:flex;align-items:center;gap:16px}
+  .donut{width:98px;height:98px;border-radius:50%;background:conic-gradient(var(--brand) 0 53%,#e9e9ee 53% 100%);display:grid;place-items:center;flex:none}
+  .donut:after{content:"53%";width:72px;height:72px;border-radius:50%;background:#fff;display:grid;place-items:center;font-size:15px;font-weight:700}
+  .stack{display:grid;gap:8px;flex:1}
+  .stack-row{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+  .stack-row b{color:var(--ink);font-weight:650}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+  .chart.small{height:72px;margin-top:4px}
+  .net-head{display:flex;align-items:baseline;justify-content:space-between}
+  .net-head strong{font-size:21px;letter-spacing:-.04em}
+  .net-head span{font-size:10px;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:11px}
+  th{text-align:left;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.07em;font-weight:700;padding:0 8px 9px 0;border-bottom:1px solid var(--line)}
+  td{padding:9px 8px 9px 0;border-bottom:1px solid #f2f2f5;color:#4b5563}
+  tr:last-child td{border-bottom:0}
+  td.name{color:var(--ink);font-weight:600}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .tag{display:inline-block;font-size:9px;font-weight:700;padding:3px 6px;border-radius:5px;background:#ecfdf3;color:#087443}
+  .tag.warn{background:#fff7e6;color:#9a6700}
+  .container-art{width:24px;height:24px;object-fit:contain;vertical-align:middle;margin-right:7px}
+  .caption{font-size:10px;color:#a1a1aa;margin-top:8px}
+  .bottom{display:grid;grid-template-columns:1.05fr 1.05fr;gap:14px}
+  .procs td:nth-child(2),.procs th:nth-child(2){text-align:right}
+  .procs td:nth-child(3),.procs th:nth-child(3){text-align:right}
+  @media(max-width:1100px){.app{grid-template-columns:1fr}.sidebar{display:none}main{padding:24px}.metrics{grid-template-columns:1fr 1fr}.wide,.split,.bottom{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="mark">運</span><span>Hakobi</span></div>
+    <nav>
+      <div class="nav"><span class="ico">▦</span> Overview</div>
+      <div class="nav"><span class="ico">▤</span> Stacks</div>
+      <div class="nav"><span class="ico">□</span> Containers</div>
+      <div class="nav"><span class="ico">▥</span> Infrastructure</div>
+      <div class="nav"><span class="ico">⌁</span> Providers</div>
+      <div class="nav active"><span class="ico">▣</span> Hosts</div>
+    </nav>
+    <div class="profile">
+      <div class="profile-top"><div class="avatar">A</div><div><b>admin</b><small>console.glicc.id</small></div></div>
+      <div class="online"><span class="dot"></span> Online</div>
+    </div>
+  </aside>
+
+  <main>
+    <div class="top">
+      <div>
+        <p class="eyebrow">Hosts / dalang-Z9PE-D8-WS</p>
+        <h1>Host resources.</h1>
+        <p class="sub">32 vCPU · 125.8 GB RAM · Linux 7.0.0-30-generic · up 57d 17h</p>
+      </div>
+      <div class="top-right">
+        <span class="pill sample">Sample data</span>
+        <span class="pill"><span class="dot"></span> Live · 1s</span>
+      </div>
+    </div>
+
+    <div class="grid metrics">
+      <div class="card metric">
+        <div class="metric-head"><div><label>CPU</label><div class="value">18.4%</div></div><img class="art" src="../static/assets/art/3d/health.webp" alt=""></div>
+        <div class="bar"><span style="width:18.4%"></span></div>
+        <div class="subline">Load 0.42 · 0.38 · 0.31</div>
+      </div>
+      <div class="card metric">
+        <div class="metric-head"><div><label>Memory</label><div class="value">66.7 <small style="font-size:13px;color:var(--muted)">/ 125.8 GB</small></div></div><img class="art" src="../static/assets/art/3d/metrics.webp" alt=""></div>
+        <div class="bar"><span style="width:53%"></span></div>
+        <div class="subline">53% used · 1.2 GB swap</div>
+      </div>
+      <div class="card metric">
+        <div class="metric-head"><div><label>Disk</label><div class="value">137 <small style="font-size:13px;color:var(--muted)">/ 942 GB</small></div></div><img class="art" src="../static/assets/art/3d/backup.webp" alt=""></div>
+        <div class="bar"><span style="width:16%"></span></div>
+        <div class="subline">16% used · /dev/sda2</div>
+      </div>
+      <div class="card metric">
+        <div class="metric-head"><div><label>Network</label><div class="value">1.24 <small style="font-size:13px;color:var(--muted)">Gbps</small></div></div><img class="art" src="../static/assets/art/3d/tunnel.webp" alt=""></div>
+        <div class="bar"><span style="width:42%"></span></div>
+        <div class="subline">enp7s0 · RX 892 MB/s · TX 348 MB/s</div>
+      </div>
+    </div>
+
+    <div class="wide">
+      <section class="card">
+        <div class="section-head"><div><h2>CPU</h2><small>32 cores · turbo 4.8 GHz</small></div><span class="sub">1s sample</span></div>
+        <div class="cpu-wrap">
+          <div>
+            <div class="cpu-number">18.4% <small>total</small></div>
+            <svg class="chart" viewBox="0 0 600 90" preserveAspectRatio="none" aria-hidden="true">
+              <defs><linearGradient id="cpuFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#164f3b" stop-opacity=".18"/><stop offset="1" stop-color="#164f3b" stop-opacity="0"/></linearGradient></defs>
+              <path d="M0,64 L22,58 L44,61 L66,42 L88,48 L110,36 L132,53 L154,47 L176,31 L198,39 L220,26 L242,35 L264,23 L286,38 L308,31 L330,45 L352,28 L374,35 L396,20 L418,29 L440,24 L462,39 L484,28 L506,34 L528,18 L550,27 L572,22 L594,30 L600,28" fill="none" stroke="#164f3b" stroke-width="2.2"/>
+              <path d="M0,64 L22,58 L44,61 L66,42 L88,48 L110,36 L132,53 L154,47 L176,31 L198,39 L220,26 L242,35 L264,23 L286,38 L308,31 L330,45 L352,28 L374,35 L396,20 L418,29 L440,24 L462,39 L484,28 L506,34 L528,18 L550,27 L572,22 L594,30 L600,28 L600,90 L0,90 Z" fill="url(#cpuFill)"/>
+              <line x1="0" y1="45" x2="600" y2="45" stroke="#ececf0" stroke-dasharray="3 4"/>
+            </svg>
+            <div class="legend"><span><i style="background:#164f3b"></i>user</span><span><i style="background:#2e7457"></i>system</span><span><i style="background:#d8f078"></i>iowait</span></div>
+          </div>
+          <div class="cores">
+            <div class="core"><div class="n">0</div><div class="track"><span class="fill" style="height:32%"></span></div><div class="p">32%</div></div>
+            <div class="core"><div class="n">1</div><div class="track"><span class="fill" style="height:18%"></span></div><div class="p">18%</div></div>
+            <div class="core"><div class="n">2</div><div class="track"><span class="fill" style="height:12%"></span></div><div class="p">12%</div></div>
+            <div class="core"><div class="n">3</div><div class="track"><span class="fill" style="height:41%"></span></div><div class="p">41%</div></div>
+            <div class="core"><div class="n">4</div><div class="track"><span class="fill" style="height:9%"></span></div><div class="p">9%</div></div>
+            <div class="core"><div class="n">5</div><div class="track"><span class="fill" style="height:22%"></span></div><div class="p">22%</div></div>
+            <div class="core"><div class="n">6</div><div class="track"><span class="fill" style="height:15%"></span></div><div class="p">15%</div></div>
+            <div class="core"><div class="n">7</div><div class="track"><span class="fill" style="height:28%"></span></div><div class="p">28%</div></div>
+            <div class="core"><div class="n">8</div><div class="track"><span class="fill" style="height:44%"></span></div><div class="p">44%</div></div>
+            <div class="core"><div class="n">9</div><div class="track"><span class="fill" style="height:11%"></span></div><div class="p">11%</div></div>
+            <div class="core"><div class="n">10</div><div class="track"><span class="fill" style="height:6%"></span></div><div class="p">6%</div></div>
+            <div class="core"><div class="n">11</div><div class="track"><span class="fill" style="height:17%"></span></div><div class="p">17%</div></div>
+            <div class="core"><div class="n">12</div><div class="track"><span class="fill" style="height:27%"></span></div><div class="p">27%</div></div>
+            <div class="core"><div class="n">13</div><div class="track"><span class="fill" style="height:8%"></span></div><div class="p">8%</div></div>
+            <div class="core"><div class="n">14</div><div class="track"><span class="fill" style="height:14%"></span></div><div class="p">14%</div></div>
+            <div class="core"><div class="n">15</div><div class="track"><span class="fill" style="height:35%"></span></div><div class="p">35%</div></div>
+            <div class="core"><div class="n">16</div><div class="track"><span class="fill" style="height:21%"></span></div><div class="p">21%</div></div>
+            <div class="core"><div class="n">17</div><div class="track"><span class="fill" style="height:13%"></span></div><div class="p">13%</div></div>
+            <div class="core"><div class="n">18</div><div class="track"><span class="fill" style="height:5%"></span></div><div class="p">5%</div></div>
+            <div class="core"><div class="n">19</div><div class="track"><span class="fill" style="height:19%"></span></div><div class="p">19%</div></div>
+            <div class="core"><div class="n">20</div><div class="track"><span class="fill" style="height:25%"></span></div><div class="p">25%</div></div>
+            <div class="core"><div class="n">21</div><div class="track"><span class="fill" style="height:10%"></span></div><div class="p">10%</div></div>
+            <div class="core"><div class="n">22</div><div class="track"><span class="fill" style="height:3%"></span></div><div class="p">3%</div></div>
+            <div class="core"><div class="n">23</div><div class="track"><span class="fill" style="height:16%"></span></div><div class="p">16%</div></div>
+            <div class="core"><div class="n">24</div><div class="track"><span class="fill" style="height:7%"></span></div><div class="p">7%</div></div>
+            <div class="core"><div class="n">25</div><div class="track"><span class="fill" style="height:12%"></span></div><div class="p">12%</div></div>
+            <div class="core"><div class="n">26</div><div class="track"><span class="fill" style="height:23%"></span></div><div class="p">23%</div></div>
+            <div class="core"><div class="n">27</div><div class="track"><span class="fill" style="height:6%"></span></div><div class="p">6%</div></div>
+            <div class="core"><div class="n">28</div><div class="track"><span class="fill" style="height:18%"></span></div><div class="p">18%</div></div>
+            <div class="core"><div class="n">29</div><div class="track"><span class="fill" style="height:11%"></span></div><div class="p">11%</div></div>
+            <div class="core"><div class="n">30</div><div class="track"><span class="fill" style="height:4%"></span></div><div class="p">4%</div></div>
+            <div class="core"><div class="n">31</div><div class="track"><span class="fill" style="height:9%"></span></div><div class="p">9%</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-head"><div><h2>Memory</h2><small>physical + swap</small></div><span class="sub">53%</span></div>
+        <div class="mem-row">
+          <div class="donut"></div>
+          <div class="stack">
+            <div class="stack-row"><span>Used</span><b>66.7 GB</b></div>
+            <div class="stack-row"><span>Cached</span><b>43.2 GB</b></div>
+            <div class="stack-row"><span>Available</span><b>119.4 GB</b></div>
+            <div class="stack-row"><span>Swap</span><b>1.2 GB / 8 GB</b></div>
+          </div>
+        </div>
+        <div class="bar" style="margin-top:16px"><span style="width:53%"></span></div>
+        <div class="caption">Memory pressure: normal</div>
+      </section>
+    </div>
+
+    <div class="split">
+      <section class="card">
+        <div class="section-head"><div><h2>Network</h2><small>enp7s0 · cumulative since boot</small></div><span class="sub">1.24 Gbps</span></div>
+        <div class="net-head"><strong>892 <span style="font-size:11px">MB/s RX</span></strong><span>348 MB/s TX</span></div>
+        <svg class="chart small" viewBox="0 0 600 72" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0,54 L24,51 L48,56 L72,38 L96,42 L120,30 L144,44 L168,35 L192,25 L216,31 L240,20 L264,27 L288,17 L312,29 L336,24 L360,38 L384,23 L408,28 L432,16 L456,22 L480,18 L504,31 L528,20 L552,26 L576,15 L600,21" fill="none" stroke="#3b82f6" stroke-width="2"/>
+          <path d="M0,62 L24,60 L48,61 L72,53 L96,57 L120,50 L144,58 L168,52 L192,46 L216,50 L240,44 L264,48 L288,41 L312,47 L336,43 L360,53 L384,45 L408,49 L432,40 L456,44 L480,42 L504,50 L528,43 L552,46 L576,39 L600,42" fill="none" stroke="#10b981" stroke-width="1.7" opacity=".8"/>
+        </svg>
+        <div class="legend"><span><i style="background:#3b82f6"></i>RX</span><span><i style="background:#10b981"></i>TX</span></div>
+      </section>
+      <section class="card">
+        <div class="section-head"><div><h2>Disk I/O</h2><small>/dev/sda · 16% used</small></div><span class="sub">42 MB/s</span></div>
+        <div class="net-head"><strong>28 <span style="font-size:11px">MB/s read</span></strong><span>14 MB/s write</span></div>
+        <svg class="chart small" viewBox="0 0 600 72" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M0,58 L24,60 L48,55 L72,57 L96,50 L120,53 L144,45 L168,49 L192,42 L216,47 L240,39 L264,44 L288,36 L312,41 L336,35 L360,40 L384,33 L408,36 L432,29 L456,34 L480,28 L504,32 L528,25 L552,29 L576,22 L600,26" fill="none" stroke="#d8f078" stroke-width="2"/>
+          <path d="M0,63 L24,62 L48,64 L72,60 L96,61 L120,58 L144,59 L168,56 L192,57 L216,53 L240,55 L264,50 L288,52 L312,48 L336,50 L360,46 L384,48 L408,43 L432,45 L456,41 L480,43 L504,38 L528,41 L552,36 L576,39 L600,34" fill="none" stroke="#9ca3af" stroke-width="1.7"/>
+        </svg>
+        <div class="legend"><span><i style="background:#d8f078"></i>read</span><span><i style="background:#9ca3af"></i>write</span></div>
+      </section>
+    </div>
+
+    <div class="bottom">
+      <section class="card">
+        <div class="section-head"><div><h2>Processes</h2><small>top by CPU</small></div><span class="sub">312 total</span></div>
+        <table class="procs">
+          <thead><tr><th>PID / command</th><th>CPU</th><th>MEM</th></tr></thead>
+          <tbody>
+            <tr><td class="name">2136897 · ps</td><td class="num">300%</td><td class="num">0.0%</td></tr>
+            <tr><td class="name">2134389 · llama-server</td><td class="num">4.6%</td><td class="num">1.9%</td></tr>
+            <tr><td class="name">2136749 · user-session</td><td class="num">23.5%</td><td class="num">0.0%</td></tr>
+            <tr><td class="name">2136729 · systemd</td><td class="num">20.0%</td><td class="num">0.0%</td></tr>
+            <tr><td class="name">2136721 · sshd</td><td class="num">1.0%</td><td class="num">0.0%</td></tr>
+            <tr><td class="name">2136835 · xdg-permission</td><td class="num">1.0%</td><td class="num">0.0%</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <div class="section-head"><div><h2>Containers</h2><small>local Docker · 3 running</small></div><span class="sub">3 / 3 healthy</span></div>
+        <table>
+          <thead><tr><th>Name</th><th>CPU</th><th>Memory</th><th>State</th></tr></thead>
+          <tbody>
+            <tr><td class="name"><img class="container-art" src="../static/assets/art/3d/container-image.webp" alt="">gliccops-api</td><td class="num">2.43%</td><td class="num">39.1 MB</td><td><span class="tag">Running</span></td></tr>
+            <tr><td class="name"><img class="container-art" src="../static/assets/art/3d/stack-compose.webp" alt="">gliccops-web</td><td class="num">0.00%</td><td class="num">25.1 MB</td><td><span class="tag">Running</span></td></tr>
+            <tr><td class="name"><img class="container-art" src="../static/assets/art/3d/build-runner.webp" alt="">hakobi-z9pe</td><td class="num">0.00%</td><td class="num">3.7 MB</td><td><span class="tag">Healthy</span></td></tr>
+          </tbody>
+        </table>
+        <p class="caption">All containers attached to the local agent provider.</p>
+      </section>
+    </div>
+  </main>
+</div>
+</body>
+</html>

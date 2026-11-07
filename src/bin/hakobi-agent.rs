@@ -7,7 +7,14 @@
 
 #![forbid(unsafe_code)]
 
-use std::{collections::HashMap, env, future::Future, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    env,
+    future::Future,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{bail, Context, Result};
 use axum::{
@@ -28,6 +35,7 @@ use hakobi::{
     },
 };
 use subtle::ConstantTimeEq;
+use sysinfo::{Disks, Networks, System};
 use tokio::{net::TcpListener, process::Command, sync::Mutex, time::timeout};
 
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(900);
@@ -41,6 +49,111 @@ const DOCKER_RUN_TIMEOUT: Duration = Duration::from_secs(120);
 struct AgentState {
     token: Arc<str>,
     jobs: Arc<Mutex<HashMap<String, InstallJob>>>,
+    system: Arc<Mutex<SystemSampler>>,
+}
+
+struct SystemSampler {
+    system: System,
+    networks: Networks,
+    last_sample: Instant,
+}
+
+impl SystemSampler {
+    fn new() -> Self {
+        let mut system = System::new_all();
+        system.refresh_all();
+        let networks = Networks::new_with_refreshed_list();
+        Self {
+            system,
+            networks,
+            last_sample: Instant::now(),
+        }
+    }
+
+    fn snapshot(&mut self) -> hakobi::host_agent::SystemMetrics {
+        let elapsed = self.last_sample.elapsed().as_secs_f64().max(0.001);
+        self.system.refresh_all();
+        self.networks.refresh(true);
+        self.last_sample = Instant::now();
+        let load = System::load_average();
+        let cpus = self.system.cpus();
+        let processes = self
+            .system
+            .processes()
+            .values()
+            .map(|process| hakobi::host_agent::SystemProcess {
+                pid: process.pid().as_u32(),
+                user: process
+                    .user_id()
+                    .map(|user| user.to_string())
+                    .unwrap_or_default(),
+                cpu_percent: process.cpu_usage(),
+                memory_percent: process.memory() as f32 / self.system.total_memory().max(1) as f32
+                    * 100.0,
+                command: process.name().to_string_lossy().into_owned(),
+            })
+            .collect::<Vec<_>>();
+        let mut processes = processes;
+        processes.sort_by(|left, right| {
+            right
+                .cpu_percent
+                .partial_cmp(&left.cpu_percent)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        processes.truncate(20);
+        let disks = Disks::new_with_refreshed_list()
+            .list()
+            .iter()
+            .filter(|disk| disk.total_space() > 0)
+            .map(|disk| hakobi::host_agent::SystemDisk {
+                name: disk.name().to_string_lossy().into_owned(),
+                mount: disk.mount_point().to_string_lossy().into_owned(),
+                total_bytes: disk.total_space(),
+                available_bytes: disk.available_space(),
+            })
+            .collect();
+        let networks = self
+            .networks
+            .iter()
+            .map(|(name, network)| hakobi::host_agent::SystemNetwork {
+                name: name.clone(),
+                received_bytes_per_second: (network.received() as f64 / elapsed) as u64,
+                transmitted_bytes_per_second: (network.transmitted() as f64 / elapsed) as u64,
+                total_received_bytes: network.total_received(),
+                total_transmitted_bytes: network.total_transmitted(),
+            })
+            .collect();
+        hakobi::host_agent::SystemMetrics {
+            hostname: System::host_name().unwrap_or_default(),
+            os_name: System::name().unwrap_or_default(),
+            os_version: System::os_version().unwrap_or_default(),
+            kernel_version: System::kernel_version().unwrap_or_default(),
+            cpu_model: cpus
+                .first()
+                .map(|cpu| cpu.brand().to_owned())
+                .unwrap_or_default(),
+            cpu_count: cpus.len(),
+            cpu_usage_percent: self.system.global_cpu_usage(),
+            cpu_per_core: cpus.iter().map(|cpu| cpu.cpu_usage()).collect(),
+            load_1: load.one,
+            load_5: load.five,
+            load_15: load.fifteen,
+            uptime_seconds: System::uptime(),
+            memory_total_bytes: self.system.total_memory(),
+            memory_used_bytes: self.system.used_memory(),
+            memory_available_bytes: self.system.available_memory(),
+            swap_total_bytes: self.system.total_swap(),
+            swap_used_bytes: self.system.used_swap(),
+            process_count: self.system.processes().len(),
+            processes,
+            disks,
+            networks,
+            sampled_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|duration| duration.as_secs().to_string())
+                .unwrap_or_default(),
+        }
+    }
 }
 
 #[tokio::main]
@@ -74,6 +187,7 @@ async fn run() -> Result<()> {
     let state = AgentState {
         token: Arc::from(token),
         jobs: Arc::new(Mutex::new(HashMap::new())),
+        system: Arc::new(Mutex::new(SystemSampler::new())),
     };
     axum::serve(listener, app(state))
         .await
@@ -90,6 +204,7 @@ fn app(state: AgentState) -> Router {
         .route("/healthz", get(health))
         .route("/v1/readiness", get(readiness))
         .route("/v1/docker/metrics", get(docker_metrics))
+        .route("/v1/system/metrics", get(system_metrics))
         .route("/v1/docker/version", get(docker_version))
         .route("/v1/docker/containers", get(docker_containers))
         .route("/v1/docker/snapshot", get(docker_snapshot))
@@ -220,6 +335,14 @@ async fn run_installer(script: &'static str) -> Result<String> {
         );
     }
     Ok(if stdout.is_empty() { stderr } else { stdout })
+}
+
+async fn system_metrics(State(state): State<AgentState>, headers: HeaderMap) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    let metrics = state.system.lock().await.snapshot();
+    Json(metrics).into_response()
 }
 
 async fn docker_metrics(State(state): State<AgentState>, headers: HeaderMap) -> Response {
@@ -655,6 +778,7 @@ mod tests {
         AgentState {
             token: Arc::from(TEST_TOKEN),
             jobs: Arc::new(Mutex::new(HashMap::new())),
+            system: Arc::new(Mutex::new(SystemSampler::new())),
         }
     }
 

@@ -65,3 +65,11 @@ arbitrary shell or a user-supplied endpoint. At startup Hakobi registers a
 local provider named `Local host` with endpoint `agent://local` when the agent
 is configured. If no agent is configured but the native Docker socket is
 present, it registers `unix:///var/run/docker.sock` instead.
+
+## System resource endpoint
+
+`GET /v1/system/metrics` reports host-level CPU (total and per-core), load,
+uptime, memory/swap, mounted filesystems, interface throughput, and the top
+processes by CPU. It is authenticated like the other endpoints and read-only.
+The dashboard uses it for `/hosts/{id}/resources` and the overview CPU/memory
+totals.

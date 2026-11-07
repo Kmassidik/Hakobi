@@ -123,6 +123,11 @@ pub fn router_with_backend(
         .route("/stacks/runtime/{provider}/{name}", get(handlers::stack_detail))
         .route("/infrastructure", get(handlers::infrastructure))
         .route("/hosts", get(handlers::hosts_list).post(handlers::hosts_create))
+        .route("/hosts/{id}/resources", get(handlers::host_resources))
+        .route(
+            "/hosts/{id}/resources/partial",
+            get(handlers::host_resources_partial),
+        )
         .route("/hosts/{id}/test", post(handlers::hosts_test))
         .route("/hosts/{id}/toggle", post(handlers::hosts_toggle))
         .route("/hosts/{id}/delete", post(handlers::hosts_delete))
