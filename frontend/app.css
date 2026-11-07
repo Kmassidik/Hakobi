@@ -407,11 +407,13 @@
   }
 
   .metric-progress::-webkit-progress-value {
+    min-width: 2px;
     border-radius: 999px;
     background: #164f3b;
   }
 
   .metric-progress::-moz-progress-bar {
+    min-width: 2px;
     border-radius: 999px;
     background: #164f3b;
   }

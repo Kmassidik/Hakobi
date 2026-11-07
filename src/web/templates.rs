@@ -1841,7 +1841,10 @@ pub(super) fn host_resources_live(
                     div class="mt-5 grid grid-cols-8 gap-1.5" {
                         @for (index, usage) in system.cpu_per_core.iter().enumerate() {
                             div class="rounded bg-[#f5f5f7] p-1" title=(format!("CPU {index}: {usage:.1}%")) {
-                                span class="mb-1 block text-[7px] text-[#a1a1aa]" { (index) }
+                                div class="mb-1 flex items-center justify-between gap-1 text-[7px] text-[#a1a1aa]" {
+                                    span { (index) }
+                                    span class="font-semibold text-[#68716c]" { (format!("{usage:.1}%")) }
+                                }
                                 progress class="metric-progress" value=(usage.min(100.0).round() as u8) max="100" aria-label=(format!("CPU {index}")) {}
                             }
                         }
