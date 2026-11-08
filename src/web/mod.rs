@@ -121,6 +121,40 @@ pub fn router_with_backend(
             post(stacks_admin::stack_delete),
         )
         .route("/stacks/runtime/{provider}/{name}", get(handlers::stack_detail))
+        .route(
+            "/environments",
+            get(handlers::environment_list).post(handlers::environment_create),
+        )
+        .route(
+            "/environments/new",
+            get(handlers::environment_new),
+        )
+        .route("/environments/{id}", get(handlers::environment_detail))
+        .route(
+            "/environments/{id}/edit",
+            get(handlers::environment_edit_page).post(handlers::environment_edit_submit),
+        )
+        .route(
+            "/environments/{id}/delete",
+            post(handlers::environment_delete),
+        )
+        .route(
+            "/environments/{id}/deploy",
+            post(handlers::environment_deploy),
+        )
+        .route(
+            "/environments/{id}/rollback",
+            post(handlers::environment_rollback),
+        )
+        .route(
+            "/environments/{id}/deployments",
+            get(handlers::environment_deployments),
+        )
+        .route("/environments/{id}/logs", get(handlers::environment_logs))
+        .route(
+            "/environments/{id}/status",
+            get(handlers::environment_status_partial),
+        )
         .route("/infrastructure", get(handlers::infrastructure))
         .route("/hosts", get(handlers::hosts_list).post(handlers::hosts_create))
         .route("/hosts/{id}/resources", get(handlers::host_resources))

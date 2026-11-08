@@ -187,6 +187,7 @@ async fn login_dashboard_and_logout_enforce_the_session() {
     let body = String::from_utf8_lossy(&body);
     assert!(body.contains("Hello, world."));
     assert!(body.contains("aria-label=\"Mobile primary\""));
+    assert!(body.contains("href=\"/environments\""));
     assert!(body.contains("href=\"/stacks\""));
 
     let status = app
@@ -1784,4 +1785,362 @@ async fn host_create_with_agent_backend_routed() {
     let host = catalog.list_host_agents().unwrap().remove(0);
     assert!(host.last_checked_at.is_some());
     assert!(host.last_error.is_none());
+}
+
+#[tokio::test]
+async fn environments_can_be_created_edited_and_deleted_over_http() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+    let host_id = {
+        let mut catalog = Catalog::open(&path).unwrap();
+        catalog
+            .create_host_agent(
+                "env-http-host",
+                "https://env-http.example.com",
+                "tok_env_http_01",
+            )
+            .unwrap()
+    };
+
+    // Empty state renders with CTA.
+    let list = app
+        .clone()
+        .oneshot(
+            Request::get("/environments")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let body = body_text(list, 128 * 1024).await;
+    assert!(body.contains("Create your first environment"));
+
+    // New form renders host select and CSRF field.
+    let new_page = app
+        .clone()
+        .oneshot(
+            Request::get("/environments/new")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(new_page.status(), StatusCode::OK);
+    let body = body_text(new_page, 128 * 1024).await;
+    assert!(body.contains("New environment"));
+    assert!(body.contains("name=\"host_id\""));
+    assert!(body.contains("name=\"csrf_token\""));
+    assert!(body.contains("registry_mode"));
+    assert!(body.contains("env-http-host"));
+
+    // Server-side validation: bad build type.
+    let invalid = post_form(
+        &app,
+        "/environments",
+        &authenticated,
+        "null",
+        format!(
+            "name=web&host_id={host_id}&build_type=helm&source_type=git&git_url=https%3A%2F%2Fexample.com%2Frepo.git&git_branch=main&registry_mode=local&csrf_token={csrf}"
+        ),
+    )
+    .await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    // Server-side validation: git source without URL.
+    let invalid = post_form(
+        &app,
+        "/environments",
+        &authenticated,
+        "null",
+        format!(
+            "name=web&host_id={host_id}&build_type=compose&source_type=git&git_url=&git_branch=main&registry_mode=local&csrf_token={csrf}"
+        ),
+    )
+    .await;
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    // Invalid host id returns 400 (rendered as form error).
+    let invalid_host = post_form(
+        &app,
+        "/environments",
+        &authenticated,
+        "null",
+        format!(
+            "name=web&host_id=no-such-host&build_type=compose&source_type=upload&git_url=&git_branch=main&registry_mode=local&csrf_token={csrf}"
+        ),
+    )
+    .await;
+    assert_eq!(invalid_host.status(), StatusCode::BAD_REQUEST);
+
+    // Create succeeds.
+    let create = post_form(
+        &app,
+        "/environments",
+        &authenticated,
+        "null",
+        format!(
+            "name=web&host_id={host_id}&build_type=dockerfile&source_type=git&git_url={}&git_branch=main&registry_mode=local&csrf_token={csrf}",
+            form_encode("https://github.com/user/repo.git")
+        ),
+    )
+    .await;
+    assert_eq!(create.status(), StatusCode::SEE_OTHER);
+    assert!(create
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("Environment+created"));
+
+    let environment_id = {
+        let catalog = Catalog::open(&path).unwrap();
+        let environments = catalog.list_environments().unwrap();
+        assert_eq!(environments.len(), 1);
+        environments[0].id.clone()
+    };
+
+    // List shows the environment.
+    let list = app
+        .clone()
+        .oneshot(
+            Request::get("/environments")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let body = body_text(list, 128 * 1024).await;
+    assert!(body.contains("web"));
+    assert!(body.contains("dockerfile"));
+    assert!(body.contains(&format!("/environments/{environment_id}")));
+
+    // Detail page shows metadata and actions.
+    let detail = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/environments/{environment_id}"))
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(detail.status(), StatusCode::OK);
+    let body = body_text(detail, 128 * 1024).await;
+    assert!(body.contains("Deployment history"));
+    assert!(body.contains(&format!("/environments/{environment_id}/deploy")));
+    assert!(body.contains(&format!("/environments/{environment_id}/edit")));
+    assert!(body.contains(&format!("/environments/{environment_id}/delete")));
+    assert!(body.contains("delete-environment"));
+    assert!(body.contains("data-confirm-input"));
+
+    // Edit form is pre-filled.
+    let edit_page = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/environments/{environment_id}/edit"))
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(edit_page.status(), StatusCode::OK);
+    let body = body_text(edit_page, 128 * 1024).await;
+    assert!(body.contains("value=\"web\""));
+    assert!(body.contains("Edit environment"));
+
+    // Edit submits.
+    let update = post_form(
+        &app,
+        &format!("/environments/{environment_id}/edit"),
+        &authenticated,
+        "null",
+        format!(
+            "name=web-2&host_id={host_id}&build_type=compose&source_type=upload&git_url=&git_branch=&registry_mode=push&csrf_token={csrf}"
+        ),
+    )
+    .await;
+    assert_eq!(update.status(), StatusCode::SEE_OTHER);
+    {
+        let catalog = Catalog::open(&path).unwrap();
+        let updated = catalog.get_environment(&environment_id).unwrap().unwrap();
+        assert_eq!(updated.name, "web-2");
+        assert_eq!(updated.build_type, "compose");
+        assert_eq!(updated.source_type, "upload");
+        assert_eq!(updated.registry_mode, "push");
+    }
+
+    // Deploy is an explicit 501 placeholder in CP5.
+    let deploy = post_form(
+        &app,
+        &format!("/environments/{environment_id}/deploy"),
+        &authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await;
+    assert_eq!(deploy.status(), StatusCode::NOT_IMPLEMENTED);
+
+    // Rollback is an explicit 501 placeholder in CP5.
+    let rollback = post_form(
+        &app,
+        &format!("/environments/{environment_id}/rollback"),
+        &authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await;
+    assert_eq!(rollback.status(), StatusCode::NOT_IMPLEMENTED);
+
+    // Deployments and logs pages render empty states.
+    let deployments = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/environments/{environment_id}/deployments"))
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deployments.status(), StatusCode::OK);
+    assert!(body_text(deployments, 128 * 1024)
+        .await
+        .contains("No deployments"));
+
+    let logs = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/environments/{environment_id}/logs"))
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logs.status(), StatusCode::OK);
+    assert!(body_text(logs, 128 * 1024).await.contains("No log lines"));
+
+    // Unknown environment 404s.
+    let missing = app
+        .clone()
+        .oneshot(
+            Request::get("/environments/nope")
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    // Unauthorized POST is rejected.
+    let forbidden = post_form(
+        &app,
+        "/environments",
+        &authenticated,
+        "https://evil.example.com",
+        format!(
+            "name=evil&host_id={host_id}&build_type=compose&source_type=upload&git_url=&git_branch=&registry_mode=local&csrf_token=wrong"
+        ),
+    )
+    .await;
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    // Delete removes the environment.
+    let delete = post_form(
+        &app,
+        &format!("/environments/{environment_id}/delete"),
+        &authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await;
+    assert_eq!(delete.status(), StatusCode::SEE_OTHER);
+    let catalog = Catalog::open(&path).unwrap();
+    assert!(catalog.list_environments().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn environment_status_partial_refreshes_with_htmx() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+    let (host_id, environment_id) = {
+        let mut catalog = Catalog::open(&path).unwrap();
+        let host_id = catalog
+            .create_host_agent(
+                "partial-host",
+                "https://partial.example.com",
+                "tok_partial_01",
+            )
+            .unwrap();
+        let environment_id = catalog
+            .create_environment(
+                "partial-env",
+                &host_id,
+                "compose",
+                "upload",
+                None,
+                None,
+                "local",
+            )
+            .unwrap();
+        (host_id, environment_id)
+    };
+
+    let partial = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/environments/{environment_id}/status"))
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(partial.status(), StatusCode::OK);
+    let body = body_text(partial, 64 * 1024).await;
+    assert!(body.contains("id=\"environment-status\""));
+    assert!(body.contains("every 5s"));
+    assert!(body.contains("idle"));
+    assert!(body.contains("No deployments yet."));
+
+    // Deployment records appear in the partial once created.
+    {
+        let mut catalog = Catalog::open(&path).unwrap();
+        let deployment_id = catalog
+            .create_deployment(&environment_id, "manual", None)
+            .unwrap();
+        catalog
+            .update_deployment_status(&deployment_id, "running", None)
+            .unwrap();
+        catalog
+            .add_deployment_log(&deployment_id, "info", "deployed v1")
+            .unwrap();
+    }
+    let partial = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/environments/{environment_id}/status"))
+                .header(COOKIE, authenticated.clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = body_text(partial, 64 * 1024).await;
+    assert!(body.contains("running"));
+    assert!(body.contains("v1"));
+
+    let _ = host_id;
+    let _ = csrf;
 }
