@@ -752,6 +752,80 @@ Status codes: 400 (validation), 401 (auth), 404 (unknown), 409 (conflict),
 
 ---
 
+## Code Quality Rules
+
+These rules apply to every milestone and every file. They are not optional.
+
+### File size limit
+
+No single source file may exceed 500 lines. If a file approaches 500 lines
+during implementation, split it by responsibility into a new module.
+
+| Current file | Lines | Action if >500 |
+|---|---|---|
+| `src/web/handlers.rs` | ~1600 | Split into `handlers/dashboard.rs`, `handlers/hosts.rs`, `handlers/containers.rs`, `handlers/stacks.rs`, `handlers/infrastructure.rs`, `handlers/auth.rs` |
+| `src/web/templates.rs` | ~2100 | Split into `templates/layout.rs`, `templates/dashboard.rs`, `templates/hosts.rs`, `templates/containers.rs`, `templates/stacks.rs`, `templates/infrastructure.rs`, `templates/providers.rs`, `templates/deployment.rs` |
+| `src/bin/hakobi-agent.rs` | ~600 | Split into `agent_server.rs` (routes), `agent_docker.rs` (Docker handlers), `agent_system.rs` (system metrics), `agent_install.rs` (installers) |
+| `src/catalog.rs` | ~900 | Split into `catalog/mod.rs`, `catalog/providers.rs`, `catalog/hosts.rs`, `catalog/stacks.rs`, `catalog/deployments.rs`, `catalog/migrations.rs` |
+| `src/providers/docker.rs` | ~500 | Split into `providers/docker/mod.rs`, `providers/docker/backend.rs`, `providers/docker/inventory.rs`, `providers/docker/snapshot.rs` |
+| `src/providers/agent.rs` | ~800 | Split into `providers/agent/mod.rs`, `providers/agent/backend.rs`, `providers/agent/routing.rs`, `providers/agent/registration.rs` |
+
+### Function size limit
+
+No single function may exceed 50 lines (excluding comments and blank lines).
+If a function exceeds 50 lines, extract a helper function with a clear name.
+
+### Architecture style
+
+Use **plain functions and structs**. Do NOT introduce OOP patterns
+(trait objects, inheritance, builder patterns) unless the PRD explicitly
+requires a trait (e.g., `ContainerBackend`).
+
+```
+GOOD:  plain functions, plain structs, clear names, small modules
+GOOD:  trait + implementations ONLY when polymorphism is required by PRD
+BAD:   builder pattern chains, trait objects for single implementations
+BAD:   nested enums, generic abstractions for one concrete type
+BAD:   closure-heavy functional style that hides control flow
+```
+
+### Naming conventions
+
+- Functions: `snake_case`, verb-first (`create_host`, `list_stacks`)
+- Structs: `PascalCase`, noun (`HostAgent`, `DeploymentStatus`)
+- Constants: `SCREAMING_SNAKE_CASE`
+- SQL: parameterized, no string interpolation
+- Error messages: lowercase, no trailing period, actionable
+
+### Module organization
+
+Each module has one responsibility. Module boundaries follow data boundaries:
+
+```
+catalog/          SQLite persistence layer
+  mod.rs          Catalog struct, open/close, migrations
+  providers.rs    Provider CRUD
+  hosts.rs        Host agent CRUD
+  environments.rs Environment CRUD
+  deployments.rs  Deployment CRUD
+  audit.rs        Audit event recording
+metrics/          Time-series persistence layer
+  mod.rs          MetricsDb struct, open/close
+  live.rs         Live sample ring buffer
+  rollups.rs      1m/5m/1h rollup queries
+  retention.rs    Retention purge job
+providers/        Container backends
+  docker/         Direct Docker API (bollard)
+  agent/          Host agent HTTP backend
+web/              HTTP layer
+  handlers/       HTTP handlers split by domain
+  templates/      Maud SSR templates split by page
+  auth.rs         Sessions, CSRF, rate limiting
+agent/            Host agent binary modules
+```
+
+---
+
 ## 12. Build-Test-Fix Loop
 
 ### 12.1 Workflow
