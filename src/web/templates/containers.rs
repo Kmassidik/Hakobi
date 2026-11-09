@@ -104,7 +104,7 @@ pub fn containers(
                                                             @for container in &group.containers {
                                                                 tr class="border-t border-line" {
                                                                     td class="px-4 py-3" {
-                                                                        span class="block font-semibold" { (container.name) }
+                                                                        a class="block font-semibold no-underline hover:text-brand" href=(format!("/containers/{}/{}", provider.id, container.name)) { (container.name) }
                                                                         span class="font-mono text-[0.68rem] text-muted" { (container.id.chars().take(12).collect::<String>()) }
                                                                         @if let Some(service) = &container.compose_service {
                                                                             span class="ml-2 text-[0.65rem] text-muted" { (service) }

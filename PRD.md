@@ -1170,46 +1170,46 @@ cargo build --release
 
 #### 13.22 CP8 Backend — Container detail
 
-- [ ] Agent exposes `GET /v1/docker/containers/{name}/inspect` returning full inspect data
-- [ ] Agent exposes `GET /v1/docker/containers/{name}/logs?tail=N` returning log lines
-- [ ] Agent validates container name before Docker calls
-- [ ] App `AgentBackend` implements `inspect_container()` and `container_logs()`
+- [x] Agent exposes `GET /v1/docker/containers/{name}/inspect` returning full inspect data
+- [x] Agent exposes `GET /v1/docker/containers/{name}/logs?tail=N` returning log lines
+- [x] Agent validates container name before Docker calls
+- [x] App `AgentBackend` implements `inspect_container()` and `container_logs()`
 
 #### 13.23 CP8 Backend — Container stats per container
 
-- [ ] Agent exposes `GET /v1/docker/containers/{name}/stats` returning CPU%, memory, network I/O
+- [x] Agent exposes `GET /v1/docker/containers/{name}/stats` returning CPU%, memory, network I/O
 - [ ] Uses `docker stats --no-stream --format json` filtered by container name
-- [ ] Or uses bollard stats API for real-time stats
+- [x] Or uses bollard stats API for real-time stats
 
 #### 13.24 CP8 UI — Container detail page
 
-- [ ] Route: `/containers/{provider}/{name}`
-- [ ] Shows metadata: image, state, health, ports, labels, environment variables
-- [ ] Shows per-container CPU/memory usage
-- [ ] Shows streaming logs (HTMX poll every 2s, last 100 lines)
-- [ ] Shows start/stop/restart/delete actions
-- [ ] Delete requires typed name confirmation
-- [ ] Link from containers list to detail page
+- [x] Route: `/containers/{provider}/{name}`
+- [x] Shows metadata: image, state, health, ports, labels, environment variables
+- [x] Shows per-container CPU/memory usage
+- [x] Shows streaming logs (HTMX poll every 2s, last 100 lines)
+- [x] Shows start/stop/restart/delete actions
+- [x] Delete requires typed name confirmation
+- [x] Link from containers list to detail page
 
 #### 13.25 CP8 Tests
 
-- [ ] Unit test: container detail serialization
-- [ ] Unit test: log line formatting
-- [ ] Integration test: container detail page renders
-- [ ] Integration test: log partial returns log lines
-- [ ] Integration test: container not found returns 404
-- [ ] All existing tests pass
+- [x] Unit test: container detail serialization
+- [x] Unit test: log line formatting
+- [x] Integration test: container detail page renders
+- [x] Integration test: log partial returns log lines
+- [x] Integration test: container not found returns 404
+- [x] All existing tests pass
 
 #### 13.26 CP8 Checklist — Build-Test-Fix
 
-- [ ] BUILD: Implement container detail backend
-- [ ] BUILD: Implement container detail UI
-- [ ] BUILD: Implement log streaming
-- [ ] TEST: `cargo fmt --check`
-- [ ] TEST: `cargo clippy --all-targets -- -D warnings`
-- [ ] TEST: `cargo test`
-- [ ] IF FAIL: fix and re-test
-- [ ] IF PASS: mark all CP8 checklist items as `[x]`
+- [x] BUILD: Implement container detail backend
+- [x] BUILD: Implement container detail UI
+- [x] BUILD: Implement log streaming
+- [x] TEST: `cargo fmt --check`
+- [x] TEST: `cargo clippy --all-targets -- -D warnings`
+- [x] TEST: `cargo test`
+- [x] IF FAIL: fix and re-test
+- [x] IF PASS: mark all CP8 checklist items as `[x]`
 - [ ] UPDATE: commit and push
 
 ---

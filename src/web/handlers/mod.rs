@@ -2,6 +2,7 @@
 //! response helpers, and embedded assets.
 
 mod auth;
+mod container_detail;
 mod containers;
 mod dashboard;
 mod deployment_pages;
@@ -13,6 +14,9 @@ mod partials;
 mod providers;
 
 pub(crate) use auth::{login, logout};
+pub(crate) use container_detail::{
+    container_detail, container_detail_logs_partial, container_detail_stats_partial,
+};
 pub(crate) use containers::{
     container_create, container_delete, container_new, container_restart, container_start,
     container_stop, containers,

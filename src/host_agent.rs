@@ -345,6 +345,83 @@ pub struct RunContainerResponse {
     pub name: String,
 }
 
+/// One mounted path of a container, reported by inspect.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DockerContainerMount {
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub destination: String,
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub read_only: bool,
+}
+
+/// Full inspect data of one container, reported by
+/// `GET /v1/docker/containers/{name}/inspect`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DockerContainerInspect {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub image: String,
+    #[serde(default)]
+    pub image_id: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub health: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub started_at: String,
+    #[serde(default)]
+    pub restart_count: i64,
+    #[serde(default)]
+    pub platform: String,
+    #[serde(default)]
+    pub ports: Vec<DockerContainerPort>,
+    #[serde(default)]
+    pub mounts: Vec<DockerContainerMount>,
+    #[serde(default)]
+    pub env: Vec<String>,
+    #[serde(default)]
+    pub labels: Vec<(String, String)>,
+}
+
+/// Per-container resource usage, reported by
+/// `GET /v1/docker/containers/{name}/stats`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DockerContainerStats {
+    #[serde(default)]
+    pub cpu_percent: f64,
+    #[serde(default)]
+    pub memory_used_bytes: u64,
+    #[serde(default)]
+    pub memory_limit_bytes: u64,
+    #[serde(default)]
+    pub network_rx_bytes: u64,
+    #[serde(default)]
+    pub network_tx_bytes: u64,
+}
+
+/// Log lines of one container, reported by
+/// `GET /v1/docker/containers/{name}/logs`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DockerContainerLogs {
+    #[serde(default)]
+    pub lines: Vec<String>,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
 fn default_protocol() -> String {
     "tcp".to_owned()
 }
@@ -484,6 +561,93 @@ mod tests {
             serde_json::from_str::<RunContainerResponse>(&encoded).unwrap(),
             result
         );
+    }
+
+    #[test]
+    fn inspect_stats_and_logs_round_trip_through_json() {
+        let inspect = sample_inspect();
+        let encoded = serde_json::to_string(&inspect).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DockerContainerInspect>(&encoded).unwrap(),
+            inspect
+        );
+
+        let stats = DockerContainerStats {
+            cpu_percent: 12.5,
+            memory_used_bytes: 1_048_576,
+            memory_limit_bytes: 8_388_608,
+            network_rx_bytes: 4096,
+            network_tx_bytes: 8192,
+        };
+        let encoded = serde_json::to_string(&stats).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DockerContainerStats>(&encoded).unwrap(),
+            stats
+        );
+
+        let logs = DockerContainerLogs {
+            lines: vec!["listening on :8080".into()],
+            truncated: false,
+        };
+        let encoded = serde_json::to_string(&logs).unwrap();
+        assert_eq!(
+            serde_json::from_str::<DockerContainerLogs>(&encoded).unwrap(),
+            logs
+        );
+    }
+
+    /// Fully populated inspect payload for round-trip assertions.
+    fn sample_inspect() -> DockerContainerInspect {
+        DockerContainerInspect {
+            id: "0123456789abcdef".into(),
+            name: "demo-api".into(),
+            image: "hakobi/demo:latest".into(),
+            image_id: "sha256:abcdef".into(),
+            command: "/app/server".into(),
+            state: "running".into(),
+            status: "Up 2 hours".into(),
+            health: Some("healthy".into()),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            started_at: "2026-01-02T00:00:00Z".into(),
+            restart_count: 1,
+            platform: "linux".into(),
+            ports: vec![DockerContainerPort {
+                host_ip: Some("0.0.0.0".into()),
+                host_port: Some(18080),
+                container_port: 8080,
+                protocol: "tcp".into(),
+            }],
+            mounts: vec![DockerContainerMount {
+                source: "/var/lib/docker/volumes/data/_data".into(),
+                destination: "/data".into(),
+                mode: "z".into(),
+                read_only: false,
+            }],
+            env: vec!["RUST_LOG=info".into()],
+            labels: vec![(
+                "com.docker.compose.project".to_owned(),
+                "hakobi-stack".to_owned(),
+            )],
+        }
+    }
+
+    #[test]
+    fn inspect_defaults_survive_missing_and_unknown_fields() {
+        let decoded: DockerContainerInspect =
+            serde_json::from_str(r#"{"name":"demo-api","future":{"a":1}}"#).unwrap();
+        assert_eq!(decoded.name, "demo-api");
+        assert_eq!(decoded.state, "");
+        assert!(decoded.ports.is_empty());
+        assert!(decoded.labels.is_empty());
+        assert!(decoded.health.is_none());
+
+        let decoded: DockerContainerStats = serde_json::from_str(r#"{"cpu_percent":1.5}"#).unwrap();
+        assert_eq!(decoded.cpu_percent, 1.5);
+        assert_eq!(decoded.memory_used_bytes, 0);
+
+        let decoded: DockerContainerLogs = serde_json::from_str(r#"{"lines":["one"]}"#).unwrap();
+        assert_eq!(decoded.lines, vec!["one".to_owned()]);
+        assert!(!decoded.truncated);
     }
 
     #[test]

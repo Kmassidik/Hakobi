@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use reqwest::Response;
 use serde::de::DeserializeOwned;
 
+use super::container_detail::{ContainerMount, DockerContainerUsage, DockerInspect, DockerLogs};
 use super::docker::{
     validate_container_name, validate_image_reference, ContainerBackend, ContainerPort,
     ContainerRow, DockerBackend, DockerSnapshot, HostInfo, ImageRow, NetworkRow, RunResult,
@@ -20,10 +21,11 @@ use super::docker::{
 };
 use crate::catalog::Catalog;
 use crate::host_agent::{
-    self, AgentEndpoint, AgentErrorBody, AgentHost, DockerContainerPort, DockerContainerRow,
-    DockerContainersResponse, DockerHostInfo, DockerImageRow, DockerNetworkRow,
-    DockerSnapshotResponse, DockerVersion, DockerVolumeRow, RunContainerRequest,
-    RunContainerResponse, LOCAL_PROVIDER_KIND, LOCAL_PROVIDER_NAME,
+    self, AgentEndpoint, AgentErrorBody, AgentHost, DockerContainerInspect, DockerContainerLogs,
+    DockerContainerPort, DockerContainerRow, DockerContainerStats, DockerContainersResponse,
+    DockerHostInfo, DockerImageRow, DockerNetworkRow, DockerSnapshotResponse, DockerVersion,
+    DockerVolumeRow, RunContainerRequest, RunContainerResponse, LOCAL_PROVIDER_KIND,
+    LOCAL_PROVIDER_NAME,
 };
 
 // Client budgets stay above the agent's own limits (20 s for queries and
@@ -34,6 +36,8 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(25);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
 const RUN_TIMEOUT: Duration = Duration::from_secs(150);
 const MAX_ERROR_CHARS: usize = 500;
+/// Mirrors the log window cap applied by the direct Docker backend.
+const MAX_LOG_LINES: usize = 500;
 
 /// [`ContainerBackend`] that forwards to the host agent's Docker endpoints.
 pub struct AgentBackend {
@@ -212,6 +216,78 @@ impl ContainerBackend for AgentBackend {
             .await?;
         Ok(RunResult::from(response))
     }
+
+    async fn inspect_container(&self, endpoint: &str, name: &str) -> Result<DockerInspect> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        let inspect: DockerContainerInspect = self
+            .get(
+                &format!("/v1/docker/containers/{name}/inspect"),
+                QUERY_TIMEOUT,
+            )
+            .await?;
+        Ok(DockerInspect {
+            id: inspect.id,
+            name: inspect.name,
+            image: inspect.image,
+            image_id: inspect.image_id,
+            command: inspect.command,
+            state: inspect.state,
+            status: inspect.status,
+            health: inspect.health,
+            created_at: inspect.created_at,
+            started_at: inspect.started_at,
+            restart_count: inspect.restart_count,
+            platform: inspect.platform,
+            ports: inspect.ports.into_iter().map(ContainerPort::from).collect(),
+            mounts: inspect
+                .mounts
+                .into_iter()
+                .map(|mount| ContainerMount {
+                    source: mount.source,
+                    destination: mount.destination,
+                    mode: mount.mode,
+                    read_only: mount.read_only,
+                })
+                .collect(),
+            env: inspect.env,
+            labels: inspect.labels,
+        })
+    }
+
+    async fn container_logs(&self, endpoint: &str, name: &str, tail: usize) -> Result<DockerLogs> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        let tail = tail.clamp(1, MAX_LOG_LINES);
+        let logs: DockerContainerLogs = self
+            .get(
+                &format!("/v1/docker/containers/{name}/logs?tail={tail}"),
+                QUERY_TIMEOUT,
+            )
+            .await?;
+        Ok(DockerLogs {
+            lines: logs.lines,
+            truncated: logs.truncated,
+        })
+    }
+
+    async fn container_stats(&self, endpoint: &str, name: &str) -> Result<DockerContainerUsage> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        let stats: DockerContainerStats = self
+            .get(
+                &format!("/v1/docker/containers/{name}/stats"),
+                QUERY_TIMEOUT,
+            )
+            .await?;
+        Ok(DockerContainerUsage {
+            cpu_percent: stats.cpu_percent,
+            memory_used_bytes: stats.memory_used_bytes,
+            memory_limit_bytes: stats.memory_limit_bytes,
+            network_rx_bytes: stats.network_rx_bytes,
+            network_tx_bytes: stats.network_tx_bytes,
+        })
+    }
 }
 
 /// Routes each provider endpoint to the backend that can serve it.
@@ -370,6 +446,27 @@ impl ContainerBackend for RoutingBackend {
         self.select(endpoint)
             .await?
             .run_container(endpoint, image, name, container_port)
+            .await
+    }
+
+    async fn inspect_container(&self, endpoint: &str, name: &str) -> Result<DockerInspect> {
+        self.select(endpoint)
+            .await?
+            .inspect_container(endpoint, name)
+            .await
+    }
+
+    async fn container_logs(&self, endpoint: &str, name: &str, tail: usize) -> Result<DockerLogs> {
+        self.select(endpoint)
+            .await?
+            .container_logs(endpoint, name, tail)
+            .await
+    }
+
+    async fn container_stats(&self, endpoint: &str, name: &str) -> Result<DockerContainerUsage> {
+        self.select(endpoint)
+            .await?
+            .container_stats(endpoint, name)
             .await
     }
 }
@@ -713,6 +810,7 @@ mod tests {
 
     use super::*;
     use crate::catalog::Catalog;
+    use crate::host_agent::DockerContainerMount;
 
     const TOKEN: &str = "test-token-0123456789abcdef";
 
@@ -1064,6 +1162,125 @@ mod tests {
         StatusCode::NO_CONTENT.into_response()
     }
 
+    async fn fake_inspect(
+        State(agent): State<FakeAgent>,
+        headers: HeaderMap,
+        axum::extract::Path(name): axum::extract::Path<String>,
+    ) -> Response {
+        if !agent.authorized(&headers) {
+            return FakeAgent::unauthorized_response();
+        }
+        if name != "demo-api" {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(AgentErrorBody {
+                    error: "no such container".into(),
+                }),
+            )
+                .into_response();
+        }
+        detail_response().into_response()
+    }
+
+    /// Fixed inspect payload served by the fake agent endpoint.
+    fn detail_response() -> Json<DockerContainerInspect> {
+        Json(DockerContainerInspect {
+            id: "0123456789abcdef".into(),
+            name: "demo-api".into(),
+            image: "hakobi/demo:latest".into(),
+            image_id: "sha256:abcdef".into(),
+            command: "/app/server --port 8080".into(),
+            state: "running".into(),
+            status: String::new(),
+            health: Some("healthy".into()),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            started_at: "2026-01-02T00:00:00Z".into(),
+            restart_count: 1,
+            platform: "linux".into(),
+            ports: vec![DockerContainerPort {
+                host_ip: Some("0.0.0.0".into()),
+                host_port: Some(18080),
+                container_port: 8080,
+                protocol: "tcp".into(),
+            }],
+            mounts: vec![DockerContainerMount {
+                source: "/var/lib/docker/volumes/data/_data".into(),
+                destination: "/data".into(),
+                mode: String::new(),
+                read_only: false,
+            }],
+            env: vec!["RUST_LOG=info".into()],
+            labels: vec![(
+                "com.docker.compose.project".to_owned(),
+                "hakobi-stack".to_owned(),
+            )],
+        })
+    }
+
+    async fn fake_logs(
+        State(agent): State<FakeAgent>,
+        headers: HeaderMap,
+        axum::extract::Path(name): axum::extract::Path<String>,
+        raw_query: axum::extract::RawQuery,
+    ) -> Response {
+        if !agent.authorized(&headers) {
+            return FakeAgent::unauthorized_response();
+        }
+        if name != "demo-api" {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(AgentErrorBody {
+                    error: "no such container".into(),
+                }),
+            )
+                .into_response();
+        }
+        let tail = raw_query
+            .0
+            .as_deref()
+            .and_then(|query| {
+                url::form_urlencoded::parse(query.as_bytes())
+                    .find(|(key, _)| key == "tail")
+                    .and_then(|(_, value)| value.parse::<usize>().ok())
+            })
+            .unwrap_or(100);
+        let lines = (0..tail.min(5))
+            .map(|index| format!("line-{index}"))
+            .collect::<Vec<_>>();
+        Json(DockerContainerLogs {
+            lines,
+            truncated: false,
+        })
+        .into_response()
+    }
+
+    async fn fake_stats(
+        State(agent): State<FakeAgent>,
+        headers: HeaderMap,
+        axum::extract::Path(name): axum::extract::Path<String>,
+    ) -> Response {
+        if !agent.authorized(&headers) {
+            return FakeAgent::unauthorized_response();
+        }
+        if name != "demo-api" {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(AgentErrorBody {
+                    error: "no such container".into(),
+                }),
+            )
+                .into_response();
+        }
+        Json(DockerContainerStats {
+            cpu_percent: 12.5,
+            memory_used_bytes: 1_048_576,
+            memory_limit_bytes: 8_388_608,
+            network_rx_bytes: 4096,
+            network_tx_bytes: 8192,
+        })
+        .into_response()
+    }
+
     async fn fake_run(
         State(agent): State<FakeAgent>,
         headers: HeaderMap,
@@ -1089,6 +1306,9 @@ mod tests {
             .route("/v1/docker/containers", get(fake_containers))
             .route("/v1/docker/snapshot", get(fake_snapshot))
             .route("/v1/docker/containers/run", post(fake_run))
+            .route("/v1/docker/containers/{name}/inspect", get(fake_inspect))
+            .route("/v1/docker/containers/{name}/logs", get(fake_logs))
+            .route("/v1/docker/containers/{name}/stats", get(fake_stats))
             .route("/v1/docker/containers/{name}/start", post(fake_action))
             .route("/v1/docker/containers/{name}/stop", post(fake_action))
             .route("/v1/docker/containers/{name}/restart", post(fake_action))
@@ -1131,6 +1351,78 @@ mod tests {
         assert_eq!(snapshot.images.len(), 1);
         assert_eq!(snapshot.volumes.len(), 1);
         assert_eq!(snapshot.networks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn agent_backend_reads_container_inspect_logs_and_stats() {
+        let url = spawn_fake_agent(TOKEN).await;
+        let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+
+        let inspect = backend
+            .inspect_container(host_agent::LOCAL_ENDPOINT, "demo-api")
+            .await
+            .unwrap();
+        assert_eq!(inspect.name, "demo-api");
+        assert_eq!(inspect.image, "hakobi/demo:latest");
+        assert_eq!(inspect.state, "running");
+        assert_eq!(inspect.health.as_deref(), Some("healthy"));
+        assert_eq!(inspect.restart_count, 1);
+        assert_eq!(inspect.ports.len(), 1);
+        assert_eq!(inspect.ports[0].host_port, Some(18080));
+        assert_eq!(inspect.mounts.len(), 1);
+        assert_eq!(inspect.mounts[0].destination, "/data");
+        assert_eq!(inspect.env, vec!["RUST_LOG=info".to_owned()]);
+        assert_eq!(inspect.labels.len(), 1);
+
+        let logs = backend
+            .container_logs(host_agent::LOCAL_ENDPOINT, "demo-api", 100)
+            .await
+            .unwrap();
+        assert_eq!(logs.lines.len(), 5);
+        assert_eq!(logs.lines[0], "line-0");
+        assert!(!logs.truncated);
+
+        let stats = backend
+            .container_stats(host_agent::LOCAL_ENDPOINT, "demo-api")
+            .await
+            .unwrap();
+        assert!((stats.cpu_percent - 12.5).abs() < f64::EPSILON);
+        assert_eq!(stats.memory_used_bytes, 1_048_576);
+        assert_eq!(stats.memory_limit_bytes, 8_388_608);
+        assert_eq!(stats.network_rx_bytes, 4096);
+        assert_eq!(stats.network_tx_bytes, 8192);
+
+        let missing = backend
+            .inspect_container(host_agent::LOCAL_ENDPOINT, "other-api")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("no such container"), "{missing}");
+    }
+
+    #[tokio::test]
+    async fn agent_backend_validates_detail_input_before_the_agent() {
+        let url = spawn_fake_agent(TOKEN).await;
+        let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+
+        assert!(backend
+            .inspect_container(host_agent::LOCAL_ENDPOINT, "bad name")
+            .await
+            .is_err());
+        assert!(backend
+            .container_logs(host_agent::LOCAL_ENDPOINT, "bad name", 100)
+            .await
+            .is_err());
+        assert!(backend
+            .container_stats(host_agent::LOCAL_ENDPOINT, "bad name")
+            .await
+            .is_err());
+        // The log window is clamped to the protocol ceiling instead of passed
+        // through unchecked.
+        assert!(backend
+            .container_logs(host_agent::LOCAL_ENDPOINT, "demo-api", 100_000)
+            .await
+            .is_ok());
     }
 
     #[tokio::test]

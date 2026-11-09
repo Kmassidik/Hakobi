@@ -26,9 +26,9 @@ use axum::{
 };
 use hakobi::{
     host_agent::{
-        self, AgentErrorBody, DockerContainerRow, DockerContainersResponse, DockerMetrics,
-        DockerSnapshotResponse, DockerVersion, InstallJob, RunContainerRequest,
-        RunContainerResponse,
+        self, AgentErrorBody, DockerContainerInspect, DockerContainerLogs, DockerContainerRow,
+        DockerContainerStats, DockerContainersResponse, DockerMetrics, DockerSnapshotResponse,
+        DockerVersion, InstallJob, RunContainerRequest, RunContainerResponse,
     },
     providers::{
         validate_container_name, validate_image_reference, ContainerBackend, DockerBackend,
@@ -44,6 +44,9 @@ const MAX_REPORTED_ROWS: usize = 512;
 const MAX_ERROR_DETAIL: usize = 500;
 const DOCKER_TIMEOUT: Duration = Duration::from_secs(20);
 const DOCKER_RUN_TIMEOUT: Duration = Duration::from_secs(120);
+/// Log window served when the dashboard omits `tail`, matching the 100 lines
+/// the detail page polls for.
+const DEFAULT_TAIL_LINES: usize = 100;
 
 #[derive(Clone)]
 struct AgentState {
@@ -207,6 +210,18 @@ fn app(state: AgentState) -> Router {
         .route("/v1/system/metrics", get(system_metrics))
         .route("/v1/docker/version", get(docker_version))
         .route("/v1/docker/containers", get(docker_containers))
+        .route(
+            "/v1/docker/containers/{name}/inspect",
+            get(docker_container_inspect),
+        )
+        .route(
+            "/v1/docker/containers/{name}/logs",
+            get(docker_container_logs),
+        )
+        .route(
+            "/v1/docker/containers/{name}/stats",
+            get(docker_container_stats),
+        )
         .route("/v1/docker/snapshot", get(docker_snapshot))
         .route("/v1/docker/containers/run", post(docker_run))
         .route("/v1/docker/containers/{name}/start", post(docker_start))
@@ -490,6 +505,122 @@ async fn docker_snapshot(State(state): State<AgentState>, headers: HeaderMap) ->
             response.networks.truncate(MAX_REPORTED_ROWS);
             Json(response).into_response()
         }
+        Err(response) => *response,
+    }
+}
+
+/// Parses the `tail` query parameter, defaulting to the same window the
+/// dashboard asks for and rejecting anything a URL should not carry.
+fn parse_tail(query: Option<&str>) -> std::result::Result<usize, Box<Response>> {
+    let Some((key, value)) =
+        query.and_then(|query| form_urlencoded_pairs(query).into_iter().next())
+    else {
+        return Ok(DEFAULT_TAIL_LINES);
+    };
+    if key != "tail" {
+        return Err(Box::new(error_response(
+            StatusCode::BAD_REQUEST,
+            "only the tail query parameter is supported",
+        )));
+    }
+    if value.is_empty() || value.len() > 4 || !value.chars().all(|c| c.is_ascii_digit()) {
+        return Err(Box::new(error_response(
+            StatusCode::BAD_REQUEST,
+            "tail must be a number between 1 and 9999",
+        )));
+    }
+    let Ok(tail) = value.parse::<usize>() else {
+        return Err(Box::new(error_response(
+            StatusCode::BAD_REQUEST,
+            "tail must be a number between 1 and 9999",
+        )));
+    };
+    if tail == 0 {
+        return Err(Box::new(error_response(
+            StatusCode::BAD_REQUEST,
+            "tail must be at least 1",
+        )));
+    }
+    Ok(tail)
+}
+
+/// Splits a query string into decoded `(key, value)` pairs.
+fn form_urlencoded_pairs(query: &str) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(query.as_bytes())
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect()
+}
+
+async fn docker_container_inspect(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    if let Err(error) = validate_container_name(&name) {
+        return error_response(StatusCode::BAD_REQUEST, error.to_string());
+    }
+    let backend = DockerBackend;
+    match docker_call(
+        backend.inspect_container(host_agent::DOCKER_SOCKET_ENDPOINT, &name),
+        DOCKER_TIMEOUT,
+    )
+    .await
+    {
+        Ok(inspect) => Json(DockerContainerInspect::from(inspect)).into_response(),
+        Err(response) => *response,
+    }
+}
+
+async fn docker_container_logs(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    raw_query: axum::extract::RawQuery,
+) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    if let Err(error) = validate_container_name(&name) {
+        return error_response(StatusCode::BAD_REQUEST, error.to_string());
+    }
+    let tail = match parse_tail(raw_query.0.as_deref()) {
+        Ok(tail) => tail,
+        Err(response) => return *response,
+    };
+    let backend = DockerBackend;
+    match docker_call(
+        backend.container_logs(host_agent::DOCKER_SOCKET_ENDPOINT, &name, tail),
+        DOCKER_TIMEOUT,
+    )
+    .await
+    {
+        Ok(logs) => Json(DockerContainerLogs::from(logs)).into_response(),
+        Err(response) => *response,
+    }
+}
+
+async fn docker_container_stats(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    if let Err(error) = validate_container_name(&name) {
+        return error_response(StatusCode::BAD_REQUEST, error.to_string());
+    }
+    let backend = DockerBackend;
+    match docker_call(
+        backend.container_stats(host_agent::DOCKER_SOCKET_ENDPOINT, &name),
+        DOCKER_TIMEOUT,
+    )
+    .await
+    {
+        Ok(stats) => Json(DockerContainerStats::from(stats)).into_response(),
         Err(response) => *response,
     }
 }
@@ -786,6 +917,9 @@ mod tests {
         vec![
             (Method::GET, "/v1/docker/version"),
             (Method::GET, "/v1/docker/containers"),
+            (Method::GET, "/v1/docker/containers/demo-api/inspect"),
+            (Method::GET, "/v1/docker/containers/demo-api/logs"),
+            (Method::GET, "/v1/docker/containers/demo-api/stats"),
             (Method::GET, "/v1/docker/snapshot"),
             (Method::POST, "/v1/docker/containers/demo-api/start"),
             (Method::POST, "/v1/docker/containers/demo-api/stop"),
@@ -886,6 +1020,67 @@ mod tests {
             let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
             assert!(!error.error.is_empty(), "{body}");
         }
+    }
+
+    #[tokio::test]
+    async fn container_detail_routes_validate_names_before_docker() {
+        for path in [
+            "/v1/docker/containers/bad%20name/inspect",
+            "/v1/docker/containers/bad%2Fname/logs",
+            "/v1/docker/containers/bad%20name/stats",
+        ] {
+            let response = app(state())
+                .oneshot(request(Method::GET, path, Some(TEST_TOKEN)))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path}");
+            let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+            let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
+            assert!(error.error.contains("container name"), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn container_logs_validate_the_tail_parameter() {
+        // A valid window passes validation; whether Docker then answers is the
+        // daemon's business, so the assertion excludes validation errors only.
+        let valid = app(state())
+            .oneshot(request(
+                Method::GET,
+                "/v1/docker/containers/demo-api/logs?tail=25",
+                Some(TEST_TOKEN),
+            ))
+            .await
+            .unwrap();
+        assert_ne!(valid.status(), StatusCode::BAD_REQUEST);
+
+        for uri in [
+            "/v1/docker/containers/demo-api/logs?tail=0",
+            "/v1/docker/containers/demo-api/logs?tail=abc",
+            "/v1/docker/containers/demo-api/logs?tail=99999",
+            "/v1/docker/containers/demo-api/logs?other=1",
+        ] {
+            let response = app(state())
+                .oneshot(request(Method::GET, uri, Some(TEST_TOKEN)))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+            let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+            let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
+            assert!(!error.error.is_empty(), "{uri}");
+        }
+    }
+
+    #[test]
+    fn parse_tail_defaults_and_rejects_out_of_range_windows() {
+        assert_eq!(parse_tail(None).unwrap(), DEFAULT_TAIL_LINES);
+        assert_eq!(parse_tail(Some("")).unwrap(), DEFAULT_TAIL_LINES);
+        assert_eq!(parse_tail(Some("tail=25")).unwrap(), 25);
+        assert!(parse_tail(Some("tail=0")).is_err());
+        assert!(parse_tail(Some("tail=-1")).is_err());
+        assert!(parse_tail(Some("tail=99999")).is_err());
+        assert!(parse_tail(Some("tail=")).is_err());
+        assert!(parse_tail(Some("since=7")).is_err());
     }
 
     #[test]

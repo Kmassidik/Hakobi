@@ -1,5 +1,6 @@
 //! Shared layout for Maud SSR templates: page shell, sidebar, and badges.
 
+mod container_detail;
 mod containers;
 mod dashboard;
 pub(crate) mod deployment;
@@ -12,6 +13,10 @@ mod providers;
 mod readiness;
 mod stacks;
 
+pub(crate) use container_detail::{
+    container_detail, container_logs_error, container_logs_section, container_stats_error,
+    container_stats_section, ContainerDetailData,
+};
 pub use containers::{container_form, containers, ContainerFormValues};
 pub use dashboard::{dashboard, metrics_section, DashboardMetrics, DashboardView};
 pub use deployment::{deployment_page, deployment_rows, environment_webhook};

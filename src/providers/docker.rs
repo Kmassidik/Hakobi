@@ -1,20 +1,20 @@
-use std::net::{IpAddr, Ipv4Addr};
-
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use bollard::query_parameters::{
-    ListContainersOptions, ListImagesOptions, ListNetworksOptions, ListVolumesOptions,
+    InspectContainerOptions, ListContainersOptions, ListImagesOptions, ListNetworksOptions,
+    ListVolumesOptions, LogsOptionsBuilder, StatsOptionsBuilder,
 };
-use bollard::{Docker, API_DEFAULT_VERSION};
-use url::Url;
+use futures_util::StreamExt;
 
+use super::container_detail::{DockerContainerUsage, DockerInspect, DockerLogs};
+use super::validate::connect;
+pub use super::validate::{validate_container_name, validate_endpoint, validate_image_reference};
 use crate::stacks::docker_exec::{remove_container as remove_docker_container, run_image};
 
 pub use crate::stacks::docker_exec::RunResult;
 
-const CONNECT_TIMEOUT_SECS: u64 = 8;
-const MAX_IMAGE_LEN: usize = 255;
-const MAX_NAME_LEN: usize = 128;
+/// Upper bound of log lines the detail page and agent ever return.
+pub(crate) const MAX_LOG_LINES: usize = 500;
 
 #[derive(Debug, Clone)]
 pub struct ContainerPort {
@@ -209,109 +209,32 @@ pub trait ContainerBackend: Send + Sync {
         name: &str,
         container_port: u16,
     ) -> Result<RunResult>;
+
+    /// Returns the full inspect data of one container.
+    ///
+    /// Backends that cannot answer (the test stubs) fail loudly instead of
+    /// inventing data.
+    async fn inspect_container(&self, _endpoint: &str, _name: &str) -> Result<DockerInspect> {
+        bail!("this backend does not support container inspect")
+    }
+
+    /// Returns the last `tail` log lines of one container.
+    async fn container_logs(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _tail: usize,
+    ) -> Result<DockerLogs> {
+        bail!("this backend does not support container logs")
+    }
+
+    /// Returns one non-streaming stats sample of one container.
+    async fn container_stats(&self, _endpoint: &str, _name: &str) -> Result<DockerContainerUsage> {
+        bail!("this backend does not support container stats")
+    }
 }
 
 pub struct DockerBackend;
-
-pub fn validate_endpoint(endpoint: &str) -> Result<()> {
-    let endpoint = endpoint.trim();
-    if endpoint.is_empty() || endpoint.len() > 512 {
-        bail!("provider endpoint must be 1–512 characters");
-    }
-    if endpoint.chars().any(char::is_control) {
-        bail!("provider endpoint must not contain control characters");
-    }
-    if let Some(path) = endpoint.strip_prefix("unix://") {
-        if !path.starts_with('/') || path.contains("..") || path == "/" {
-            bail!("Unix provider endpoint must be an absolute socket path");
-        }
-        return Ok(());
-    }
-    if let Some(address) = endpoint.strip_prefix("tcp://") {
-        let url = Url::parse(&format!("http://{address}/"))
-            .context("Docker TCP endpoint must be host:port")?;
-        let host = url.host_str().context("Docker TCP endpoint needs a host")?;
-        if url.port().is_none() {
-            bail!("Docker TCP endpoint must include a port");
-        }
-        if matches!(url.path(), "" | "/") && url.query().is_none() && url.username().is_empty() {
-            if let Ok(address) = host.parse::<IpAddr>() {
-                if address == IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)) {
-                    bail!("metadata addresses are not allowed");
-                }
-            }
-            return Ok(());
-        }
-    }
-    bail!("use a unix:///path or tcp://host:port Docker endpoint")
-}
-
-fn connect(endpoint: &str) -> Result<Docker> {
-    validate_endpoint(endpoint)?;
-    if let Some(path) = endpoint.strip_prefix("unix://") {
-        return Docker::connect_with_unix(path, CONNECT_TIMEOUT_SECS, API_DEFAULT_VERSION)
-            .context("connect to Docker Unix socket");
-    }
-    let host = endpoint
-        .strip_prefix("tcp://")
-        .context("invalid Docker endpoint")?;
-    Docker::connect_with_http(
-        &format!("http://{host}"),
-        CONNECT_TIMEOUT_SECS,
-        API_DEFAULT_VERSION,
-    )
-    .context("connect to Docker TCP endpoint")
-}
-
-/// Validates a Docker container name before it reaches the Docker API.
-///
-/// Mirrors the rules applied by the execution layer: alphanumeric first
-/// character, then letters, digits, `.`, `_` and `-` only.
-pub fn validate_container_name(name: &str) -> Result<()> {
-    if name.is_empty() || name.len() > MAX_NAME_LEN {
-        bail!("container name must be 1–{MAX_NAME_LEN} characters");
-    }
-    match name.chars().next() {
-        Some(first) if first.is_ascii_alphanumeric() => {}
-        _ => bail!("container name must start with a letter or digit"),
-    }
-    if !name
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-'))
-    {
-        bail!("container name may only contain letters, digits, '.', '_' and '-'");
-    }
-    Ok(())
-}
-
-/// Validates an image reference that must already exist locally.
-///
-/// The reference is never pulled, so this only rejects shapes Docker would
-/// refuse or that could smuggle arguments into a registry URL.
-pub fn validate_image_reference(image: &str) -> Result<()> {
-    if image.is_empty() || image.len() > MAX_IMAGE_LEN {
-        bail!("image reference must be 1–{MAX_IMAGE_LEN} characters");
-    }
-    if image
-        .chars()
-        .any(|character| character.is_whitespace() || character.is_control())
-    {
-        bail!("image reference must not contain whitespace or control characters");
-    }
-    match image.chars().next() {
-        Some(first) if first.is_ascii_alphanumeric() => {}
-        _ => bail!("image reference must start with a letter or digit"),
-    }
-    if !image.chars().all(|character| {
-        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-' | '/' | ':' | '@')
-    }) {
-        bail!("image reference contains unsupported characters");
-    }
-    if image.contains("..") || image.contains("//") || image.contains("@@") {
-        bail!("image reference contains an invalid separator sequence");
-    }
-    Ok(())
-}
 
 impl DockerBackend {
     /// Returns the Docker server version and the API version it exposes.
@@ -325,6 +248,76 @@ impl DockerBackend {
             version.version.unwrap_or_else(|| "unknown".into()),
             version.api_version.unwrap_or_else(|| "unknown".into()),
         ))
+    }
+
+    /// Returns the full inspect data of one container.
+    ///
+    /// The container name is validated before it reaches the Docker API, which
+    /// keeps path fragments out of the request URL.
+    pub async fn inspect_container(&self, endpoint: &str, name: &str) -> Result<DockerInspect> {
+        validate_container_name(name)?;
+        let inspect = connect(endpoint)?
+            .inspect_container(name, None::<InspectContainerOptions>)
+            .await
+            .with_context(|| format!("inspect container `{name}`"))?;
+        Ok(DockerInspect::from_bollard(&inspect))
+    }
+
+    /// Returns the last `tail` log lines of one container.
+    ///
+    /// `tail` clamps to [`MAX_LOG_LINES`]; the returned flag reports whether
+    /// the answer filled the whole window, so the UI can show truncation.
+    pub async fn container_logs(
+        &self,
+        endpoint: &str,
+        name: &str,
+        tail: usize,
+    ) -> Result<DockerLogs> {
+        validate_container_name(name)?;
+        let tail = tail.clamp(1, MAX_LOG_LINES);
+        let options = LogsOptionsBuilder::new()
+            .stdout(true)
+            .stderr(true)
+            .tail(&tail.to_string())
+            .build();
+        let stream = connect(endpoint)?.logs(name, Some(options));
+        let collected = stream
+            .take(tail)
+            .map(|chunk| chunk.map(|chunk| chunk.to_string()))
+            .collect::<Vec<_>>()
+            .await;
+        let mut lines = Vec::new();
+        for chunk in collected {
+            let chunk = chunk.with_context(|| format!("read logs of container `{name}`"))?;
+            for line in chunk.lines() {
+                lines.push(line.trim_end_matches(['\r']).to_owned());
+            }
+        }
+        let truncated = lines.len() >= tail;
+        lines.truncate(MAX_LOG_LINES);
+        Ok(DockerLogs { lines, truncated })
+    }
+
+    /// Returns one non-streaming stats sample of one container.
+    ///
+    /// Uses the bollard stats API with `one_shot` so the daemon answers with a
+    /// single JSON object instead of an endless stream.
+    pub async fn container_stats(
+        &self,
+        endpoint: &str,
+        name: &str,
+    ) -> Result<DockerContainerUsage> {
+        validate_container_name(name)?;
+        let options = StatsOptionsBuilder::new()
+            .stream(false)
+            .one_shot(true)
+            .build();
+        let sample = connect(endpoint)?
+            .stats(name, Some(options))
+            .next()
+            .await
+            .with_context(|| format!("collect stats of container `{name}`"))??;
+        Ok(DockerContainerUsage::from_bollard(&sample))
     }
 }
 
