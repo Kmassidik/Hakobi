@@ -192,11 +192,16 @@ pub(crate) async fn environment_deploy(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if load_environment(&state, &id).await.ok().flatten().is_none() {
+    let Some(environment) = load_environment(&state, &id).await.ok().flatten() else {
         return StatusCode::NOT_FOUND.into_response();
-    }
-    // CP6 implements the build/deploy pipeline. CP5 records the intent only.
-    StatusCode::NOT_IMPLEMENTED.into_response()
+    };
+    start_or_redirect(
+        &state,
+        &environment,
+        crate::web::deployment::Trigger::Manual,
+        None,
+        None,
+    )
 }
 
 pub(crate) async fn environment_rollback(
@@ -211,11 +216,71 @@ pub(crate) async fn environment_rollback(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if load_environment(&state, &id).await.ok().flatten().is_none() {
+    let Some(environment) = load_environment(&state, &id).await.ok().flatten() else {
         return StatusCode::NOT_FOUND.into_response();
+    };
+    // Rollback redeploys the latest running deployment's version: the
+    // executor resolves the previous version at run time and rebuilds it.
+    let environment_key = environment.id.clone();
+    let previous = match with_catalog(&state, move |catalog| {
+        Ok(catalog
+            .list_deployments(&environment_key)?
+            .into_iter()
+            .find(|record| record.status == "running"))
+    })
+    .await
+    {
+        Ok(previous) => previous,
+        Err(error) => return internal_error(error),
+    };
+    let Some(previous) = previous else {
+        return redirect_with_notice(
+            &format!("/environments/{}", environment.id),
+            "No running deployment to roll back to.",
+        );
+    };
+    let notice = format!("Rolling back to v{}.", previous.version);
+    start_or_redirect(
+        &state,
+        &environment,
+        crate::web::deployment::Trigger::Manual,
+        None,
+        Some(&notice),
+    )
+}
+
+/// Shared tail of deploy/rollback: queue the deployment and redirect with a
+/// notice, or surface the concurrent-deployment conflict.
+fn start_or_redirect(
+    state: &AppState,
+    environment: &hakobi::catalog::Environment,
+    trigger: crate::web::deployment::Trigger,
+    commit_sha: Option<&str>,
+    notice: Option<&str>,
+) -> Response {
+    let deps = crate::web::deployment::ExecutorDeps {
+        catalog_path: (*state.catalog_path).clone(),
+        build_runner: state.build_runner.clone(),
+        backend: state.backend.clone(),
+    };
+    match crate::web::deployment::start_deployment(
+        &deps,
+        &state.deployments,
+        &environment.id,
+        trigger,
+        commit_sha,
+        None,
+    ) {
+        Ok(Some(_)) => {
+            let base = format!("/environments/{}", environment.id);
+            redirect_with_notice(&base, notice.unwrap_or("Deployment queued."))
+        }
+        Ok(None) => redirect_with_notice(
+            &format!("/environments/{}", environment.id),
+            "A deployment is already running for this environment.",
+        ),
+        Err(error) => internal_error(error),
     }
-    // CP6 implements rollback as a redeploy of the previous version.
-    StatusCode::NOT_IMPLEMENTED.into_response()
 }
 
 pub(crate) async fn environment_edit_page(

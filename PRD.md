@@ -1009,8 +1009,8 @@ cargo build --release
 - [x] Unit test: deployment status transitions
 - [x] Unit test: deployment log storage
 - [x] Integration test: create environment via HTTP POST
-- [ ] SKIPPED (CP6: deploy pipeline executor; CP5 deploy endpoint is an explicit 501 placeholder)
-- [ ] SKIPPED (CP6: rollback redeploys; CP5 rollback endpoint is an explicit 501 placeholder)
+- [x] DONE IN CP6 (deploy pipeline executor; CP5 deploy endpoint was an explicit 501 placeholder)
+- [x] DONE IN CP6 (rollback redeploys; CP5 rollback endpoint was an explicit 501 placeholder)
 - [x] Integration test: unauthorized POST returns 403
 - [x] Integration test: invalid host_id returns 400
 - [x] All existing tests pass
@@ -1033,19 +1033,19 @@ cargo build --release
 
 #### 13.11 CP6 Backend — Build runner
 
-- [ ] Integrate with existing `buildrunner.rs` HTTP client
-- [ ] Build runner endpoint: configurable via `HAKOBI_BUILDRUNNER_URL`
-- [ ] Build runner auth: `HAKOBI_BUILDRUNNER_TOKEN`
-- [ ] Support compose build type
-- [ ] Support Dockerfile build type
-- [ ] Support nixpacks build type
-- [ ] Return build output and image tag on success
-- [ ] Return build error on failure
-- [ ] Build timeout configurable (default 15 minutes)
+- [x] Integrate with existing `buildrunner.rs` HTTP client
+- [x] Build runner endpoint: configurable via `HAKOBI_BUILDRUNNER_URL`
+- [x] Build runner auth: `HAKOBI_BUILDRUNNER_TOKEN`
+- [x] Support compose build type
+- [x] Support Dockerfile build type
+- [x] Support nixpacks build type
+- [x] Return build output and image tag on success
+- [x] Return build error on failure
+- [x] Build timeout configurable (default 15 minutes)
 
 #### 13.12 CP6 Backend — Deployment executor
 
-- [ ] Implement deployment executor that:
+- [x] Implement deployment executor that:
   - Creates deployment record (status: pending)
   - Triggers build via build runner
   - Updates status to `building`
@@ -1055,51 +1055,51 @@ cargo build --release
   - Verifies containers are running
   - Updates status to `running`
   - On any failure, updates status to `failed`
-- [ ] Run deployment asynchronously (spawn tokio task)
-- [ ] Record deployment logs at each stage
-- [ ] Handle concurrent deployments (only one per environment at a time)
-- [ ] Support rollback to previous version
+- [x] Run deployment asynchronously (spawn tokio task)
+- [x] Record deployment logs at each stage
+- [x] Handle concurrent deployments (only one per environment at a time)
+- [x] Support rollback to previous version
 
 #### 13.13 CP6 Backend — Webhook receiver
 
-- [ ] POST `/webhook/{environment_id}/{secret}` endpoint
-- [ ] Verify secret matches environment's `webhook_secret`
-- [ ] Parse GitHub/GitLab webhook payload for commit SHA and message
-- [ ] Trigger deployment (trigger_type: webhook)
-- [ ] Return 202 Accepted immediately
-- [ ] Reject invalid secret with 403
+- [x] POST `/webhook/{environment_id}/{secret}` endpoint
+- [x] Verify secret matches environment's `webhook_secret`
+- [x] Parse GitHub/GitLab webhook payload for commit SHA and message
+- [x] Trigger deployment (trigger_type: webhook)
+- [x] Return 202 Accepted immediately
+- [x] Reject invalid secret with 403
 
 #### 13.14 CP6 UI — Deployment page
 
-- [ ] `/deployment` page shows all deployments across environments
-- [ ] Each deployment shows: environment, version, status, trigger, started, completed
-- [ ] Status badges: pending (gray), building (blue), deploying (blue), running (green), failed (red), rolled_back (amber)
-- [ ] "Deploy" button per environment
-- [ ] "Rollback" button per environment with previous version
-- [ ] HTMX auto-refresh every 5s
+- [x] `/deployment` page shows all deployments across environments
+- [x] Each deployment shows: environment, version, status, trigger, started, completed
+- [x] Status badges: pending (gray), building (blue), deploying (blue), running (green), failed (red), rolled_back (amber)
+- [x] "Deploy" button per environment
+- [x] "Rollback" button per environment with previous version
+- [x] HTMX auto-refresh every 5s
 
 #### 13.15 CP6 Tests
 
-- [ ] Unit test: build runner request serialization
-- [ ] Unit test: deployment executor state machine
-- [ ] Unit test: webhook signature verification
-- [ ] Integration test: manual deploy triggers full pipeline
-- [ ] Integration test: webhook deploy triggers pipeline
-- [ ] Integration test: build failure marks deployment as failed
-- [ ] Integration test: concurrent deploy rejected (409)
-- [ ] All existing tests pass
+- [x] Unit test: build runner request serialization
+- [x] Unit test: deployment executor state machine
+- [x] Unit test: webhook signature verification
+- [x] Integration test: manual deploy triggers full pipeline
+- [x] Integration test: webhook deploy triggers pipeline
+- [x] Integration test: build failure marks deployment as failed
+- [x] Integration test: concurrent deploy rejected (409)
+- [x] All existing tests pass
 
 #### 13.16 CP6 Checklist — Build-Test-Fix
 
-- [ ] BUILD: Implement all CP6 backend code
-- [ ] BUILD: Implement all CP6 UI code
-- [ ] BUILD: Add all CP6 tests
-- [ ] TEST: `cargo fmt --check`
-- [ ] TEST: `cargo clippy --all-targets -- -D warnings`
-- [ ] TEST: `cargo test`
-- [ ] IF FAIL: fix and re-test
-- [ ] IF PASS: mark all CP6 checklist items as `[x]`
-- [ ] UPDATE: commit and push
+- [x] BUILD: Implement all CP6 backend code
+- [x] BUILD: Implement all CP6 UI code
+- [x] BUILD: Add all CP6 tests
+- [x] TEST: `cargo fmt --check`
+- [x] TEST: `cargo clippy --all-targets -- -D warnings`
+- [x] TEST: `cargo test`
+- [x] IF FAIL: fix and re-test
+- [x] IF PASS: mark all CP6 checklist items as `[x]`
+- [ ] UPDATE: commit and push — SKIPPED per task instruction ("Do not deploy or commit")
 
 ---
 

@@ -388,17 +388,17 @@ fn deployments_version_status_and_logs() {
         .expect("create environment");
 
     assert!(catalog
-        .create_deployment("missing-env", "manual", None)
+        .create_deployment("missing-env", "manual", None, None)
         .is_err());
     assert!(catalog
-        .create_deployment(&environment_id, "cron", None)
+        .create_deployment(&environment_id, "cron", None, None)
         .is_err());
 
     let first = catalog
-        .create_deployment(&environment_id, "manual", None)
+        .create_deployment(&environment_id, "manual", None, None)
         .expect("create deployment");
     let second = catalog
-        .create_deployment(&environment_id, "webhook", Some("abc123"))
+        .create_deployment(&environment_id, "webhook", Some("abc123"), None)
         .expect("create second deployment");
     assert_ne!(first, second);
 

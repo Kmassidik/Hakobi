@@ -1,6 +1,6 @@
-use std::sync::Arc;
+    use std::sync::Arc;
 
-use super::{auth, router_with_backend};
+    use super::{auth, router_with_backend};
 use crate::config::PublicConfig;
 use async_trait::async_trait;
 use axum::{
@@ -22,7 +22,7 @@ use hakobi::{
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-struct FakeBackend;
+pub(crate) struct FakeBackend;
 
 #[async_trait]
 impl ContainerBackend for FakeBackend {
@@ -110,6 +110,95 @@ impl ContainerBackend for FakeBackend {
     }
 }
 
+
+/// Backend that reports the container last started via `run_container` as
+/// running with the deployed image, so the executor's verification passes.
+pub(crate) struct PipelineBackend {
+    deployed: tokio::sync::Mutex<Option<(String, String)>>,
+}
+
+impl PipelineBackend {
+    pub(crate) fn new() -> Self {
+        Self {
+            deployed: tokio::sync::Mutex::new(None),
+        }
+    }
+}
+
+#[async_trait]
+impl ContainerBackend for PipelineBackend {
+    async fn test(&self, _endpoint: &str) -> anyhow::Result<String> {
+        Ok("Pipeline backend".into())
+    }
+
+    async fn containers(&self, _endpoint: &str) -> anyhow::Result<Vec<ContainerRow>> {
+        let deployed = self.deployed.lock().await;
+        Ok(match deployed.as_ref() {
+            Some((name, image)) => vec![ContainerRow {
+                id: "0123456789abcdef".into(),
+                name: name.clone(),
+                image: image.clone(),
+                state: "running".into(),
+                status: "Up 1 second".into(),
+                health: None,
+                compose_project: None,
+                compose_service: None,
+                ports: vec![],
+            }],
+            None => vec![],
+        })
+    }
+
+    async fn snapshot(&self, _endpoint: &str) -> anyhow::Result<DockerSnapshot> {
+        Ok(DockerSnapshot {
+            host: HostInfo {
+                name: "pipeline-test".into(),
+                server_version: "28.0.1".into(),
+                containers: 1,
+                running: 1,
+                images: 1,
+                operating_system: "Test".into(),
+                architecture: "x86_64".into(),
+                cpus: 4,
+            },
+            images: vec![],
+            volumes: vec![],
+            networks: vec![],
+        })
+    }
+
+    async fn start_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn stop_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn restart_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn remove_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn run_container(
+        &self,
+        _endpoint: &str,
+        image: &str,
+        name: &str,
+        _container_port: u16,
+    ) -> anyhow::Result<RunResult> {
+        *self.deployed.lock().await = Some((name.to_owned(), image.to_owned()));
+        Ok(RunResult {
+            container_id: "fedcba9876543210".into(),
+            host_port: 18050,
+            name: name.to_owned(),
+        })
+    }
+}
+
 fn app() -> (TempDir, Router) {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("catalog.sqlite3");
@@ -119,7 +208,7 @@ fn app() -> (TempDir, Router) {
     )
 }
 
-fn config() -> PublicConfig {
+pub(crate) fn config() -> PublicConfig {
     PublicConfig {
         username: "admin".into(),
         password_hash: auth::hash_password("correct horse battery staple").unwrap(),
@@ -574,7 +663,7 @@ fn form_encode(value: &str) -> String {
     encoded
 }
 
-async fn sign_in(app: &Router) -> (String, String) {
+pub(crate) async fn sign_in(app: &Router) -> (String, String) {
     let login_page = app
         .clone()
         .oneshot(Request::get("/login").body(Body::empty()).unwrap())
@@ -821,7 +910,7 @@ async fn overview_renders_readiness_and_dialog_and_serves_the_script() {
     assert!(body.contains("data-confirm-input"));
 }
 
-async fn post_form(
+pub(crate) async fn post_form(
     app: &Router,
     path: &str,
     cookies: &str,
@@ -841,7 +930,7 @@ async fn post_form(
         .unwrap()
 }
 
-async fn body_text(response: Response, limit: usize) -> String {
+pub(crate) async fn body_text(response: Response, limit: usize) -> String {
     let body = to_bytes(response.into_body(), limit).await.unwrap();
     String::from_utf8_lossy(&body).into_owned()
 }
@@ -1978,7 +2067,8 @@ async fn environments_can_be_created_edited_and_deleted_over_http() {
         assert_eq!(updated.registry_mode, "push");
     }
 
-    // Deploy is an explicit 501 placeholder in CP5.
+    // CP6: deploy queues a pipeline run (no build runner configured, so the
+    // executor marks it failed asynchronously) and redirects with a notice.
     let deploy = post_form(
         &app,
         &format!("/environments/{environment_id}/deploy"),
@@ -1987,9 +2077,9 @@ async fn environments_can_be_created_edited_and_deleted_over_http() {
         format!("csrf_token={csrf}"),
     )
     .await;
-    assert_eq!(deploy.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(deploy.status(), StatusCode::SEE_OTHER);
 
-    // Rollback is an explicit 501 placeholder in CP5.
+    // CP6: rollback with no running deployment redirects with a no-op notice.
     let rollback = post_form(
         &app,
         &format!("/environments/{environment_id}/rollback"),
@@ -1998,7 +2088,7 @@ async fn environments_can_be_created_edited_and_deleted_over_http() {
         format!("csrf_token={csrf}"),
     )
     .await;
-    assert_eq!(rollback.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(rollback.status(), StatusCode::SEE_OTHER);
 
     // Deployments and logs pages render empty states.
     let deployments = app
@@ -2012,9 +2102,9 @@ async fn environments_can_be_created_edited_and_deleted_over_http() {
         .await
         .unwrap();
     assert_eq!(deployments.status(), StatusCode::OK);
-    assert!(body_text(deployments, 128 * 1024)
-        .await
-        .contains("No deployments"));
+    // CP6: the queued deploy created a real deployment record, so the page
+    // shows it rather than the empty state.
+    assert!(!body_text(deployments, 128 * 1024).await.contains("No deployments"));
 
     let logs = app
         .clone()
@@ -2027,7 +2117,8 @@ async fn environments_can_be_created_edited_and_deleted_over_http() {
         .await
         .unwrap();
     assert_eq!(logs.status(), StatusCode::OK);
-    assert!(body_text(logs, 128 * 1024).await.contains("No log lines"));
+    // CP6: the queued deploy writes stage logs, so the page is not empty.
+    assert!(!body_text(logs, 128 * 1024).await.contains("No log lines"));
 
     // Unknown environment 404s.
     let missing = app
@@ -2118,7 +2209,7 @@ async fn environment_status_partial_refreshes_with_htmx() {
     {
         let mut catalog = Catalog::open(&path).unwrap();
         let deployment_id = catalog
-            .create_deployment(&environment_id, "manual", None)
+            .create_deployment(&environment_id, "manual", None, None)
             .unwrap();
         catalog
             .update_deployment_status(&deployment_id, "running", None)

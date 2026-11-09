@@ -14,10 +14,14 @@ use url::Url;
 
 const ENV_BUILDRUNNER_URL: &str = "HAKOBI_BUILDRUNNER_URL";
 const ENV_BUILDRUNNER_TOKEN: &str = "HAKOBI_BUILDRUNNER_TOKEN";
+const ENV_BUILDRUNNER_TIMEOUT: &str = "HAKOBI_BUILDRUNNER_TIMEOUT_SECS";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(15);
-const BUILD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+/// Default build budget; override with `HAKOBI_BUILDRUNNER_TIMEOUT_SECS`.
+const DEFAULT_BUILD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const MIN_BUILD_TIMEOUT_SECS: u64 = 1;
+const MAX_BUILD_TIMEOUT_SECS: u64 = 6 * 60 * 60;
 
 const MAX_ERROR_BODY: usize = 8 * 1024;
 const ERROR_EXCERPT_BYTES: usize = 512;
@@ -38,6 +42,7 @@ pub struct BuildRunnerClient {
     client: Client,
     base_url: String,
     token: Option<String>,
+    build_timeout: Duration,
 }
 
 impl fmt::Debug for BuildRunnerClient {
@@ -102,7 +107,24 @@ impl BuildRunnerClient {
             _ => return Ok(None),
         }
         let token = read_env(ENV_BUILDRUNNER_TOKEN)?;
-        Self::from_optional(url.as_deref(), token.as_deref())
+        let timeout = read_env(ENV_BUILDRUNNER_TIMEOUT)?;
+        let parsed_timeout = match timeout.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            Some(raw) => {
+                let parsed: u64 = raw.parse().map_err(|_| {
+                    anyhow!("{ENV_BUILDRUNNER_TIMEOUT} must be a whole number of seconds")
+                })?;
+                if !(MIN_BUILD_TIMEOUT_SECS..=MAX_BUILD_TIMEOUT_SECS).contains(&parsed) {
+                    bail!("{ENV_BUILDRUNNER_TIMEOUT} must be between {MIN_BUILD_TIMEOUT_SECS} and {MAX_BUILD_TIMEOUT_SECS}");
+                }
+                Some(Duration::from_secs(parsed))
+            }
+            None => None,
+        };
+        let mut client = Self::from_optional(url.as_deref(), token.as_deref())?;
+        if let (Some(client), Some(timeout)) = (client.as_mut(), parsed_timeout) {
+            client.build_timeout = timeout;
+        }
+        Ok(client)
     }
 
     pub fn new(base_url: &str, token: Option<&str>) -> Result<Self> {
@@ -126,6 +148,7 @@ impl BuildRunnerClient {
             client,
             base_url,
             token,
+            build_timeout: DEFAULT_BUILD_TIMEOUT,
         })
     }
 
@@ -140,6 +163,10 @@ impl BuildRunnerClient {
             return Err(http_error(response).await);
         }
         Ok(())
+    }
+
+    pub async fn build_compose(&self, request: &BuildRequest) -> Result<BuildResponse> {
+        self.build(BuildKind::Compose, request).await
     }
 
     pub async fn build_dockerfile(&self, request: &BuildRequest) -> Result<BuildResponse> {
@@ -162,7 +189,7 @@ impl BuildRunnerClient {
         let payload = BuildPayload::for_request(kind, request)?;
         let response = self
             .request(Method::POST, kind.endpoint())
-            .timeout(BUILD_TIMEOUT)
+            .timeout(self.build_timeout)
             .json(&payload)
             .send()
             .await
@@ -192,6 +219,7 @@ impl BuildRunnerClient {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BuildKind {
+    Compose,
     Dockerfile,
     Nixpacks,
 }
@@ -199,6 +227,7 @@ enum BuildKind {
 impl BuildKind {
     fn endpoint(self) -> &'static str {
         match self {
+            Self::Compose => "/build/compose",
             Self::Dockerfile => "/build/dockerfile",
             Self::Nixpacks => "/build/nixpacks",
         }
@@ -222,7 +251,10 @@ impl<'a> BuildPayload<'a> {
     fn for_request(kind: BuildKind, request: &'a BuildRequest) -> Result<Self> {
         validate_request_common(request)?;
         let (dockerfile_path, context_dir) = match kind {
-            BuildKind::Dockerfile => {
+            BuildKind::Compose | BuildKind::Dockerfile => {
+                if kind == BuildKind::Compose && request.dockerfile_path.is_some() {
+                    bail!("compose builds do not accept dockerfile_path");
+                }
                 if let Some(path) = request.dockerfile_path.as_deref() {
                     validate_repo_path("dockerfile_path", path, false)?;
                 }
@@ -1168,5 +1200,37 @@ mod tests {
             })
         );
         assert!(!serialized.contains("token"));
+    }
+
+    #[test]
+    fn compose_serialization_carries_context_and_rejects_dockerfile() {
+        let mut request = sample_request();
+        request.context_dir = Some("deploy".to_owned());
+        let serialized = serde_json::to_string(
+            &BuildPayload::for_request(BuildKind::Compose, &request).unwrap(),
+        )
+        .unwrap();
+        let value: Value = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "git_url": "https://github.com/acme/app.git",
+                "branch": "main",
+                "image_tag": "acme/app:latest",
+                "context_dir": "deploy",
+            })
+        );
+
+        let mut request = sample_request();
+        request.dockerfile_path = Some("Dockerfile".to_owned());
+        assert!(BuildPayload::for_request(BuildKind::Compose, &request).is_err());
+
+        let request = sample_request();
+        let serialized = serde_json::to_string(
+            &BuildPayload::for_request(BuildKind::Nixpacks, &request).unwrap(),
+        )
+        .unwrap();
+        assert!(!serialized.contains("context_dir"));
+        assert!(!serialized.contains("dockerfile_path"));
     }
 }

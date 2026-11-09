@@ -4,15 +4,22 @@
 //! The catalog is a SQLite database. Its schema is versioned with
 //! `PRAGMA user_version`; opening an up-to-date database is a no-op.
 
+mod deployments;
 mod environments;
 mod hosts;
 mod legacy;
 mod providers;
 mod stacks;
 
+/// Upper bound for [`Catalog::list_recent_deployments`].
+pub const DEPLOYMENT_PAGE_LIMIT: u32 = 100;
+
+pub use deployments::{
+    validate_build_type, validate_registry_mode, validate_source_type, Deployment, DeploymentLog,
+};
 pub use environments::{
-    validate_build_type, validate_environment_name, validate_registry_mode, validate_source_type,
-    Deployment, DeploymentLog, Environment,
+    validate_deployment_status, validate_environment_name, validate_log_level,
+    validate_source_pair, Environment,
 };
 pub use hosts::HostAgent;
 pub use legacy::{AuditEvent, Service};

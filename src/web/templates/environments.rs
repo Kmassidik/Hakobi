@@ -209,7 +209,7 @@ pub fn environment_detail(
                                     }
                                 }
                             }
-                            p class="mb-0 mt-3 text-xs text-muted" { "The pipeline executor lands in the deployment milestone." }
+                            p class="mb-0 mt-3 text-xs text-muted" { "Deployments run through the build runner; watch progress under Deployment." }
                         }
                     }
                     section class="mt-10" {

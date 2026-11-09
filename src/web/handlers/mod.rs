@@ -4,6 +4,7 @@
 mod auth;
 mod containers;
 mod dashboard;
+mod deployment_pages;
 mod environment_pages;
 mod environments;
 mod hosts;
@@ -17,6 +18,9 @@ pub(crate) use containers::{
     container_stop, containers,
 };
 pub(crate) use dashboard::dashboard;
+pub(crate) use deployment_pages::{
+    deployment_list_partial, deployment_page, environment_webhook_page, environment_webhook_submit,
+};
 pub(crate) use environment_pages::{
     environment_delete, environment_deploy, environment_deployments, environment_detail,
     environment_edit_page, environment_edit_submit, environment_logs, environment_rollback,

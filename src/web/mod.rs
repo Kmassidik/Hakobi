@@ -1,10 +1,24 @@
 mod agent_client;
 pub mod auth;
+mod deployment;
 mod handlers;
 mod stacks_admin;
 mod templates;
 #[cfg(test)]
-mod tests;
+mod tests {
+    // Contents of tests.rs are included verbatim; the file itself opens and
+    // closes the module braces.
+    include!("tests.rs");
+}
+#[cfg(test)]
+mod tests_deployment;
+#[cfg(test)]
+mod tests_pipeline_support;
+#[cfg(test)]
+mod tests_webhook;
+mod webhook;
+
+use hakobi::buildrunner::BuildRunnerClient;
 
 use std::{
     path::PathBuf,
@@ -42,6 +56,8 @@ pub(super) struct AppState {
     pub password_work: Arc<Semaphore>,
     pub catalog_path: Arc<PathBuf>,
     pub backend: Arc<dyn ContainerBackend>,
+    pub build_runner: Option<BuildRunnerClient>,
+    pub deployments: deployment::DeploymentGuard,
 }
 
 /// Builds the production router.
@@ -67,6 +83,24 @@ pub fn router_with_backend(
     catalog_path: PathBuf,
     backend: Arc<dyn ContainerBackend>,
 ) -> Router {
+    let build_runner = match BuildRunnerClient::from_env() {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(error = %error, "build runner disabled: invalid configuration");
+            None
+        }
+    };
+    router_with_pipeline(config, catalog_path, backend, build_runner)
+}
+
+/// Builds the router with an explicit build runner client; tests inject a
+/// scripted runner here instead of relying on process environment variables.
+pub(crate) fn router_with_pipeline(
+    config: PublicConfig,
+    catalog_path: PathBuf,
+    backend: Arc<dyn ContainerBackend>,
+    build_runner: Option<BuildRunnerClient>,
+) -> Router {
     let secure = config.secure_cookies;
     let state = AppState {
         config: Arc::new(config),
@@ -75,6 +109,8 @@ pub fn router_with_backend(
         password_work: Arc::new(Semaphore::new(2)),
         catalog_path: Arc::new(catalog_path),
         backend,
+        build_runner,
+        deployments: deployment::DeploymentGuard::new(),
     };
 
     Router::new()
@@ -155,6 +191,13 @@ pub fn router_with_backend(
             "/environments/{id}/status",
             get(handlers::environment_status_partial),
         )
+        .route(
+            "/environments/{id}/webhook",
+            get(handlers::environment_webhook_page).post(handlers::environment_webhook_submit),
+        )
+        .route("/webhook/{environment_id}/{secret}", post(webhook::webhook_receive))
+        .route("/deployment", get(handlers::deployment_page))
+        .route("/deployment/list", get(handlers::deployment_list_partial))
         .route("/infrastructure", get(handlers::infrastructure))
         .route("/hosts", get(handlers::hosts_list).post(handlers::hosts_create))
         .route("/hosts/{id}/resources", get(handlers::host_resources))

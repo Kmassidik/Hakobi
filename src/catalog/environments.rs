@@ -6,6 +6,7 @@
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 
+use super::deployments::{validate_build_type, validate_registry_mode, validate_source_type};
 use super::Catalog;
 
 /// A CP5 environment: build recipe bound to an enrolled host agent.
@@ -20,59 +21,10 @@ pub struct Environment {
     pub git_branch: Option<String>,
     pub registry_mode: String,
     pub status: String,
+    pub webhook_secret: Option<String>,
+    pub webhook_enabled: bool,
     pub created_at: String,
     pub updated_at: String,
-}
-
-/// An immutable, versioned deployment of an environment.
-#[derive(Debug, Clone)]
-pub struct Deployment {
-    pub id: String,
-    pub environment_id: String,
-    pub version: i64,
-    pub status: String,
-    pub trigger_type: String,
-    pub git_commit_sha: Option<String>,
-    pub git_commit_message: Option<String>,
-    pub build_output: Option<String>,
-    pub deploy_output: Option<String>,
-    pub started_at: String,
-    pub completed_at: Option<String>,
-    pub created_at: String,
-}
-
-/// One log line belonging to a deployment.
-#[derive(Debug, Clone)]
-pub struct DeploymentLog {
-    pub id: i64,
-    pub deployment_id: String,
-    pub timestamp: String,
-    pub level: String,
-    pub message: String,
-}
-
-/// Validates that `value` is one of the accepted build types.
-pub fn validate_build_type(value: &str) -> Result<()> {
-    if matches!(value, "compose" | "dockerfile" | "nixpacks") {
-        return Ok(());
-    }
-    bail!("build type must be one of compose, dockerfile, nixpacks");
-}
-
-/// Validates that `value` is one of the accepted source types.
-pub fn validate_source_type(value: &str) -> Result<()> {
-    if matches!(value, "git" | "upload") {
-        return Ok(());
-    }
-    bail!("source type must be git or upload");
-}
-
-/// Validates that `value` is one of the accepted registry modes.
-pub fn validate_registry_mode(value: &str) -> Result<()> {
-    if matches!(value, "local" | "push") {
-        return Ok(());
-    }
-    bail!("registry mode must be local or push");
 }
 
 /// Validates that `value` is one of the accepted environment statuses.
@@ -157,34 +109,15 @@ fn read_environment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Environment
         git_branch: row.get(6)?,
         registry_mode: row.get(7)?,
         status: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
+        webhook_secret: row.get(9)?,
+        webhook_enabled: row.get::<_, i64>(10)? != 0,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 
 const ENVIRONMENT_COLUMNS: &str = "id, name, host_id, build_type, source_type, git_url, \
-     git_branch, registry_mode, status, created_at, updated_at";
-
-fn read_deployment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Deployment> {
-    Ok(Deployment {
-        id: row.get(0)?,
-        environment_id: row.get(1)?,
-        version: row.get(2)?,
-        status: row.get(3)?,
-        trigger_type: row.get(4)?,
-        git_commit_sha: row.get(5)?,
-        git_commit_message: row.get(6)?,
-        build_output: row.get(7)?,
-        deploy_output: row.get(8)?,
-        started_at: row.get(9)?,
-        completed_at: row.get(10)?,
-        created_at: row.get(11)?,
-    })
-}
-
-const DEPLOYMENT_COLUMNS: &str = "id, environment_id, version, status, trigger_type, \
-     git_commit_sha, git_commit_message, build_output, deploy_output, started_at, \
-     completed_at, created_at";
+     git_branch, registry_mode, status, webhook_secret, webhook_enabled, created_at, updated_at";
 
 impl Catalog {
     /// Creates a CP5 environment bound to an enrolled host agent.
@@ -327,6 +260,15 @@ impl Catalog {
     /// Permanently deletes an environment, its deployments, and their logs.
     pub fn delete_environment(&mut self, id: &str) -> Result<()> {
         let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "DELETE FROM deployment_logs WHERE deployment_id IN \
+                 (SELECT id FROM deployments WHERE environment_id = ?1)",
+            params![id],
+        )?;
+        transaction.execute(
+            "DELETE FROM deployments WHERE environment_id = ?1",
+            params![id],
+        )?;
         let deleted = transaction.execute("DELETE FROM environments WHERE id = ?1", params![id])?;
         if deleted == 0 {
             bail!("environment {id} not found");
@@ -334,137 +276,6 @@ impl Catalog {
         super::record_audit(&transaction, "delete", "environment", id)?;
         transaction.commit()?;
         Ok(())
-    }
-
-    /// Creates a pending deployment at the next version for an environment.
-    pub fn create_deployment(
-        &mut self,
-        environment_id: &str,
-        trigger_type: &str,
-        git_commit_sha: Option<&str>,
-    ) -> Result<String> {
-        if !matches!(trigger_type, "manual" | "webhook") {
-            bail!("trigger type must be manual or webhook");
-        }
-        let id = super::new_id();
-        let transaction = self.connection.transaction()?;
-        let environment_exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM environments WHERE id = ?1)",
-            params![environment_id],
-            |row| row.get(0),
-        )?;
-        if !environment_exists {
-            bail!("environment {environment_id} not found");
-        }
-        let version: i64 = transaction.query_row(
-            "SELECT COALESCE(MAX(version), 0) + 1 FROM deployments \
-                 WHERE environment_id = ?1",
-            params![environment_id],
-            |row| row.get(0),
-        )?;
-        transaction.execute(
-            "INSERT INTO deployments \
-                 (id, environment_id, version, status, trigger_type, git_commit_sha, \
-                  started_at, created_at) \
-             VALUES (?1, ?2, ?3, 'pending', ?4, ?5, \
-                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            params![id, environment_id, version, trigger_type, git_commit_sha],
-        )?;
-        super::record_created(&transaction, "deployment", &id)?;
-        transaction.commit()?;
-        Ok(id)
-    }
-
-    /// Updates a deployment's status and records its output.
-    ///
-    /// Setting a terminal status (`running`, `failed`, `rolled_back`) also
-    /// stamps `completed_at`.
-    pub fn update_deployment_status(
-        &mut self,
-        id: &str,
-        status: &str,
-        output: Option<&str>,
-    ) -> Result<()> {
-        validate_deployment_status(status)?;
-        let completed_now = matches!(status, "running" | "failed" | "rolled_back");
-        let updated = self.connection.execute(
-            "UPDATE deployments \
-             SET status = ?2, \
-                 build_output = COALESCE(?3, build_output), \
-                 deploy_output = COALESCE(?3, deploy_output), \
-                 completed_at = CASE WHEN ?4 THEN \
-                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE completed_at END \
-             WHERE id = ?1",
-            params![id, status, output, completed_now],
-        )?;
-        if updated == 0 {
-            bail!("deployment {id} not found");
-        }
-        Ok(())
-    }
-
-    /// Lists deployments for an environment, newest version first.
-    pub fn list_deployments(&self, environment_id: &str) -> Result<Vec<Deployment>> {
-        let mut statement = self.connection.prepare(&format!(
-            "SELECT {DEPLOYMENT_COLUMNS} FROM deployments \
-             WHERE environment_id = ?1 ORDER BY version DESC, rowid DESC"
-        ))?;
-        let rows = statement
-            .query_map(params![environment_id], read_deployment_row)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    /// Returns the highest-version deployment for an environment.
-    pub fn get_latest_deployment(&self, environment_id: &str) -> Result<Option<Deployment>> {
-        self.connection
-            .query_row(
-                &format!(
-                    "SELECT {DEPLOYMENT_COLUMNS} FROM deployments \
-                     WHERE environment_id = ?1 ORDER BY version DESC, rowid DESC LIMIT 1"
-                ),
-                params![environment_id],
-                read_deployment_row,
-            )
-            .optional()
-            .context("load latest deployment")
-    }
-
-    /// Appends a log line to a deployment.
-    pub fn add_deployment_log(
-        &mut self,
-        deployment_id: &str,
-        level: &str,
-        message: &str,
-    ) -> Result<()> {
-        validate_log_level(level)?;
-        self.connection.execute(
-            "INSERT INTO deployment_logs (deployment_id, timestamp, level, message) \
-             VALUES (?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?2, ?3)",
-            params![deployment_id, level, message],
-        )?;
-        Ok(())
-    }
-
-    /// Lists log lines for a deployment in chronological order.
-    pub fn list_deployment_logs(&self, deployment_id: &str) -> Result<Vec<DeploymentLog>> {
-        let mut statement = self.connection.prepare(
-            "SELECT id, deployment_id, timestamp, level, message \
-             FROM deployment_logs WHERE deployment_id = ?1 ORDER BY id",
-        )?;
-        let rows = statement
-            .query_map(params![deployment_id], |row| {
-                Ok(DeploymentLog {
-                    id: row.get(0)?,
-                    deployment_id: row.get(1)?,
-                    timestamp: row.get(2)?,
-                    level: row.get(3)?,
-                    message: row.get(4)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
     }
 }
 
