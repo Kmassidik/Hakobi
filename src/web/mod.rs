@@ -13,6 +13,8 @@ mod tests {
 #[cfg(test)]
 mod tests_deployment;
 #[cfg(test)]
+mod tests_metrics;
+#[cfg(test)]
 mod tests_pipeline_support;
 #[cfg(test)]
 mod tests_webhook;
@@ -201,6 +203,10 @@ pub(crate) fn router_with_pipeline(
         .route("/infrastructure", get(handlers::infrastructure))
         .route("/hosts", get(handlers::hosts_list).post(handlers::hosts_create))
         .route("/hosts/{id}/resources", get(handlers::host_resources))
+        .route(
+            "/hosts/{id}/resources/history",
+            get(handlers::host_history),
+        )
         .route(
             "/hosts/{id}/resources/partial",
             get(handlers::host_resources_partial),

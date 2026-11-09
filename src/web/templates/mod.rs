@@ -5,6 +5,7 @@ mod dashboard;
 pub(crate) mod deployment;
 mod environment_form;
 mod environments;
+mod history;
 mod hosts;
 mod infrastructure;
 mod providers;
@@ -19,6 +20,7 @@ pub use environments::{
     environment_deployments, environment_detail, environment_logs, environment_status_body,
     environments,
 };
+pub use history::{history_panel, history_window_bounds, HistoryWindow};
 pub use hosts::{host_resources, host_resources_live, hosts};
 pub use infrastructure::infrastructure;
 pub use providers::providers;

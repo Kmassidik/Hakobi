@@ -266,6 +266,9 @@ pub async fn serve(store: &ConfigStore) -> Result<()> {
     if let Err(error) = register_local_provider(&catalog_path) {
         eprintln!("warning: could not register the local Docker provider: {error:#}");
     }
+    // CP7: metrics sampling every 60s and the daily retention purge.
+    let sampler = hakobi::metrics::spawn_sampler(catalog_path.clone());
+    let retention = hakobi::metrics::spawn_retention_job(catalog_path.clone());
     let app = web::router(public, catalog_path);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let server = axum::serve(listener, app).with_graceful_shutdown(async {
@@ -294,6 +297,8 @@ pub async fn serve(store: &ConfigStore) -> Result<()> {
             eprintln!("warning: could not stop cloudflared cleanly: {error:#}");
         }
     }
+    sampler.abort();
+    retention.abort();
     outcome
 }
 

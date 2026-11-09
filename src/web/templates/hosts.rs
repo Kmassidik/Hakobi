@@ -243,6 +243,7 @@ pub fn host_resources_live(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn host_resources(
     base_url: &str,
     username: &str,
@@ -251,6 +252,7 @@ pub fn host_resources(
     system: &hakobi::host_agent::SystemMetrics,
     containers: &[ContainerRow],
     live_url: &str,
+    history: Markup,
 ) -> Markup {
     page(
         format!("{host_label} resources · Hakobi").as_str(),
@@ -288,6 +290,7 @@ pub fn host_resources(
                         }
                     }
                     (host_resources_live(system, containers, live_url))
+                    (history)
                 }
             }
         },

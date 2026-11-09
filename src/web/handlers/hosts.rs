@@ -1,7 +1,7 @@
 //! Host agent handlers: list, register, resources, test, toggle, delete.
 
 use axum::{
-    extract::{Form, Path, State},
+    extract::{Form, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -13,6 +13,13 @@ use super::{
 };
 use crate::web::{agent_client::HostAgent, templates, AppState};
 use hakobi::host_agent::{AgentEndpoint, AgentHost};
+use hakobi::metrics;
+
+/// History time-window query parameter.
+#[derive(Debug, Deserialize)]
+pub struct HistoryParams {
+    window: Option<String>,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct HostsCreateForm {
@@ -158,6 +165,9 @@ pub(crate) async fn host_resources(
         .unwrap_or_default();
     let (csrf_token, cookies) = page_csrf(&state, &headers);
     let live_url = format!("/hosts/{id}/resources/partial");
+    let history_host_id = if id == "local" { "local" } else { id.as_str() };
+    let history_markup =
+        load_history_markup(&state, history_host_id, templates::HistoryWindow::OneHour).await;
     let markup = templates::host_resources(
         &state.config.base_url,
         &state.config.username,
@@ -166,8 +176,44 @@ pub(crate) async fn host_resources(
         &system,
         &containers,
         &live_url,
+        history_markup,
     );
     html_response(StatusCode::OK, markup, cookies)
+}
+
+/// Loads the default (1h) history panel markup; an empty or unavailable
+/// metrics database renders the panel with "No data yet" charts.
+async fn load_history_markup(
+    state: &AppState,
+    host_id: &str,
+    window: templates::HistoryWindow,
+) -> maud::Markup {
+    let metrics_path = metrics::metrics_database_path(&state.catalog_path);
+    let host_id = host_id.to_owned();
+    let host_for_panel = host_id.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<maud::Markup> {
+        let stamp = hakobi::metrics::now_ms();
+        let db = metrics::MetricsDb::open(&metrics_path)?;
+        let (from, to) = templates::history_window_bounds(window, stamp);
+        let points = match window {
+            templates::HistoryWindow::FiveMinutes => db.query_1m(&host_id, from, to)?,
+            templates::HistoryWindow::OneHour => db.query_5m(&host_id, from, to)?,
+            templates::HistoryWindow::TwentyFourHours => db.query_1h(&host_id, from, to)?,
+        };
+        Ok(templates::history_panel(&host_id, window, &points, stamp))
+    })
+    .await;
+    match result {
+        Ok(Ok(markup)) => markup,
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "history panel unavailable");
+            templates::history_panel(&host_for_panel, window, &[], hakobi::metrics::now_ms())
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "history panel task failed");
+            templates::history_panel(&host_for_panel, window, &[], hakobi::metrics::now_ms())
+        }
+    }
 }
 
 pub(crate) async fn host_resources_partial(
@@ -205,6 +251,26 @@ pub(crate) async fn host_resources_partial(
         templates::host_resources_live(&system, &containers, &live_url),
         Vec::new(),
     )
+}
+
+/// Serves the host history panel: SVG charts for the selected time window,
+/// read from the metrics database. The live section keeps polling separately.
+pub(crate) async fn host_history(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(params): Query<HistoryParams>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return super::partials::partial_unauthorized();
+    }
+    if host_endpoint(&state, &id).await.is_none() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let window = templates::HistoryWindow::from_query(params.window.as_deref());
+    let host_id = id.clone();
+    let markup = load_history_markup(&state, &host_id, window).await;
+    html_response(StatusCode::OK, markup, Vec::new())
 }
 
 pub(crate) async fn hosts_test(

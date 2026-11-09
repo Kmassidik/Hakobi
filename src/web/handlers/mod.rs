@@ -28,8 +28,8 @@ pub(crate) use environment_pages::{
 };
 pub(crate) use environments::{environment_create, environment_list, environment_new};
 pub(crate) use hosts::{
-    host_resources, host_resources_partial, hosts_create, hosts_delete, hosts_list, hosts_test,
-    hosts_toggle,
+    host_history, host_resources, host_resources_partial, hosts_create, hosts_delete, hosts_list,
+    hosts_test, hosts_toggle,
 };
 pub(crate) use infrastructure::{infrastructure, stack_detail, stacks};
 pub(crate) use partials::{install_tool, metrics_partial, readiness_partial, status};

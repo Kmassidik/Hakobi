@@ -425,4 +425,40 @@
     object-fit: contain;
     margin: 0 auto 1rem;
   }
+
+  .chart-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    --chart-line: var(--color-brand, #164f3b);
+    --chart-grid: var(--color-line, #dcded7);
+    --chart-empty: var(--color-muted, #68716c);
+  }
+
+  .chart-line {
+    fill: none;
+    stroke: var(--chart-line);
+    stroke-width: 2;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+
+  .chart-line--tx {
+    stroke: var(--color-brand-bright, #2e7457);
+    stroke-dasharray: 4 3;
+  }
+
+  .chart-grid {
+    stroke: var(--chart-grid);
+    stroke-width: 1;
+  }
+
+  .chart-bar {
+    fill: var(--chart-line);
+  }
+
+  .chart-empty {
+    fill: var(--chart-empty);
+    font-size: 12px;
+  }
 }
