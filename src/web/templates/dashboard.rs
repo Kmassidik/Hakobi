@@ -237,12 +237,7 @@ fn dashboard_alerts(agent_configured: bool, agent_online: bool, notice: Option<&
     }
 }
 
-fn greeting_row(
-    username: &str,
-    agent_online: bool,
-    control_label: &str,
-    control_healthy: bool,
-) -> Markup {
+fn greeting_row(username: &str, control_label: &str, control_healthy: bool) -> Markup {
     html! {
                         div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between" {
                             div {
@@ -252,9 +247,6 @@ fn greeting_row(
                                 }
                             }
                             div class="flex items-center gap-3" {
-                            @if agent_online {
-                                a class="rounded-full bg-white px-3.5 py-2 text-[0.72rem] font-semibold text-ink no-underline shadow-sm" href="/hosts/local/resources" { "Host resources →" }
-                            }
                             (status_badge(control_label, control_healthy))
                         }
                         }
@@ -293,7 +285,7 @@ pub fn dashboard(view: DashboardView<'_>) -> Markup {
 
                 main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
                     (dashboard_alerts(agent_configured, agent_online, notice))
-                    (greeting_row(username, agent_online, control_label, control_healthy))
+                    (greeting_row(username, control_label, control_healthy))
 
                     (metrics_section(metrics))
 
