@@ -112,7 +112,7 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
                 (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infrastructure"))
                 (nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
-                (nav_item(active, "deployment", "/deployment", "fa-rocket", "Deployment"))
+                (nav_item(active, "deployment", "/hosts", "fa-rocket", "Deployment"))
             }
             div class="mt-auto" {
                 div class="rounded-xl bg-[#f5f5f7] p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
@@ -245,7 +245,7 @@ fn mobile_sidebar(active: &str, _base_url: &str, _username: &str, _csrf_token: &
                     (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                     (mobile_nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infra"))
                     (mobile_nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
-                    (mobile_nav_item(active, "deployment", "/deployment", "fa-rocket", "Deploy"))
+                    (mobile_nav_item(active, "deployment", "/hosts", "fa-rocket", "Deploy"))
                 }
             }
     }
