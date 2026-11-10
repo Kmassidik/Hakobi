@@ -309,5 +309,69 @@
     drawAll();
   }
   window.addEventListener("resize", drawAll);
+  window.__drawCharts = drawAll;
   document.body.addEventListener("htmx:afterSwap", drawAll);
+})();
+
+/* Live metrics scheduler: 2s poll, 5s backoff after failures, paused while
+   the tab is hidden. Replaces fixed-interval HTMX polling on the dashboard. */
+(function () {
+  "use strict";
+  var POLL_MS = 2000;
+  var BACKOFF_MS = 5000;
+  var STALE_AFTER_MS = 30000;
+
+  function init() {
+    var grid = document.querySelector("[data-live-metrics]");
+    if (!grid) return;
+    var url = grid.dataset.liveMetrics;
+    var interval = POLL_MS;
+    var lastGoodAt = Date.now();
+    var busy = false;
+
+    async function tick() {
+      if (busy || document.hidden) return;
+      busy = true;
+      var started = Date.now();
+      try {
+        var response = await fetch(url, { headers: { "HX-Request": "true" } });
+        if (response.ok) {
+          var html = await response.text();
+          grid.outerHTML = html;
+          grid = document.querySelector("[data-live-metrics]");
+          interval = POLL_MS;
+          lastGoodAt = Date.now();
+          markFresh();
+          if (window.__drawCharts) window.__drawCharts();
+        } else {
+          interval = BACKOFF_MS;
+        }
+      } catch (error) {
+        interval = BACKOFF_MS;
+      }
+      busy = false;
+      var spent = Date.now() - started;
+      setTimeout(tick, Math.max(interval - spent, 250));
+    }
+
+    function markFresh() {
+      var stale = Date.now() - lastGoodAt > STALE_AFTER_MS;
+      grid.querySelectorAll("[data-freshness]").forEach(function (badge) {
+        badge.textContent = stale ? "stale" : "live";
+        badge.dataset.state = stale ? "stale" : "live";
+      });
+      if (stale) interval = BACKOFF_MS;
+    }
+
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) tick();
+    });
+    tick();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
 })();

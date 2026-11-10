@@ -59,21 +59,35 @@ struct SystemSampler {
     system: System,
     networks: Networks,
     last_sample: Instant,
+    cached: hakobi::host_agent::SystemMetrics,
 }
+
+/// How often the background loop refreshes counters. Fixed 2s window gives
+/// stable CPU/network deltas like btop, independent of request timing.
+const SAMPLE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl SystemSampler {
     fn new() -> Self {
         let mut system = System::new_all();
         system.refresh_all();
-        let networks = Networks::new_with_refreshed_list();
-        Self {
+        let mut networks = Networks::new_with_refreshed_list();
+        // Warm the delta baseline with a short sleep so the first snapshot
+        // has a real window instead of a near-zero one.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        system.refresh_all();
+        networks.refresh(true);
+        let mut sampler = Self {
             system,
             networks,
             last_sample: Instant::now(),
-        }
+            cached: hakobi::host_agent::SystemMetrics::default(),
+        };
+        sampler.cached = sampler.measure();
+        sampler
     }
 
-    fn snapshot(&mut self) -> hakobi::host_agent::SystemMetrics {
+    /// Measures counters over the window since the last measure call.
+    fn measure(&mut self) -> hakobi::host_agent::SystemMetrics {
         let elapsed = self.last_sample.elapsed().as_secs_f64().max(0.001);
         self.system.refresh_all();
         self.networks.refresh(true);
@@ -157,6 +171,21 @@ impl SystemSampler {
                 .unwrap_or_default(),
         }
     }
+
+    /// Returns the most recent measurement; never blocks on counters.
+    fn snapshot(&self) -> hakobi::host_agent::SystemMetrics {
+        self.cached.clone()
+    }
+
+    /// Background loop: keeps the cached snapshot current on a fixed window.
+    async fn run_refresh_loop(sampler: Arc<Mutex<Self>>) {
+        loop {
+            tokio::time::sleep(SAMPLE_INTERVAL).await;
+            if let Ok(mut sampler) = sampler.try_lock() {
+                sampler.cached = sampler.measure();
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -190,7 +219,11 @@ async fn run() -> Result<()> {
     let state = AgentState {
         token: Arc::from(token),
         jobs: Arc::new(Mutex::new(HashMap::new())),
-        system: Arc::new(Mutex::new(SystemSampler::new())),
+        system: {
+            let sampler = Arc::new(Mutex::new(SystemSampler::new()));
+            tokio::spawn(SystemSampler::run_refresh_loop(Arc::clone(&sampler)));
+            sampler
+        },
     };
     axum::serve(listener, app(state))
         .await
@@ -909,7 +942,11 @@ mod tests {
         AgentState {
             token: Arc::from(TEST_TOKEN),
             jobs: Arc::new(Mutex::new(HashMap::new())),
-            system: Arc::new(Mutex::new(SystemSampler::new())),
+            system: {
+                let sampler = Arc::new(Mutex::new(SystemSampler::new()));
+                tokio::spawn(SystemSampler::run_refresh_loop(Arc::clone(&sampler)));
+                sampler
+            },
         }
     }
 

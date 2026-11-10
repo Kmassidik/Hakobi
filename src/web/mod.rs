@@ -23,7 +23,7 @@ mod webhook;
 use hakobi::buildrunner::BuildRunnerClient;
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -60,6 +60,42 @@ pub(super) struct AppState {
     pub backend: Arc<dyn ContainerBackend>,
     pub build_runner: Option<BuildRunnerClient>,
     pub deployments: deployment::DeploymentGuard,
+    /// Shared 1.5s cache of latest live samples so concurrent dashboard
+    /// components share one metrics-db read and fall back to the last-good
+    /// reading instead of rendering zeros when the database is empty.
+    pub live_cache: Arc<std::sync::Mutex<LiveSampleCache>>,
+}
+
+/// Last-good live samples with a short shared TTL.
+#[derive(Default)]
+pub(super) struct LiveSampleCache {
+    pub fetched_at: Option<std::time::Instant>,
+    pub samples: Vec<hakobi::metrics::LatestLive>,
+}
+
+impl LiveSampleCache {
+    const TTL: std::time::Duration = std::time::Duration::from_millis(1500);
+
+    /// Returns cached samples when fresh; otherwise reloads from the metrics
+    /// database and keeps the previous reading as last-good fallback.
+    fn get_or_load(&mut self, catalog_path: &Path) -> Vec<hakobi::metrics::LatestLive> {
+        if let Some(fetched_at) = self.fetched_at {
+            if fetched_at.elapsed() < Self::TTL && !self.samples.is_empty() {
+                return self.samples.clone();
+            }
+        }
+        let metrics_path = hakobi::metrics::metrics_database_path(catalog_path);
+        let fresh = hakobi::metrics::MetricsDb::open(metrics_path)
+            .and_then(|db| db.latest_live_samples())
+            .unwrap_or_default();
+        if !fresh.is_empty() {
+            self.samples = fresh.clone();
+            self.fetched_at = Some(std::time::Instant::now());
+        }
+        // Empty fresh read keeps the last-good samples (stale but honest);
+        // only starts empty when nothing was ever sampled.
+        self.samples.clone()
+    }
 }
 
 /// Builds the production router.
@@ -113,6 +149,7 @@ pub(crate) fn router_with_pipeline(
         backend,
         build_runner,
         deployments: deployment::DeploymentGuard::new(),
+        live_cache: Arc::new(std::sync::Mutex::new(LiveSampleCache::default())),
     };
 
     Router::new()

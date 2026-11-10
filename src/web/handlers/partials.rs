@@ -85,10 +85,12 @@ pub(crate) async fn metrics_partial(State(state): State<AppState>, headers: Head
         return partial_unauthorized();
     }
     let metrics = collect_dashboard_metrics(&state).await;
-    let metrics_path = hakobi::metrics::metrics_database_path(&state.catalog_path);
-    let live = tokio::task::spawn_blocking(move || -> Vec<hakobi::metrics::LatestLive> {
-        hakobi::metrics::MetricsDb::open(&metrics_path)
-            .and_then(|db| db.latest_live_samples())
+    let history_path = (*state.catalog_path).clone();
+    let live_cache = std::sync::Arc::clone(&state.live_cache);
+    let live = tokio::task::spawn_blocking(move || {
+        live_cache
+            .lock()
+            .map(|mut cache| cache.get_or_load(&history_path))
             .unwrap_or_default()
     })
     .await

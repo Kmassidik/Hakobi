@@ -1,6 +1,7 @@
 //! Overview dashboard handler and metrics collection.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use anyhow::Context as _;
 use axum::{
@@ -166,15 +167,15 @@ async fn load_dashboard_extras(
     Vec<hakobi::metrics::LatestLive>,
     Vec<ActivityItem>,
 ) {
-    let history_path = hakobi::metrics::metrics_database_path(&state.catalog_path);
+    let history_path = (*state.catalog_path).clone();
+    let live_cache = Arc::clone(&state.live_cache);
     let (history, live) = tokio::task::spawn_blocking(move || -> (Vec<hakobi::metrics::HistoryPoint>, Vec<hakobi::metrics::LatestLive>) {
         let now = hakobi::metrics::now_ms();
         let from = now - 24 * 60 * 60_000;
-        let Ok(db) = hakobi::metrics::MetricsDb::open(&history_path) else {
-            return (Vec::new(), Vec::new());
-        };
-        let live = db.latest_live_samples().unwrap_or_default();
-        let history = aggregate_all_hosts(&db, from, now).unwrap_or_default();
+        let live = live_cache.lock().map(|mut cache| cache.get_or_load(&history_path)).unwrap_or_default();
+        let history = hakobi::metrics::MetricsDb::open(&history_path)
+            .map(|db| aggregate_all_hosts(&db, from, now).unwrap_or_default())
+            .unwrap_or_default();
         (history, live)
     })
     .await

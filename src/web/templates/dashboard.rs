@@ -177,15 +177,26 @@ fn stat_cards(stats: &LiveStats, metrics: &DashboardMetrics) -> Markup {
         "delta warn"
     };
     html! {
-        div id="overview-metrics" class="mb-5 grid grid-cols-2 gap-3.5 xl:grid-cols-4" hx-get="/partials/metrics" hx-trigger="every 15s" hx-swap="outerHTML" aria-label="System status" {
-            (stat_card(
-                "CPU utilization",
-                &format!("{:.2}%", stats.cpu_percent),
-                &format!("{} hosts · avg live", stats.hosts_reporting),
-                "live",
-                cpu_class,
-                "fa-gauge-high",
-            ))
+        @if !stats.fresh {
+            div class="mb-3 rounded-xl bg-amber-50 px-4 py-2.5 text-[0.78rem] text-amber-900 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" role="alert" {
+                b { "No live samples yet." }
+                " The sampler polls the host agent every minute; cards and charts fill in after the first sample lands."
+            }
+        }
+        div id="overview-metrics" class="mb-5 grid grid-cols-2 gap-3.5 xl:grid-cols-4" data-live-metrics="/partials/metrics" aria-label="System status" {
+            article class="card min-h-[6rem] rounded-xl p-4" {
+                div class="flex items-center justify-between" {
+                    span class="text-[0.62rem] font-extrabold uppercase tracking-[0.09em] text-[#86868b]" { "CPU utilization" }
+                    i class="fa-solid fa-gauge-high text-[#c7c7cc]" aria-hidden="true" {}
+                }
+                p class=(format!("m-0 mt-2 font-mono text-[1.5rem] font-semibold leading-tight tracking-[-0.04em] {cpu_class}")) {
+                    (format!("{:.2}%", stats.cpu_percent))
+                }
+                div class="mt-1 flex items-center justify-between text-[0.68rem] text-[#86868b]" {
+                    span { (format!("{} hosts · avg live", stats.hosts_reporting)) }
+                    span data-freshness="live" data-state="live" class="delta good" { "live" }
+                }
+            }
             (stat_card("Memory utilization", &format!("{:.1}%", stats.memory_percent), &format!("{:.1} / {:.1} GiB", stats.memory_used_gb, stats.memory_total_gb), "live", mem_class, "fa-memory"))
             (stat_card("Active containers", &format!("{} / {}", metrics.containers_healthy, metrics.containers_total.max(1)), &format!("{} restarting", metrics.containers_restarting), "provider trait", "delta good", "fa-cube"))
             (stat_card("Environments", &format!("{}", metrics.stacks), "registered", &format!("{} hosts up", stats.hosts_reporting), host_delta, "fa-layer-group"))
