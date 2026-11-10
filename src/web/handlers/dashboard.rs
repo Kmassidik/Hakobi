@@ -205,7 +205,7 @@ async fn load_dashboard_extras(
 }
 
 /// Averages per-host rollups into one series across all hosts.
-fn aggregate_all_hosts(
+pub(crate) fn aggregate_all_hosts(
     db: &hakobi::metrics::MetricsDb,
     from: i64,
     to: i64,

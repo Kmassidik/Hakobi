@@ -18,7 +18,9 @@ pub(crate) use container_detail::{
     container_stats_section, ContainerDetailData,
 };
 pub use containers::{container_form, containers, ContainerFormValues};
-pub use dashboard::{dashboard, metrics_section, ActivityRow, DashboardMetrics, DashboardView};
+pub use dashboard::{
+    chart_section, dashboard, metrics_section, ActivityRow, DashboardMetrics, DashboardView,
+};
 pub use deployment::{deployment_page, deployment_rows, environment_webhook};
 pub use environment_form::{environment_form, EnvironmentFormValues};
 pub use environments::{

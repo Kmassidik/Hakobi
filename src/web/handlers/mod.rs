@@ -36,7 +36,9 @@ pub(crate) use hosts::{
     hosts_test, hosts_toggle,
 };
 pub(crate) use infrastructure::{infrastructure, stack_detail, stacks};
-pub(crate) use partials::{install_tool, metrics_partial, readiness_partial, status};
+pub(crate) use partials::{
+    charts_partial, install_tool, metrics_partial, readiness_partial, status,
+};
 pub(crate) use providers::{
     add_provider, delete_provider, providers, test_provider, toggle_provider,
 };

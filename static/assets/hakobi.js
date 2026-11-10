@@ -329,6 +329,11 @@
     var lastGoodAt = Date.now();
     var busy = false;
 
+    var charts = document.querySelector("[data-live-charts]");
+    var chartsUrl = charts ? charts.dataset.liveCharts : null;
+    var chartsAt = 0;
+    var CHARTS_MS = 5000;
+
     async function tick() {
       if (busy || document.hidden) return;
       busy = true;
@@ -342,6 +347,18 @@
           interval = POLL_MS;
           lastGoodAt = Date.now();
           markFresh();
+          // Refresh charts at a slower cadence than the stat cards.
+          if (chartsUrl && Date.now() - chartsAt >= CHARTS_MS) {
+            var chartsResponse = await fetch(chartsUrl, {
+              headers: { "HX-Request": "true" },
+            });
+            if (chartsResponse.ok) {
+              var chartsHtml = await chartsResponse.text();
+              charts.outerHTML = chartsHtml;
+              charts = document.querySelector("[data-live-charts]");
+              chartsAt = Date.now();
+            }
+          }
           if (window.__drawCharts) window.__drawCharts();
         } else {
           interval = BACKOFF_MS;

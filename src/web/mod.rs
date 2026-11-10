@@ -173,6 +173,7 @@ pub(crate) fn router_with_pipeline(
         )
         .route("/host/install/{tool}", post(handlers::install_tool))
         .route("/partials/metrics", get(handlers::metrics_partial))
+        .route("/partials/charts", get(handlers::charts_partial))
         .route("/partials/readiness", get(handlers::readiness_partial))
         .route(
             "/containers/new",

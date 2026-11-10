@@ -215,7 +215,7 @@ fn section_title(text: &str, small: &str) -> Markup {
 }
 
 /// Time-series chart panels. The canvas elements are drawn by dashboard.js.
-fn chart_section(points: &[hakobi::metrics::HistoryPoint]) -> Markup {
+pub fn chart_section(points: &[hakobi::metrics::HistoryPoint]) -> Markup {
     let series: Vec<f64> = points.iter().map(|p| p.cpu_percent).collect();
     let memory: Vec<f64> = points.iter().map(|p| p.memory_percent).collect();
     let disk: Vec<f64> = points
@@ -231,7 +231,7 @@ fn chart_section(points: &[hakobi::metrics::HistoryPoint]) -> Markup {
         .map(|p| p.network_tx_bps * 8.0 / 1_000_000.0)
         .collect();
     html! {
-        section {
+        section id="dashboard-charts" data-live-charts="/partials/charts" {
             (section_title("Compute", "ALL HOSTS · AGGREGATED"))
             div class="grid grid-cols-1 gap-3.5 lg:grid-cols-2" {
                 div class="card rounded-xl p-4" {
