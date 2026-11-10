@@ -17,6 +17,23 @@ pub struct HistoryPoint {
     pub network_tx_bps: f64,
 }
 
+/// Lists distinct host ids having any rollup data in the window.
+pub fn host_ids_with_data(
+    connection: &rusqlite::Connection,
+    from: i64,
+    to: i64,
+) -> Result<Vec<String>> {
+    let mut statement = connection.prepare(
+        "SELECT DISTINCT host_id FROM metrics_1m WHERE timestamp BETWEEN ? AND ? ORDER BY host_id",
+    )?;
+    let rows = statement.query_map(rusqlite::params![from, to], |row| row.get(0))?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row?);
+    }
+    Ok(ids)
+}
+
 /// Loads 1-minute rollups for one host within `[from, to]` (milliseconds).
 pub fn query_1m(
     connection: &Connection,
@@ -121,6 +138,11 @@ impl super::MetricsDb {
     /// Reads 1-minute rollups for one host within `[from, to]` (milliseconds).
     pub fn query_1m(&self, host_id: &str, from: i64, to: i64) -> Result<Vec<HistoryPoint>> {
         query_1m(&self.connection, host_id, from, to)
+    }
+
+    /// Lists distinct host ids with data in the window.
+    pub fn host_ids_with_data(&self, from: i64, to: i64) -> Result<Vec<String>> {
+        host_ids_with_data(&self.connection, from, to)
     }
 
     /// Reads 5-minute rollups for one host within `[from, to]` (milliseconds).

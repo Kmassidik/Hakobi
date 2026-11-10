@@ -17,14 +17,15 @@ Gap: <difference, or "none">
 
 ## Entries
 
-### Overview (sidebar: "Overview", route `/`)
-User intent: A dashboard landing page. Shows health at a glance. Should link
-out to the things an operator actually does: deploy something, check a host,
-inspect a container. Not a metrics wall.
-Code reality: Greeting row, status badge, workload cards (Running services,
-Active containers), Environments card, readiness section, recent deployments.
-Gap: none (Host resources button removed 2026-11-10 — CPU/memory lives on the
-per-host resources page).
+### Dashboard (sidebar: "Dashboard", route `/`)
+User intent: Metrics only. Live server metrics (24h CPU/memory charts
+aggregated across all hosts), total running services/containers (live count,
+provider-neutral via ContainerBackend trait — Docker now, K8s/Nix later),
+recent deployment activity. No hero banner, no greeting, no readiness
+section, no instance cards.
+Code reality: Metric cards (Active containers, Environments), 24h charts,
+recent activity feed.
+Gap: none (rebuilt 2026-11-10 per user direction).
 
 ### Deployment (sidebar: "Deployment", route `/hosts`)
 User intent: The operator's main work surface. Where you register a remote

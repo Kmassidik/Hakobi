@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{authenticated, html_response, load_providers, page_csrf, ProviderNotice};
+use super::{authenticated, html_response, load_providers, with_catalog, ProviderNotice};
 use crate::web::{agent_client::HostAgent, templates, AppState};
 use hakobi::providers::ContainerRow;
 
@@ -22,10 +22,10 @@ pub(crate) async fn dashboard(
         return axum::response::Redirect::to("/login").into_response();
     }
 
-    let (csrf_token, cookies) = page_csrf(&state, &headers);
+    let cookies = Vec::new();
     let agent = HostAgent::from_env();
     let agent_configured = agent.is_some();
-    let (readiness, agent_online) = match load_readiness(agent.as_ref()).await {
+    let (_, agent_online) = match load_readiness(agent.as_ref()).await {
         Ok(result) => result,
         Err(error) => {
             tracing::error!(error = %error, "readiness detection failed");
@@ -33,29 +33,22 @@ pub(crate) async fn dashboard(
         }
     };
     let metrics = collect_dashboard_metrics(&state).await;
-    let install_running = if agent_online && notice.notice.is_some() {
-        match &agent {
-            Some(agent) => agent
-                .install_status()
-                .await
-                .map(|jobs| jobs.values().any(|job| job.running))
-                .unwrap_or(false),
-            None => false,
-        }
-    } else {
-        false
-    };
+    let (history_points, activity) = load_dashboard_extras(&state).await;
+    let activity_views: Vec<templates::ActivityRow<'_>> = activity
+        .iter()
+        .map(|item| templates::ActivityRow {
+            deployment: &item.deployment,
+            environment_name: &item.environment_name,
+        })
+        .collect();
     let markup = templates::dashboard(templates::DashboardView {
-        base_url: &state.config.base_url,
-        csrf_token: &csrf_token,
-        tunnel_enabled: state.config.tunnel_enabled,
         username: &state.config.username,
-        readiness: &readiness,
         metrics: &metrics,
         notice: notice.notice.as_deref(),
         agent_configured,
         agent_online,
-        install_running,
+        history_points: &history_points,
+        activity: &activity_views,
     });
     html_response(StatusCode::OK, markup, cookies)
 }
@@ -156,4 +149,90 @@ fn account_rows(
             running_services.insert(service);
         }
     }
+}
+
+/// Owned activity row so the view can borrow without lifetime knots.
+struct ActivityItem {
+    environment_name: String,
+    deployment: hakobi::catalog::Deployment,
+}
+
+/// Loads 24h aggregate history (averaged across hosts) and recent deployments.
+async fn load_dashboard_extras(
+    state: &AppState,
+) -> (Vec<hakobi::metrics::HistoryPoint>, Vec<ActivityItem>) {
+    let history_path = hakobi::metrics::metrics_database_path(&state.catalog_path);
+    let history = tokio::task::spawn_blocking(move || -> Vec<hakobi::metrics::HistoryPoint> {
+        let now = hakobi::metrics::now_ms();
+        let from = now - 24 * 60 * 60_000;
+        let Ok(db) = hakobi::metrics::MetricsDb::open(&history_path) else {
+            return Vec::new();
+        };
+        aggregate_all_hosts(&db, from, now).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+
+    let activity = with_catalog(state, |catalog| {
+        let deployments = catalog.list_recent_deployments(10)?;
+        let environments = catalog.list_environments()?;
+        let names: std::collections::HashMap<&str, &str> = environments
+            .iter()
+            .map(|environment| (environment.id.as_str(), environment.name.as_str()))
+            .collect();
+        Ok(deployments
+            .into_iter()
+            .map(|deployment| ActivityItem {
+                environment_name: names
+                    .get(deployment.environment_id.as_str())
+                    .map(|name| (*name).to_owned())
+                    .unwrap_or_else(|| "deleted".to_owned()),
+                deployment,
+            })
+            .collect())
+    })
+    .await
+    .unwrap_or_default();
+    (history, activity)
+}
+
+/// Averages per-host rollups into one series across all hosts.
+fn aggregate_all_hosts(
+    db: &hakobi::metrics::MetricsDb,
+    from: i64,
+    to: i64,
+) -> anyhow::Result<Vec<hakobi::metrics::HistoryPoint>> {
+    let hosts = db.host_ids_with_data(from, to)?;
+    if hosts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let per_host = hosts
+        .iter()
+        .map(|host| db.query_1m(host, from, to))
+        .collect::<Result<Vec<_>, _>>()?;
+    // Group by timestamp, average values.
+    let mut buckets: std::collections::BTreeMap<i64, (f64, f64, usize)> = Default::default();
+    for points in &per_host {
+        for point in points {
+            let entry = buckets.entry(point.timestamp).or_default();
+            entry.0 += point.cpu_percent;
+            entry.1 += point.memory_percent;
+            entry.2 += 1;
+        }
+    }
+    Ok(buckets
+        .into_iter()
+        .map(|(timestamp, (cpu, memory, count))| {
+            let count = count as f64;
+            hakobi::metrics::HistoryPoint {
+                timestamp,
+                cpu_percent: cpu / count,
+                memory_percent: memory / count,
+                disk_used_bytes: 0,
+                disk_total_bytes: 0,
+                network_rx_bps: 0.0,
+                network_tx_bps: 0.0,
+            }
+        })
+        .collect())
 }

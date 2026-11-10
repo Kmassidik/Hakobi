@@ -2,23 +2,7 @@
 
 use maud::{html, Markup};
 
-use super::readiness::readiness_section;
-use hakobi::install::Readiness;
-
-use super::{brand, page, sidebar, status_badge, CONTENT_WIDTH, EYEBROW};
-
-pub struct DashboardView<'a> {
-    pub base_url: &'a str,
-    pub csrf_token: &'a str,
-    pub tunnel_enabled: bool,
-    pub username: &'a str,
-    pub readiness: &'a Readiness,
-    pub metrics: &'a DashboardMetrics,
-    pub notice: Option<&'a str>,
-    pub agent_configured: bool,
-    pub agent_online: bool,
-    pub install_running: bool,
-}
+use super::{brand, page, sidebar, CONTENT_WIDTH};
 
 #[derive(Debug, Clone, Default)]
 pub struct DashboardMetrics {
@@ -136,65 +120,6 @@ fn environments_card(metrics: &DashboardMetrics, inventory_known: bool) -> Marku
     }
 }
 
-fn instance_cards(base_url: &str, tunnel_enabled: bool) -> Markup {
-    html! {
-                        section class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3" aria-label="Instance details" {
-                            article class="min-w-0 rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
-                                p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-[#86868b]")) {
-                                    i class="fa-solid fa-globe" aria-hidden="true" {}
-                                    "Public address"
-                                }
-                                a class="block truncate text-[0.88rem] font-semibold no-underline" href=(base_url) { (base_url) }
-                            }
-                            article class="min-w-0 rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
-                                p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-[#86868b]")) {
-                                    i class="fa-solid fa-cloud" aria-hidden="true" {}
-                                    "Delivery"
-                                }
-                                @if tunnel_enabled {
-                                    p class="m-0 text-[0.88rem] font-semibold" {
-                                        "Cloudflare Tunnel"
-                                        span class="text-xs font-normal text-muted" { " · outbound only" }
-                                    }
-                                } @else {
-                                    p class="m-0 text-[0.88rem] font-semibold" {
-                                        "Loopback only"
-                                        span class="text-xs font-normal text-muted" { " · local development" }
-                                    }
-                                }
-                            }
-                            article class="min-w-0 rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
-                                p class=(format!("{EYEBROW} mb-3 flex items-center gap-2 text-[0.6rem] text-[#86868b]")) {
-                                    i class="fa-solid fa-shield-halved" aria-hidden="true" {}
-                                    "Session"
-                                }
-                                p class="m-0 text-[0.88rem] font-semibold" {
-                                    "Authenticated"
-                                    span class="text-xs font-normal text-muted" { " · 12 hour expiry" }
-                                }
-                            }
-                        }
-    }
-}
-
-fn hero_banner() -> Markup {
-    html! {
-                        section class="relative mb-6 flex min-h-[22rem] items-center overflow-hidden rounded-2xl bg-[#0f382c] px-8 py-10 text-white sm:px-12 lg:px-14 lg:py-14" aria-labelledby="hello-title" {
-                            img src="/assets/art/hero-pipeline.webp" alt="" aria-hidden="true" class="hero-art pointer-events-none absolute inset-0 h-full w-full object-cover";
-                            div aria-hidden="true" class="hero-scrim" {}
-                            div class="relative z-10 max-w-[36rem]" {
-                                p class="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-[#d8f078]" { "The first step is live" }
-                                h2 id="hello-title" class="m-0 font-sans text-[clamp(2.6rem,5vw,4.6rem)] font-semibold leading-none tracking-[-0.05em]" {
-                                    "Hello, world."
-                                }
-                                p class="mt-5 max-w-[31rem] text-[0.95rem] leading-[1.65] text-[#c3d2ca]" {
-                                    "Your self-hosted control plane is running. Authentication and secure delivery are in place—ready for whatever you ship next."
-                                }
-                            }
-                        }
-    }
-}
-
 fn mobile_header(csrf_token: &str, username: &str) -> Markup {
     html! {
                     header class="bg-[#f5f5f7]/90 backdrop-blur lg:hidden" {
@@ -234,93 +159,6 @@ fn dashboard_alerts(agent_configured: bool, agent_online: bool, notice: Option<&
                             }
                         }
                         (notice_banner(notice))
-    }
-}
-
-fn greeting_row(username: &str, control_label: &str, control_healthy: bool) -> Markup {
-    html! {
-                        div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between" {
-                            div {
-                                p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6e6e73]" { "Overview" }
-                                h1 class="m-0 font-sans text-[clamp(1.9rem,3vw,2.6rem)] font-semibold tracking-[-0.045em]" {
-                                    "Good to see you, " (username) "."
-                                }
-                            }
-                            div class="flex items-center gap-3" {
-                            (status_badge(control_label, control_healthy))
-                        }
-                        }
-    }
-}
-
-pub fn dashboard(view: DashboardView<'_>) -> Markup {
-    let DashboardView {
-        base_url,
-        csrf_token,
-        tunnel_enabled,
-        username,
-        readiness,
-        metrics,
-        notice,
-        agent_configured,
-        agent_online,
-        install_running,
-    } = view;
-    let control_healthy = !(agent_configured && !agent_online)
-        && metrics.providers_failed == 0
-        && !metrics.catalog_failed;
-    let control_label = if agent_configured && !agent_online {
-        "Host agent offline"
-    } else if metrics.catalog_failed || metrics.providers_failed > 0 {
-        "Control plane degraded"
-    } else {
-        "Control plane online"
-    };
-    page(
-        "Dashboard · Hakobi",
-        html! {
-            div class="min-h-screen bg-[#f5f5f7] lg:pl-64" data-install-watch=(if install_running { "true" } else { "false" }) {
-                (sidebar("overview", base_url, username, csrf_token))
-                (mobile_header(csrf_token, username))
-
-                main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
-                    (dashboard_alerts(agent_configured, agent_online, notice))
-                    (greeting_row(username, control_label, control_healthy))
-
-                    (metrics_section(metrics))
-
-                    (hero_banner())
-
-                    (readiness_section(readiness, csrf_token, agent_online, agent_configured))
-
-                    (instance_cards(base_url, tunnel_enabled))
-                    (install_dialog())
-                }
-
-                footer class=(format!("{CONTENT_WIDTH} flex flex-col gap-4 py-6 text-[0.65rem] tracking-[0.1em] text-[#86868b] sm:flex-row sm:justify-between")) {
-                    span { "Hakobi / 運び" }
-                    span { "Your infra. Your data." }
-                }
-            }
-        },
-    )
-}
-
-fn install_dialog() -> Markup {
-    html! {
-        dialog id="install-tool" class="w-[90%] max-w-[44rem] rounded-[0.85rem] border border-line bg-surface p-6 text-ink" aria-labelledby="install-tool-title" {
-            form method="dialog" class="m-0" {
-                h2 id="install-tool-title" class="m-0 font-display text-[1.5rem] font-normal" { "Install tool" }
-                p class="mt-3 text-sm leading-relaxed text-muted" {
-                    "Run this command on the host. The dashboard never installs anything by itself."
-                }
-                code class="mt-4 block overflow-x-auto rounded-[0.6rem] border border-line bg-surface px-4 py-3 font-mono text-xs text-ink" data-install-command { "…" }
-                div class="mt-5 flex flex-wrap gap-2" {
-                    button type="button" class="rounded-lg bg-brand px-3.5 py-2 text-[0.78rem] font-semibold text-white" data-copy-command { "Copy command" }
-                    button type="submit" class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink" data-dialog-close { "Close" }
-                }
-            }
-        }
     }
 }
 
@@ -433,5 +271,109 @@ fn containers_foot(
         )
     } else {
         inventory_note.to_owned()
+    }
+}
+
+/// View model for the dashboard page.
+pub struct DashboardView<'a> {
+    pub username: &'a str,
+    pub metrics: &'a DashboardMetrics,
+    pub notice: Option<&'a str>,
+    pub agent_configured: bool,
+    pub agent_online: bool,
+    /// Aggregate CPU/memory points across all hosts for the 24h charts.
+    pub history_points: &'a [hakobi::metrics::HistoryPoint],
+    /// Most recent deployments across all environments.
+    pub activity: &'a [ActivityRow<'a>],
+}
+
+/// One row of the recent-activity feed.
+pub struct ActivityRow<'a> {
+    pub deployment: &'a hakobi::catalog::Deployment,
+    pub environment_name: &'a str,
+}
+
+/// Renders the dashboard: metric cards, 24h charts, recent activity.
+pub fn dashboard(view: DashboardView<'_>) -> Markup {
+    let DashboardView {
+        username,
+        metrics,
+        notice,
+        agent_configured,
+        agent_online,
+        history_points,
+        activity,
+    } = view;
+    page(
+        "Dashboard · Hakobi",
+        html! {
+            div class="min-h-screen bg-[#f5f5f7] lg:pl-64" {
+                (sidebar("overview", "", username, ""))
+                (mobile_header("", username))
+                main class=(format!("{CONTENT_WIDTH} pb-24 pt-8 lg:pt-12")) {
+                    (dashboard_alerts(agent_configured, agent_online, notice))
+                    (metrics_section(metrics))
+                    (dashboard_charts(history_points))
+                    (recent_activity(activity))
+                }
+                footer class=(format!("{CONTENT_WIDTH} flex flex-col gap-4 py-6 text-[0.65rem] tracking-[0.1em] text-[#86868b] sm:flex-row sm:justify-between")) {
+                    span { "Hakobi / 運び" }
+                    span { "Your infra. Your data." }
+                }
+            }
+        },
+    )
+}
+
+/// 24h CPU and memory charts aggregated across all hosts.
+fn dashboard_charts(points: &[hakobi::metrics::HistoryPoint]) -> Markup {
+    let now = hakobi::metrics::now_ms();
+    let from = now - 24 * 60 * 60_000;
+    let cpu: Vec<(i64, f64)> = points
+        .iter()
+        .map(|p| (p.timestamp, p.cpu_percent))
+        .collect();
+    let memory: Vec<(i64, f64)> = points
+        .iter()
+        .map(|p| (p.timestamp, p.memory_percent))
+        .collect();
+    html! {
+        section class="mt-8" aria-label="Server metrics" {
+            h2 class="m-0 mb-3 text-[14px] font-semibold" { "Server metrics · 24h" }
+            div class="grid grid-cols-1 gap-4 md:grid-cols-2" {
+                div class="rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    (super::history::percent_chart(&cpu, from, now, "CPU"))
+                }
+                div class="rounded-xl bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    (super::history::percent_chart(&memory, from, now, "Memory"))
+                }
+            }
+        }
+    }
+}
+
+/// Recent deployments across all environments.
+fn recent_activity(rows: &[ActivityRow<'_>]) -> Markup {
+    html! {
+        section class="mt-8" aria-label="Recent activity" {
+            h2 class="m-0 mb-3 text-[14px] font-semibold" { "Recent activity" }
+            @if rows.is_empty() {
+                p class="m-0 rounded-xl bg-white p-4 text-sm text-muted shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
+                    "No deployments yet. Create an environment to deploy."
+                }
+            } @else {
+                div class="overflow-hidden rounded-[0.85rem] border border-line bg-white" {
+                    @for row in rows {
+                        div class="flex items-center justify-between gap-3 border-b border-line px-4 py-3 last:border-b-0" {
+                            div class="min-w-0" {
+                                p class="m-0 truncate text-[0.82rem] font-semibold" { (row.environment_name) }
+                                p class="m-0 mt-0.5 text-xs text-[#86868b]" { (row.deployment.started_at) }
+                            }
+                            span class="text-xs font-medium" { (row.deployment.status) }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

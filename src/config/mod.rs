@@ -65,7 +65,6 @@ pub struct PublicConfig {
     pub password_hash: String,
     pub base_url: String,
     pub secure_cookies: bool,
-    pub tunnel_enabled: bool,
 }
 
 impl Config {
@@ -96,7 +95,6 @@ impl Config {
             password_hash: self.auth.password_hash.clone(),
             base_url: self.base_url.clone(),
             secure_cookies: self.base_url.starts_with("https://"),
-            tunnel_enabled: self.cloudflare.is_some(),
         }
     }
 

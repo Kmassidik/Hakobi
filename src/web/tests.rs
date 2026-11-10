@@ -214,7 +214,6 @@ pub(crate) fn config() -> PublicConfig {
         password_hash: auth::hash_password("correct horse battery staple").unwrap(),
         base_url: "http://127.0.0.1:3000".into(),
         secure_cookies: false,
-        tunnel_enabled: false,
     }
 }
 
@@ -274,7 +273,7 @@ async fn login_dashboard_and_logout_enforce_the_session() {
     assert_eq!(dashboard.status(), StatusCode::OK);
     let body = to_bytes(dashboard.into_body(), 64 * 1024).await.unwrap();
     let body = String::from_utf8_lossy(&body);
-    assert!(body.contains("Hello, world."));
+    assert!(body.contains("Recent activity"));
     assert!(body.contains("aria-label=\"Mobile primary\""));
     assert!(body.contains("href=\"/environments\""));
     assert!(body.contains("href=\"/stacks\""));
@@ -882,13 +881,9 @@ async fn overview_renders_readiness_and_dialog_and_serves_the_script() {
     assert_eq!(dashboard.status(), StatusCode::OK);
     let body = to_bytes(dashboard.into_body(), 256 * 1024).await.unwrap();
     let body = String::from_utf8_lossy(&body);
-    assert!(body.contains("Host readiness"));
-    assert!(body.contains("Docker"));
-    assert!(body.contains("Compose"));
-    assert!(body.contains("kubectl"));
-    assert!(body.contains("Nixpacks"));
-    assert!(body.contains("id=\"install-tool\""));
-    assert!(body.contains("data-copy-command"));
+    assert!(body.contains("Server metrics · 24h"));
+    assert!(body.contains("Recent activity"));
+    assert!(body.contains("Active containers"));
     assert!(body.contains("hakobi.js?v="));
 
     let script = app
