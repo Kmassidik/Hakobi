@@ -9,3 +9,5 @@ __pycache__/
 .env
 *.tmp
 .DS_Store
+mockups/
+examples_gen.rs
