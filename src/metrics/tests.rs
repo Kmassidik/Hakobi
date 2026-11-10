@@ -275,3 +275,20 @@ async fn spawn_retention_job_is_created_and_cancelled_cleanly() {
     let outcome = handle.await;
     assert!(outcome.is_err()); // aborted
 }
+#[tokio::test]
+async fn local_agent_is_included_in_sampling_targets() {
+    // The app's own agent (env-configured) is sampled as host `local` even
+    // with no registered agents, so the machine Hakobi runs on reports
+    // dashboard metrics.
+    let directory = tempfile::tempdir().unwrap();
+    std::env::set_var("HAKOBI_AGENT_URL", "http://127.0.0.1:1");
+    std::env::set_var("HAKOBI_AGENT_TOKEN", "0123456789abcdef0123456789abcdef");
+    let targets =
+        crate::metrics::sampler::list_enabled_hosts(&directory.path().join("catalog.sqlite3"))
+            .await
+            .unwrap();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].0, "local");
+    std::env::remove_var("HAKOBI_AGENT_URL");
+    std::env::remove_var("HAKOBI_AGENT_TOKEN");
+}

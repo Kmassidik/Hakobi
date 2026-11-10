@@ -462,3 +462,60 @@
     font-size: 12px;
   }
 }
+
+@layer components {
+  /* Dashboard control-center components (mockup: server-monitor-dashboard) */
+  .card {
+    background: var(--color-surface);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+
+  .eyebrow {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #86868b;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    background: #e7f5ef;
+    color: #0d7a55;
+  }
+
+  .tag.warn {
+    background: #fdf3e0;
+    color: #a06a0a;
+  }
+
+  .tag.bad {
+    background: #fbeae7;
+    color: var(--color-danger);
+  }
+
+  .tag.idle {
+    background: #f1f1f4;
+    color: #68716c;
+  }
+
+  .delta.good {
+    color: #0d7a55;
+    font-weight: 600;
+  }
+
+  .delta.warn {
+    color: #a06a0a;
+    font-weight: 600;
+  }
+
+  .delta.bad {
+    color: var(--color-danger);
+    font-weight: 600;
+  }
+}

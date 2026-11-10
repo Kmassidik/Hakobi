@@ -253,7 +253,11 @@ async fn sampling_tick(catalog_path: &std::path::Path) -> Result<()> {
 }
 
 /// Enabled host agents from the catalog as `(id, url, token)` triples.
-async fn list_enabled_hosts(
+///
+/// The app's own host agent (configured via `HAKOBI_AGENT_URL` /
+/// `HAKOBI_AGENT_TOKEN`) is always included as host id `local` so the
+/// machine Hakobi runs on is sampled even with no registered agents.
+pub(super) async fn list_enabled_hosts(
     catalog_path: &std::path::Path,
 ) -> Result<Vec<(String, String, String)>> {
     let path = catalog_path.to_path_buf();
@@ -264,6 +268,16 @@ async fn list_enabled_hosts(
         for host in hosts.into_iter().filter(|host| host.enabled) {
             let token = catalog.host_agent_token(&host.id)?;
             resolved.push((host.id, host.agent_url, token));
+        }
+        if let Some(endpoint) = crate::host_agent::AgentEndpoint::from_env() {
+            let already = resolved.iter().any(|(_, url, _)| url == endpoint.url());
+            if !already {
+                resolved.push((
+                    "local".to_owned(),
+                    endpoint.url().to_owned(),
+                    endpoint.token().to_owned(),
+                ));
+            }
         }
         Ok(resolved)
     })
