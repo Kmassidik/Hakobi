@@ -107,11 +107,11 @@ pub(crate) async fn charts_partial(State(state): State<AppState>, headers: Heade
     if !authenticated(&state, &headers).await {
         return partial_unauthorized();
     }
-    let history_path = (*state.catalog_path).clone();
+    let metrics_path = hakobi::metrics::metrics_database_path(&state.catalog_path);
     let points = tokio::task::spawn_blocking(move || -> Vec<hakobi::metrics::HistoryPoint> {
         let now = hakobi::metrics::now_ms();
         let from = now - 24 * 60 * 60_000;
-        hakobi::metrics::MetricsDb::open(&history_path)
+        hakobi::metrics::MetricsDb::open(metrics_path)
             .map(|db| super::dashboard::aggregate_all_hosts(&db, from, now).unwrap_or_default())
             .unwrap_or_default()
     })

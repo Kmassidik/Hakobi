@@ -173,7 +173,7 @@ async fn load_dashboard_extras(
         let now = hakobi::metrics::now_ms();
         let from = now - 24 * 60 * 60_000;
         let live = live_cache.lock().map(|mut cache| cache.get_or_load(&history_path)).unwrap_or_default();
-        let history = hakobi::metrics::MetricsDb::open(&history_path)
+        let history = hakobi::metrics::MetricsDb::open(hakobi::metrics::metrics_database_path(&history_path))
             .map(|db| aggregate_all_hosts(&db, from, now).unwrap_or_default())
             .unwrap_or_default();
         (history, live)
