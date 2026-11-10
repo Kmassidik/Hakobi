@@ -20,7 +20,7 @@ fn pipeline_app(build_runner: Option<BuildRunnerClient>) -> (tempfile::TempDir, 
         Arc::new(PipelineBackend::new()),
         build_runner,
     );
-    (directory, app)
+    (directory, app.expect("router build"))
 }
 
 fn scripted_runner(script: PipelineScript) -> BuildRunnerClient {

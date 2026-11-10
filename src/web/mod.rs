@@ -129,6 +129,7 @@ pub fn router_with_backend(
         }
     };
     router_with_pipeline(config, catalog_path, backend, build_runner)
+        .expect("session secret load cannot fail for a writable data dir")
 }
 
 /// Builds the router with an explicit build runner client; tests inject a
@@ -138,11 +139,13 @@ pub(crate) fn router_with_pipeline(
     catalog_path: PathBuf,
     backend: Arc<dyn ContainerBackend>,
     build_runner: Option<BuildRunnerClient>,
-) -> Router {
+) -> anyhow::Result<Router> {
     let secure = config.secure_cookies;
     let state = AppState {
         config: Arc::new(config),
-        sessions: Arc::new(Sessions::default()),
+        sessions: Arc::new(Sessions::load(
+            catalog_path.parent().unwrap_or(Path::new(".")),
+        )?),
         limiter: Arc::new(LoginLimiter::default()),
         password_work: Arc::new(Semaphore::new(2)),
         catalog_path: Arc::new(catalog_path),
@@ -152,7 +155,7 @@ pub(crate) fn router_with_pipeline(
         live_cache: Arc::new(std::sync::Mutex::new(LiveSampleCache::default())),
     };
 
-    Router::new()
+    Ok(Router::new()
         .route("/", get(handlers::dashboard_redirect))
         .route("/dashboard", get(handlers::dashboard))
         .route("/providers", get(handlers::providers).post(handlers::add_provider))
@@ -315,5 +318,5 @@ pub(crate) fn router_with_pipeline(
             },
         ))
         .layer(CatchPanicLayer::new())
-        .layer(TraceLayer::new_for_http())
+        .layer(TraceLayer::new_for_http()))
 }
