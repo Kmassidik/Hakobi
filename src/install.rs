@@ -500,10 +500,12 @@ printf 'nixpacks 1.29.1\n'
     #[test]
     fn probes_time_out_instead_of_hanging() {
         let directory = tempfile::tempdir().expect("temp dir");
+        // No external commands: the child PATH is the tempdir, and some
+        // shells fall back to a default PATH and would find real `sleep`.
         write_fake(
             directory.path(),
             "docker",
-            "#!/bin/sh\nsleep 5\nprintf 'late\\n'\n",
+            "#!/bin/sh\nn=0\nwhile [ $n -lt 5000 ]; do n=$((n+1)); done\nprintf 'late\\n'\n",
         );
         let config = DetectConfig {
             path: directory.path().as_os_str().to_owned(),
