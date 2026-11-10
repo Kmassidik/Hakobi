@@ -18,7 +18,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
-pub use history::HistoryPoint;
+pub use history::{HistoryPoint, LatestLive};
 pub use rollups::{combine_1m, combine_5m, rollup_from_live, Rollup1h, Rollup1m, Rollup5m};
 pub use sampler::{
     advance_rollups, sample_host, spawn_retention_job, spawn_sampler, SamplingReport,

@@ -133,6 +133,56 @@ fn map_rollup_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryPoint> {
     })
 }
 
+/// The newest live sample per host: host id, sample, and sample timestamp.
+#[derive(Debug, Clone)]
+pub struct LatestLive {
+    pub host_id: String,
+    pub timestamp: i64,
+    pub cpu_percent: f64,
+    pub memory_used_bytes: u64,
+    pub memory_total_bytes: u64,
+    pub disk_used_bytes: u64,
+    pub disk_total_bytes: u64,
+    pub network_rx_bps: f64,
+    pub network_tx_bps: f64,
+    pub load_1: f64,
+}
+
+/// Reads the latest `metrics_live` row per host.
+pub fn latest_live_samples(connection: &rusqlite::Connection) -> Result<Vec<LatestLive>> {
+    let mut statement = connection
+        .prepare(
+            "SELECT l.host_id, l.timestamp, l.cpu_percent, l.memory_used_bytes, \
+             l.memory_total_bytes, l.disk_used_bytes, l.disk_total_bytes, \
+             l.network_rx_bps, l.network_tx_bps, l.load_1 \
+             FROM metrics_live l \
+             JOIN (SELECT host_id, MAX(timestamp) AS ts FROM metrics_live GROUP BY host_id) m \
+               ON l.host_id = m.host_id AND l.timestamp = m.ts",
+        )
+        .context("prepare latest live query")?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok(LatestLive {
+                host_id: row.get(0)?,
+                timestamp: row.get(1)?,
+                cpu_percent: row.get(2)?,
+                memory_used_bytes: row.get::<_, i64>(3)?.max(0) as u64,
+                memory_total_bytes: row.get::<_, i64>(4)?.max(0) as u64,
+                disk_used_bytes: row.get::<_, i64>(5)?.max(0) as u64,
+                disk_total_bytes: row.get::<_, i64>(6)?.max(0) as u64,
+                network_rx_bps: row.get(7)?,
+                network_tx_bps: row.get(8)?,
+                load_1: row.get(9)?,
+            })
+        })
+        .context("read latest live rows")?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
 /// Public re-export used by the MetricsDb CRUD surface.
 impl super::MetricsDb {
     /// Reads 1-minute rollups for one host within `[from, to]` (milliseconds).
@@ -153,5 +203,10 @@ impl super::MetricsDb {
     /// Reads 1-hour rollups for one host within `[from, to]` (milliseconds).
     pub fn query_1h(&self, host_id: &str, from: i64, to: i64) -> Result<Vec<HistoryPoint>> {
         query_1h(&self.connection, host_id, from, to)
+    }
+
+    /// Reads the latest live sample per host.
+    pub fn latest_live_samples(&self) -> Result<Vec<LatestLive>> {
+        latest_live_samples(&self.connection)
     }
 }

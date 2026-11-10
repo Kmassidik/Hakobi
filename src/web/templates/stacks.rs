@@ -21,7 +21,7 @@ pub fn stacks(
     page(
         "Stacks · Hakobi",
         html! {
-            div class="min-h-screen lg:pl-64" {
+            div class="min-h-screen lg:pl-60" {
                 (sidebar("stacks", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
@@ -223,7 +223,7 @@ pub fn stack_form(
     page(
         &title,
         html! {
-            div class="min-h-screen lg:pl-64" {
+            div class="min-h-screen lg:pl-60" {
                 (sidebar("stacks", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
@@ -349,7 +349,7 @@ pub fn stack_delete(
     page(
         "Delete stack · Hakobi",
         html! {
-            div class="min-h-screen lg:pl-64" {
+            div class="min-h-screen lg:pl-60" {
                 (sidebar("stacks", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
@@ -405,7 +405,7 @@ pub fn stack_detail(
     page(
         "Stack · Hakobi",
         html! {
-            div class="min-h-screen lg:pl-64" {
+            div class="min-h-screen lg:pl-60" {
                 (sidebar("stacks", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {

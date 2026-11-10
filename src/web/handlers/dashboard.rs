@@ -33,7 +33,7 @@ pub(crate) async fn dashboard(
         }
     };
     let metrics = collect_dashboard_metrics(&state).await;
-    let (history_points, activity) = load_dashboard_extras(&state).await;
+    let (history_points, live, activity) = load_dashboard_extras(&state).await;
     let activity_views: Vec<templates::ActivityRow<'_>> = activity
         .iter()
         .map(|item| templates::ActivityRow {
@@ -48,6 +48,7 @@ pub(crate) async fn dashboard(
         agent_configured,
         agent_online,
         history_points: &history_points,
+        live: &live,
         activity: &activity_views,
     });
     html_response(StatusCode::OK, markup, cookies)
@@ -160,15 +161,21 @@ struct ActivityItem {
 /// Loads 24h aggregate history (averaged across hosts) and recent deployments.
 async fn load_dashboard_extras(
     state: &AppState,
-) -> (Vec<hakobi::metrics::HistoryPoint>, Vec<ActivityItem>) {
+) -> (
+    Vec<hakobi::metrics::HistoryPoint>,
+    Vec<hakobi::metrics::LatestLive>,
+    Vec<ActivityItem>,
+) {
     let history_path = hakobi::metrics::metrics_database_path(&state.catalog_path);
-    let history = tokio::task::spawn_blocking(move || -> Vec<hakobi::metrics::HistoryPoint> {
+    let (history, live) = tokio::task::spawn_blocking(move || -> (Vec<hakobi::metrics::HistoryPoint>, Vec<hakobi::metrics::LatestLive>) {
         let now = hakobi::metrics::now_ms();
         let from = now - 24 * 60 * 60_000;
         let Ok(db) = hakobi::metrics::MetricsDb::open(&history_path) else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
-        aggregate_all_hosts(&db, from, now).unwrap_or_default()
+        let live = db.latest_live_samples().unwrap_or_default();
+        let history = aggregate_all_hosts(&db, from, now).unwrap_or_default();
+        (history, live)
     })
     .await
     .unwrap_or_default();
@@ -193,7 +200,7 @@ async fn load_dashboard_extras(
     })
     .await
     .unwrap_or_default();
-    (history, activity)
+    (history, live, activity)
 }
 
 /// Averages per-host rollups into one series across all hosts.

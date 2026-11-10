@@ -75,9 +75,9 @@ pub(crate) fn brand(home_label: &str) -> Markup {
 
 fn nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str) -> Markup {
     let class = if active == key {
-        "relative flex items-center gap-3 rounded-lg bg-slate-100 px-3.5 py-2.5 text-sm font-semibold text-slate-900 no-underline before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-brand"
+        "relative flex items-center gap-3 rounded-lg bg-slate-100 px-3 py-2 text-[0.8rem] font-semibold text-slate-900 no-underline before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-brand"
     } else {
-        "flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-sm font-semibold text-slate-500 no-underline transition hover:bg-slate-50 hover:text-slate-900"
+        "flex items-center gap-3 rounded-lg px-3 py-2 text-[0.8rem] font-semibold text-slate-500 no-underline transition hover:bg-slate-50 hover:text-slate-900"
     };
     html! {
         a class=(class) href=(href) aria-current=(if active == key { "page" } else { "false" }) {
@@ -103,9 +103,9 @@ fn mobile_nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str)
 
 fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Markup {
     html! {
-        aside class="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col bg-white px-5 py-6 lg:flex" aria-label="Sidebar" {
+        aside class="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col overflow-y-auto bg-white px-4 py-5 lg:flex" aria-label="Sidebar" {
             div class="px-1" { (brand("Hakobi dashboard")) }
-            nav class="mt-9 flex flex-col gap-1" aria-label="Primary" {
+            nav class="mt-7 flex flex-col gap-0.5" aria-label="Primary" {
                 (nav_item(active, "overview", "/", "fa-square-poll-vertical", "Overview"))
                 (nav_item(active, "environments", "/environments", "fa-layer-group", "Environments"))
                 (nav_item(active, "stacks", "/stacks", "fa-cubes-stacked", "Stacks"))
@@ -114,7 +114,7 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
                 (nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
                 (nav_item(active, "deployment", "/hosts", "fa-rocket", "Deployment"))
             }
-            div class="mt-auto" {
+            div class="mt-auto pt-4" {
                 div class="rounded-xl bg-[#f5f5f7] p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
                     div class="flex items-center gap-3" {
                         span class="grid size-9 shrink-0 place-items-center rounded-full bg-brand text-xs font-bold uppercase text-white" aria-hidden="true" {

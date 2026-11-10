@@ -257,7 +257,7 @@ pub fn host_resources(
     page(
         format!("{host_label} resources · Hakobi").as_str(),
         html! {
-            div class="min-h-screen lg:pl-64" {
+            div class="min-h-screen lg:pl-60" {
                 (sidebar("deployment", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
@@ -402,7 +402,7 @@ pub fn hosts(base_url: &str, username: &str, csrf_token: &str, hosts: &[HostAgen
     page(
         "Deployment · Hakobi",
         html! {
-            div class="min-h-screen lg:pl-64" {
+            div class="min-h-screen lg:pl-60" {
                 (sidebar("deployment", base_url, username, csrf_token))
                 header class="lg:hidden border-b border-line bg-paper/95" {
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
