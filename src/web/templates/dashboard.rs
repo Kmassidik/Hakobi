@@ -216,6 +216,12 @@ fn section_title(text: &str, small: &str) -> Markup {
 
 /// Time-series chart panels. The canvas elements are drawn by dashboard.js.
 pub fn chart_section(points: &[hakobi::metrics::HistoryPoint]) -> Markup {
+    eprintln!(
+        "DBG charts points={} disk_last={:?} rx_last={:?}",
+        points.len(),
+        points.last().map(|p| p.disk_used_bytes),
+        points.last().map(|p| p.network_rx_bps)
+    );
     let series: Vec<f64> = points.iter().map(|p| p.cpu_percent).collect();
     let memory: Vec<f64> = points.iter().map(|p| p.memory_percent).collect();
     let disk: Vec<f64> = points

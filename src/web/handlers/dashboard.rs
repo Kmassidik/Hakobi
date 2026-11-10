@@ -205,6 +205,17 @@ async fn load_dashboard_extras(
 }
 
 /// Averages per-host rollups into one series across all hosts.
+/// Per-timestamp accumulator for cross-host aggregation.
+#[derive(Default)]
+struct AggregateEntry {
+    cpu: f64,
+    memory: f64,
+    count: usize,
+    disk_used: u64,
+    network_rx: f64,
+    network_tx: f64,
+}
+
 pub(crate) fn aggregate_all_hosts(
     db: &hakobi::metrics::MetricsDb,
     from: i64,
@@ -218,28 +229,32 @@ pub(crate) fn aggregate_all_hosts(
         .iter()
         .map(|host| db.query_1m(host, from, to))
         .collect::<Result<Vec<_>, _>>()?;
-    // Group by timestamp, average values.
-    let mut buckets: std::collections::BTreeMap<i64, (f64, f64, usize)> = Default::default();
+    // Group by timestamp: CPU/memory average across hosts, disk is the max
+    // (usage snapshot per host), network sums (traffic aggregates).
+    let mut buckets: std::collections::BTreeMap<i64, AggregateEntry> = Default::default();
     for points in &per_host {
         for point in points {
             let entry = buckets.entry(point.timestamp).or_default();
-            entry.0 += point.cpu_percent;
-            entry.1 += point.memory_percent;
-            entry.2 += 1;
+            entry.cpu += point.cpu_percent;
+            entry.memory += point.memory_percent;
+            entry.count += 1;
+            entry.disk_used = entry.disk_used.max(point.disk_used_bytes);
+            entry.network_rx += point.network_rx_bps;
+            entry.network_tx += point.network_tx_bps;
         }
     }
     Ok(buckets
         .into_iter()
-        .map(|(timestamp, (cpu, memory, count))| {
-            let count = count as f64;
+        .map(|(timestamp, entry)| {
+            let count = entry.count as f64;
             hakobi::metrics::HistoryPoint {
                 timestamp,
-                cpu_percent: cpu / count,
-                memory_percent: memory / count,
-                disk_used_bytes: 0,
+                cpu_percent: entry.cpu / count,
+                memory_percent: entry.memory / count,
+                disk_used_bytes: entry.disk_used,
                 disk_total_bytes: 0,
-                network_rx_bps: 0.0,
-                network_tx_bps: 0.0,
+                network_rx_bps: entry.network_rx,
+                network_tx_bps: entry.network_tx,
             }
         })
         .collect())
