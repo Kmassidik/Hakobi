@@ -122,14 +122,24 @@ fn load_1h(
 }
 
 fn map_rollup_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryPoint> {
+    // Named column lookups: the rollup tables have extra columns (cpu_max,
+    // memory_max) between the ones we read, so positional get() silently
+    // returned the wrong columns for disk and network. The 1h table has no
+    // network columns at all; absent columns degrade to zero.
+    let network = |name: &str| {
+        row.get::<_, Option<f64>>(name)
+            .ok()
+            .flatten()
+            .unwrap_or(0.0)
+    };
     Ok(HistoryPoint {
-        timestamp: row.get(0)?,
-        cpu_percent: row.get(1)?,
-        memory_percent: row.get(2)?,
-        disk_used_bytes: row.get::<_, i64>(3)?.max(0) as u64,
+        timestamp: row.get("timestamp")?,
+        cpu_percent: row.get("cpu_avg")?,
+        memory_percent: row.get("memory_avg")?,
+        disk_used_bytes: row.get::<_, i64>("disk_used")?.max(0) as u64,
         disk_total_bytes: 0,
-        network_rx_bps: row.get(4)?,
-        network_tx_bps: row.get(5)?,
+        network_rx_bps: network("network_rx_avg"),
+        network_tx_bps: network("network_tx_avg"),
     })
 }
 

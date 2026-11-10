@@ -292,3 +292,28 @@ async fn local_agent_is_included_in_sampling_targets() {
     std::env::remove_var("HAKOBI_AGENT_URL");
     std::env::remove_var("HAKOBI_AGENT_TOKEN");
 }
+
+#[test]
+fn disk_and_network_map_to_correct_columns() -> Result<()> {
+    // Regression: map_rollup_row used positional indexes while the 1m table
+    // interleaves cpu_max/memory_max, so disk and network silently read the
+    // wrong columns and always rendered zero on the dashboard.
+    let (_data, metrics) = open_temp_metrics();
+    let rollup = Rollup1m {
+        cpu_avg: 10.0,
+        cpu_max: 20.0,
+        memory_avg: 30.0,
+        memory_max: 40.0,
+        disk_used: 2_050_000_000_000,
+        network_rx_avg: 900_000.0,
+        network_tx_avg: 450_000.0,
+    };
+    metrics.insert_1m_rollup("local", 1_000, &rollup)?;
+    let point = &metrics.query_1m("local", 0, 2_000)?[0];
+    assert_eq!(point.disk_used_bytes, 2_050_000_000_000);
+    assert!((point.network_rx_bps - 900_000.0).abs() < 1e-9);
+    assert!((point.network_tx_bps - 450_000.0).abs() < 1e-9);
+    assert!((point.cpu_percent - 10.0).abs() < 1e-9);
+    assert!((point.memory_percent - 30.0).abs() < 1e-9);
+    Ok(())
+}
