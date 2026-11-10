@@ -153,7 +153,8 @@ pub(crate) fn router_with_pipeline(
     };
 
     Router::new()
-        .route("/", get(handlers::dashboard))
+        .route("/", get(handlers::dashboard_redirect))
+        .route("/dashboard", get(handlers::dashboard))
         .route("/providers", get(handlers::providers).post(handlers::add_provider))
         .route("/providers/{id}/test", post(handlers::test_provider))
         .route("/providers/{id}/toggle", post(handlers::toggle_provider))

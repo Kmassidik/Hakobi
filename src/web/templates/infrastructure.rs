@@ -23,7 +23,7 @@ pub fn infrastructure(
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
                         (brand("Hakobi dashboard"))
                         nav class="flex items-center gap-1 text-[0.8rem] font-semibold max-md:hidden" aria-label="Primary" {
-                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/" { "Overview" }
+                            a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/dashboard" { "Overview" }
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/providers" { "Providers" }
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/stacks" { "Stacks" }
                             a class="rounded-lg px-3 py-2 no-underline transition hover:bg-surface" href="/containers" { "Containers" }

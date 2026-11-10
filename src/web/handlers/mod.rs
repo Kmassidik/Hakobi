@@ -21,7 +21,7 @@ pub(crate) use containers::{
     container_create, container_delete, container_new, container_restart, container_start,
     container_stop, containers,
 };
-pub(crate) use dashboard::dashboard;
+pub(crate) use dashboard::{dashboard, dashboard_redirect};
 pub(crate) use deployment_pages::{
     deployment_list_partial, deployment_page, environment_webhook_page, environment_webhook_submit,
 };

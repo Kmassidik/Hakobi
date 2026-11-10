@@ -23,7 +23,7 @@ pub fn containers(
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
                         (brand("Hakobi dashboard"))
                         div class="flex items-center gap-4" {
-                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/" { "Back to overview" }
+                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/dashboard" { "Back to overview" }
                             a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/providers" { "Providers" }
                             span class="text-sm text-muted max-sm:hidden" { (username) }
                             form method="post" action="/logout" class="m-0" {

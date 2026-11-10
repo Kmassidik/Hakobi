@@ -230,6 +230,20 @@ fn cookie(response: &Response, name: &str) -> String {
 }
 
 #[tokio::test]
+async fn root_redirects_to_dashboard() {
+    let (_data, app) = app();
+    let response = app
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        "/dashboard"
+    );
+}
+
+#[tokio::test]
 async fn login_dashboard_and_logout_enforce_the_session() {
     let (_data, app) = app();
     let login_page = app
@@ -263,7 +277,7 @@ async fn login_dashboard_and_logout_enforce_the_session() {
     let dashboard = app
         .clone()
         .oneshot(
-            Request::get("/")
+            Request::get("/dashboard")
                 .header(COOKIE, session.clone())
                 .body(Body::empty())
                 .unwrap(),
@@ -323,7 +337,7 @@ async fn login_dashboard_and_logout_enforce_the_session() {
     let still_authenticated = app
         .clone()
         .oneshot(
-            Request::get("/")
+            Request::get("/dashboard")
                 .header(COOKIE, session.clone())
                 .body(Body::empty())
                 .unwrap(),
@@ -350,7 +364,7 @@ async fn login_dashboard_and_logout_enforce_the_session() {
 
     let after_logout = app
         .oneshot(
-            Request::get("/")
+            Request::get("/dashboard")
                 .header(COOKIE, session)
                 .body(Body::empty())
                 .unwrap(),
@@ -871,7 +885,7 @@ async fn overview_renders_readiness_and_dialog_and_serves_the_script() {
     let dashboard = app
         .clone()
         .oneshot(
-            Request::get("/")
+            Request::get("/dashboard")
                 .header(COOKIE, authenticated)
                 .body(Body::empty())
                 .unwrap(),

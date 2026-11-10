@@ -259,3 +259,8 @@ pub(crate) fn aggregate_all_hosts(
         })
         .collect())
 }
+
+/// Redirects the legacy `/` bookmark to `/dashboard`.
+pub(crate) async fn dashboard_redirect() -> Response {
+    axum::response::Redirect::to("/dashboard").into_response()
+}

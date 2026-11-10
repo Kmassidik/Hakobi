@@ -43,7 +43,7 @@ pub fn environments(
                     div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
                         (brand("Hakobi dashboard"))
                         div class="flex items-center gap-4" {
-                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/" { "Overview" }
+                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/dashboard" { "Overview" }
                             span class="text-sm text-muted max-sm:hidden" { (username) }
                             form method="post" action="/logout" class="m-0" {
                                 input type="hidden" name="csrf_token" value=(csrf_token);

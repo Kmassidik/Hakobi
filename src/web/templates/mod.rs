@@ -68,7 +68,7 @@ pub(crate) fn page(title: &str, content: Markup) -> Markup {
 
 pub(crate) fn brand(home_label: &str) -> Markup {
     html! {
-        a class=(BRAND) href="/" aria-label=(home_label) {
+        a class=(BRAND) href="/dashboard" aria-label=(home_label) {
             span class=(BRAND_MARK) aria-hidden="true" { "運" }
             span { "Hakobi" }
         }
@@ -108,7 +108,7 @@ fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Ma
         aside class="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col overflow-y-auto bg-white px-4 py-5 lg:flex" aria-label="Sidebar" {
             div class="px-1" { (brand("Hakobi dashboard")) }
             nav class="mt-7 flex flex-col gap-0.5" aria-label="Primary" {
-                (nav_item(active, "overview", "/", "fa-square-poll-vertical", "Overview"))
+                (nav_item(active, "overview", "/dashboard", "fa-square-poll-vertical", "Dashboard"))
                 (nav_item(active, "environments", "/environments", "fa-layer-group", "Environments"))
                 (nav_item(active, "stacks", "/stacks", "fa-cubes-stacked", "Stacks"))
                 (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
@@ -241,7 +241,7 @@ fn mobile_sidebar(active: &str, _base_url: &str, _username: &str, _csrf_token: &
     html! {
             nav class="fixed inset-x-0 bottom-0 z-40 bg-white/95 px-2 pb-2 pt-1.5 shadow-[0_-1px_3px_rgba(0,0,0,0.04)] backdrop-blur lg:hidden" aria-label="Mobile primary" {
                 div class="mx-auto grid max-w-md grid-cols-6 gap-0.5" {
-                    (mobile_nav_item(active, "overview", "/", "fa-square-poll-vertical", "Overview"))
+                    (mobile_nav_item(active, "overview", "/dashboard", "fa-square-poll-vertical", "Dashboard"))
                     (mobile_nav_item(active, "environments", "/environments", "fa-layer-group", "Envs"))
                     (mobile_nav_item(active, "stacks", "/stacks", "fa-cubes-stacked", "Stacks"))
                     (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
