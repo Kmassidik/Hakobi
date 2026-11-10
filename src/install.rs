@@ -505,7 +505,7 @@ printf 'nixpacks 1.29.1\n'
         write_fake(
             directory.path(),
             "docker",
-            "#!/bin/sh\nn=0\nwhile [ $n -lt 5000 ]; do n=$((n+1)); done\nprintf 'late\\n'\n",
+            "#!/bin/sh\nn=0\nwhile [ $n -lt 200000000 ]; do n=$((n+1)); done\nprintf 'late\\n'\n",
         );
         let config = DetectConfig {
             path: directory.path().as_os_str().to_owned(),
