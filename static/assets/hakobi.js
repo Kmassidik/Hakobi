@@ -218,7 +218,15 @@
     var ch = height - pad.top - pad.bottom;
     var isPercent = canvas.dataset.chart === "percent";
     var max = 100;
-    if (!isPercent) {
+    if (isPercent) {
+      var peak = 0;
+      series.forEach(function (s) {
+        s.values.forEach(function (v) {
+          if (v > peak) peak = v;
+        });
+      });
+      if (peak < 10) max = niceCeil(Math.max(peak * 1.3, 2));
+    } else {
       max = 1;
       series.forEach(function (s) {
         s.values.forEach(function (v) {

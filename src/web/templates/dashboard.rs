@@ -178,7 +178,14 @@ fn stat_cards(stats: &LiveStats, metrics: &DashboardMetrics) -> Markup {
     };
     html! {
         div id="overview-metrics" class="mb-5 grid grid-cols-2 gap-3.5 xl:grid-cols-4" hx-get="/partials/metrics" hx-trigger="every 15s" hx-swap="outerHTML" aria-label="System status" {
-            (stat_card("CPU utilization", &format!("{:.1}%", stats.cpu_percent), &format!("{} hosts · avg live", stats.hosts_reporting), "live", cpu_class, "fa-gauge-high"))
+            (stat_card(
+                "CPU utilization",
+                &format!("{:.2}%", stats.cpu_percent),
+                &format!("{} hosts · avg live", stats.hosts_reporting),
+                "live",
+                cpu_class,
+                "fa-gauge-high",
+            ))
             (stat_card("Memory utilization", &format!("{:.1}%", stats.memory_percent), &format!("{:.1} / {:.1} GiB", stats.memory_used_gb, stats.memory_total_gb), "live", mem_class, "fa-memory"))
             (stat_card("Active containers", &format!("{} / {}", metrics.containers_healthy, metrics.containers_total.max(1)), &format!("{} restarting", metrics.containers_restarting), "provider trait", "delta good", "fa-cube"))
             (stat_card("Environments", &format!("{}", metrics.stacks), "registered", &format!("{} hosts up", stats.hosts_reporting), host_delta, "fa-layer-group"))
