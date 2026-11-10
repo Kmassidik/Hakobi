@@ -19,8 +19,8 @@ pub struct DashboardMetrics {
     pub catalog_failed: bool,
 }
 
-pub fn metrics_section(metrics: &DashboardMetrics) -> Markup {
-    let stats = LiveStats::from_samples(&[], metrics);
+pub fn metrics_section(live: &[hakobi::metrics::LatestLive], metrics: &DashboardMetrics) -> Markup {
+    let stats = LiveStats::from_samples(live, metrics);
     stat_cards(&stats, metrics)
 }
 

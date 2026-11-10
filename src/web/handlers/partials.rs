@@ -85,9 +85,17 @@ pub(crate) async fn metrics_partial(State(state): State<AppState>, headers: Head
         return partial_unauthorized();
     }
     let metrics = collect_dashboard_metrics(&state).await;
+    let metrics_path = hakobi::metrics::metrics_database_path(&state.catalog_path);
+    let live = tokio::task::spawn_blocking(move || -> Vec<hakobi::metrics::LatestLive> {
+        hakobi::metrics::MetricsDb::open(&metrics_path)
+            .and_then(|db| db.latest_live_samples())
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
     html_response(
         StatusCode::OK,
-        templates::metrics_section(&metrics),
+        templates::metrics_section(&live, &metrics),
         Vec::new(),
     )
 }
