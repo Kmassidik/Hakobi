@@ -77,96 +77,99 @@ fn settings_page_markup(
     default_branch: &str,
     auto_deploy: bool,
 ) -> Markup {
-    html! {
-        div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {
-            (super::super::templates::sidebar("settings", base_url, username, ""))
-            (super::super::templates::mobile_header("", username))
-            main class="mx-auto w-[92%] max-w-[60rem] pb-24 pt-10 lg:pt-16" {
-                p class="mb-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-brand-bright" { "Settings" }
-                h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Settings" }
+crate::web::templates::page(
+        "Settings · Hakobi",
+        html! {
+            div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {
+                (crate::web::templates::sidebar("settings", base_url, username, ""))
+                (crate::web::templates::mobile_header("", username))
+                main class="mx-auto w-[92%] max-w-[60rem] pb-24 pt-10 lg:pt-16" {
+                    p class="mb-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-brand-bright" { "Settings" }
+                    h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Settings" }
 
-                // ---------- Integrations: GitHub ----------
-                section class="mt-8 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="gh-heading" {
-                    div class="flex items-center justify-between gap-4" {
-                        div class="flex items-center gap-3" {
-                            i class="fa-brands fa-github text-[1.5rem] text-ink" aria-hidden="true" {}
-                            h2 id="gh-heading" class="m-0 text-[1.05rem] font-bold" { "GitHub" }
-                        }
-                        @if app_installed {
-                            span class="rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700" { "Connected" }
-                        } @else {
-                            span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Not connected" }
-                        }
-                    }
-                    p class="m-0 mt-2 max-w-[36rem] text-sm leading-relaxed text-muted" {
-                        "Install the Hakobi GitHub App to scan repositories, build on push, and report commit statuses. Sign in with GitHub to pick your repos in environment forms."
-                    }
-                    div class="mt-4 flex flex-wrap items-center gap-3" {
-                        @if app_installed {
-                            @if let Some(login) = github_login {
-                                span class="text-sm text-muted" { "Signed in as " (login) }
+                    // ---------- Integrations: GitHub ----------
+                    section class="mt-8 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="gh-heading" {
+                        div class="flex items-center justify-between gap-4" {
+                            div class="flex items-center gap-3" {
+                                i class="fa-brands fa-github text-[1.5rem] text-ink" aria-hidden="true" {}
+                                h2 id="gh-heading" class="m-0 text-[1.05rem] font-bold" { "GitHub" }
+                            }
+                            @if app_installed {
+                                span class="rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700" { "Connected" }
                             } @else {
-                                form method="post" action="/settings/github/connect" class="m-0" {
-                                    button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Sign in with GitHub" }
+                                span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Not connected" }
+                            }
+                        }
+                        p class="m-0 mt-2 max-w-[36rem] text-sm leading-relaxed text-muted" {
+                            "Install the Hakobi GitHub App to scan repositories, build on push, and report commit statuses. Sign in with GitHub to pick your repos in environment forms."
+                        }
+                        div class="mt-4 flex flex-wrap items-center gap-3" {
+                            @if app_installed {
+                                @if let Some(login) = github_login {
+                                    span class="text-sm text-muted" { "Signed in as " (login) }
+                                } @else {
+                                    form method="post" action="/settings/github/connect" class="m-0" {
+                                        button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Sign in with GitHub" }
+                                    }
                                 }
+                            } @else {
+                                form method="post" action="/settings/github/install" class="m-0" {
+                                    button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Install GitHub App" }
+                                }
+                                span class="text-xs text-muted" { "Approve on github.com — no passwords shared." }
                             }
-                        } @else {
-                            form method="post" action="/settings/github/install" class="m-0" {
-                                button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Install GitHub App" }
-                            }
-                            span class="text-xs text-muted" { "Approve on github.com — no passwords shared." }
                         }
                     }
-                }
 
-                // ---------- Build tools grid (moved from overview) ----------
-                section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="tools-heading" {
-                    h2 id="tools-heading" class="m-0 text-[1.05rem] font-bold" { "Build tools" }
-                    p class="m-0 mt-1 text-sm text-muted" {
-                        "Detected on the control-plane host. An environment can use a tool once its badge is green."
-                    }
-                    div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" {
-                        (tool_tile("fab fa-docker", "Docker", &readiness.docker, "Container builds, compose, deploys"))
-                        (tool_tile("fab fa-golang", "Go builds", &readiness.docker, "Via Docker multi-stage builds"))
-                        (tool_tile("fas fa-cube", "Nixpacks", &readiness.nixpacks, "Zero-config builds — pick as build type"))
-                        (tool_tile("fas fa-dharmachakra", "Kubernetes", &readiness.kubectl, "Planned — deploy target not wired yet"))
-                    }
-                }
-
-                // ---------- Deployment defaults ----------
-                section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="defaults-heading" {
-                    h2 id="defaults-heading" class="m-0 text-[1.05rem] font-bold" { "Deployment defaults" }
-                    p class="m-0 mt-1 text-sm text-muted" { "Applied to newly created environments." }
-                    form method="post" action="/settings/defaults" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end" {
-                        label class="grid gap-1.5" {
-                            span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Default branch" }
-                            input name="default_branch" value=(default_branch) class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" required;
+                    // ---------- Build tools grid (moved from overview) ----------
+                    section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="tools-heading" {
+                        h2 id="tools-heading" class="m-0 text-[1.05rem] font-bold" { "Build tools" }
+                        p class="m-0 mt-1 text-sm text-muted" {
+                            "Detected on the control-plane host. An environment can use a tool once its badge is green."
                         }
-                        div class="flex items-end gap-3" {
-                            label class="flex items-center gap-2 pb-2.5 text-sm" {
-                                input name="auto_deploy_default" type="checkbox" value="1" checked[auto_deploy] class="size-4";
-                                "Auto-deploy on push"
+                        div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" {
+                            (tool_tile("fab fa-docker", "Docker", &readiness.docker, "Container builds, compose, deploys"))
+                            (tool_tile("fab fa-golang", "Go builds", &readiness.docker, "Via Docker multi-stage builds"))
+                            (tool_tile("fas fa-cube", "Nixpacks", &readiness.nixpacks, "Zero-config builds — pick as build type"))
+                            (tool_tile("fas fa-dharmachakra", "Kubernetes", &readiness.kubectl, "Planned — deploy target not wired yet"))
+                        }
+                    }
+
+                    // ---------- Deployment defaults ----------
+                    section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="defaults-heading" {
+                        h2 id="defaults-heading" class="m-0 text-[1.05rem] font-bold" { "Deployment defaults" }
+                        p class="m-0 mt-1 text-sm text-muted" { "Applied to newly created environments." }
+                        form method="post" action="/settings/defaults" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end" {
+                            label class="grid gap-1.5" {
+                                span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Default branch" }
+                                input name="default_branch" value=(default_branch) class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" required;
                             }
-                            button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Save" }
+                            div class="flex items-end gap-3" {
+                                label class="flex items-center gap-2 pb-2.5 text-sm" {
+                                    input name="auto_deploy_default" type="checkbox" value="1" checked[auto_deploy] class="size-4";
+                                    "Auto-deploy on push"
+                                }
+                                button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Save" }
+                            }
                         }
                     }
-                }
 
-                // ---------- Instance ----------
-                section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="instance-heading" {
-                    h2 id="instance-heading" class="m-0 text-[1.05rem] font-bold" { "Instance" }
-                    div class="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_1fr]" {
-                        span class="font-semibold" { "Base URL" }
-                        span class="break-all text-muted" { (base_url) }
-                        span class="font-semibold" { "Session lifetime" }
-                        span class="text-muted" { "12 hours (JWT)" }
-                        span class="font-semibold" { "Signed in as" }
-                        span class="text-muted" { (username) }
+                    // ---------- Instance ----------
+                    section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="instance-heading" {
+                        h2 id="instance-heading" class="m-0 text-[1.05rem] font-bold" { "Instance" }
+                        div class="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_1fr]" {
+                            span class="font-semibold" { "Base URL" }
+                            span class="break-all text-muted" { (base_url) }
+                            span class="font-semibold" { "Session lifetime" }
+                            span class="text-muted" { "12 hours (JWT)" }
+                            span class="font-semibold" { "Signed in as" }
+                            span class="text-muted" { (username) }
+                        }
                     }
                 }
             }
-        }
-    }
+        },
+    )
 }
 
 fn tool_tile(icon: &str, name: &str, status: &ToolStatus, description: &str) -> Markup {
