@@ -1214,6 +1214,242 @@ cargo build --release
 
 ---
 
+---
+
+### CP9: GitHub Integration — Sign-in, Repo Deploy Pipeline, PR Statuses
+
+#### 14.1 Goal
+
+Connect Hakobi to GitHub the way Cloudflare Workers Builds works:
+one-time GitHub App installation by the admin, per-user GitHub sign-in
+inside the dashboard (after Hakobi login), repo→environment deploy
+pipeline with monorepo path filtering, and PR/commit status reporting
+back to GitHub. Everything else (build runner, executor, environments,
+webhook receiver) is reused from CP6.
+
+#### 14.2 Non-goals (v1)
+
+- No buildpacks/Nixpacks: Dockerfile builds only (`dockerfile_path`).
+- No Kubernetes/Nix deploy targets: Docker host agents only.
+- No GitHub check-run "annotations"; commit statuses + one check run
+  per deploy is enough for v1.
+- No multi-tenant: all environments belong to the single Hakobi admin
+  user's GitHub connection; other users may authenticate later but v1
+  authorizes environments from the admin's installation.
+
+#### 14.3 Architecture decisions
+
+- **GitHub App, not OAuth App**: manifest-driven install, fine-grained
+  permissions (Contents: read, Commit statuses: read+write, Webhooks:
+  read+write), installation tokens (1h TTL, auto-refresh), higher rate
+  limits, per-repo installation scoping.
+- **Stateless JWT sessions stay**: GitHub access tokens are stored
+  encrypted in the existing vault (same envelope as provider
+  credentials), keyed by Hakobi user.
+- **Monorepo model**: an Environment points at `(repo, branch, path,
+  dockerfile_path)`. Push events are matched against the path glob; one
+  repo can serve many environments. Path detection is assisted by a
+  scanner (see 14.6) but the stored value is explicit.
+- **Concurrency**: a newer push for the same environment cancels the
+  in-flight build (Workers-style); the cancelled deployment row is
+  marked `cancelled`.
+
+#### 14.4 Data model (schema v6)
+
+New table `github_connections`:
+- `id` TEXT PK
+- `user_id` TEXT NOT NULL (Hakobi username)
+- `github_login` TEXT NOT NULL
+- `github_user_id` INTEGER NOT NULL
+- `access_token` TEXT NOT NULL (encrypted, vault envelope)
+- `refresh_token` TEXT (encrypted, nullable)
+- `token_expires_at` TEXT NOT NULL (ISO-8601)
+- `created_at` TEXT NOT NULL
+
+New table `github_app` (single row, admin-level install):
+- `id` TEXT PK (constant `app`)
+- `app_id` INTEGER NOT NULL
+- `client_id` TEXT NOT NULL
+- `client_secret` TEXT NOT NULL (encrypted)
+- `webhook_secret` TEXT NOT NULL (encrypted)
+- `private_key_pem` TEXT NOT NULL (encrypted)
+- `installation_id` INTEGER NOT NULL
+- `installed_at` TEXT NOT NULL
+
+New table `webhook_deliveries` (dedupe):
+- `delivery_id` TEXT PK (X-GitHub-Delivery header)
+- `received_at` TEXT NOT NULL
+
+`environments` gains columns (ALTER TABLE, schema v6):
+- `github_repo` TEXT (nullable, `owner/name`)
+- `github_branch` TEXT (nullable)
+- `github_path` TEXT (nullable, glob, empty = whole repo)
+- `github_dockerfile` TEXT (nullable, default `Dockerfile` at path root)
+- `github_auto_deploy` INTEGER NOT NULL DEFAULT 0
+- `github_installation_id` INTEGER (nullable)
+
+#### 14.5 GitHub App setup flow (admin, one-time)
+
+1. Settings → GitHub → "Install GitHub App" renders a manifest
+   (`name=hakobi-<random suffix>`, `url=base_url`,
+   `hook_attributes.url=base_url+/webhooks/github`,
+   `callback_urls=[base_url+/webhooks/github/callback]`,
+   `public=false`,
+   `request_oauth_on_install=true`,
+   permissions: Contents R, Commit statuses RW, Metadata R,
+   Pull requests R, Webhooks RW).
+2. Admin reviews on `github.com/settings/apps/new?manifest=...`;
+   GitHub redirects back to `/webhooks/github/callback?code=...`.
+3. Hakobi POSTs the code to
+   `POST /app-manifests/{code}` (no auth required by GitHub for this
+   endpoint) and receives `id, client_id, client_secret, webhook_secret,
+   pem`.
+4. Hakobi derives the installation id via
+   `GET /apps/{app_id}/installations`, stores all credentials encrypted
+   in `github_app`, marks setup complete.
+5. Connection health shown as a badge on the Settings page.
+
+#### 14.6 Environment source config with auto-detection
+
+The environment form's GitHub section automates what would otherwise be
+hand-typed, using a script-driven recommendation flow:
+
+1. User picks repo (dropdown from installation repos) and branch
+   (dropdown from that repo's branches).
+2. On selection, Hakobi fetches the repo tree (`GET /repos/{o}/{r}/git/
+   trees/{branch}?recursive=1`, cached 5 min) and runs the detector:
+   - finds files matching `(^|/)Dockerfile$` → candidate dockerfile
+     paths
+   - finds `docker-compose.yml` / `compose.yaml` as a hint
+   - derives the set of top-level dirs that contain a Dockerfile
+3. UI presents:
+   - **Path recommendation**: if exactly one dir with a Dockerfile →
+     preselected; if several → dropdown of dirs (monorepo), user picks;
+     if zero → warning "no Dockerfile found at branch head".
+   - **Dockerfile recommendation**: defaults to `<path>/Dockerfile`;
+     dropdown lists all candidates under the chosen path.
+   - Everything remains editable (detector only pre-fills).
+4. On save, backend validates: path exists in tree; dockerfile path
+   exists in tree. Stored explicitly per environment.
+
+#### 14.7 Webhook pipeline
+
+Route: `POST /webhooks/github` (public; auth via HMAC, not session).
+
+1. Verify `X-Hub-Signature-256` = HMAC-SHA256(raw body,
+   webhook_secret). Fail → 401.
+2. Dedupe on `X-GitHub-Delivery` via `webhook_deliveries` (INSERT OR
+   IGNORE; already seen → 200, skip).
+3. Event routing:
+   - `push` → pipeline below.
+   - `installation` / `installation_repositories` → update stored
+     installation id / repo cache.
+   - `ping` → 200.
+   - other → 200 ignore.
+4. Parse push: `repository.full_name`, `ref` (strip `refs/heads/`),
+   `commits[].modified/added/removed` (union = changed set; for
+   forced pushes or >20 commits treat changed set as "all").
+5. Match environments: enabled, `github_auto_deploy=1`,
+   `github_repo` equal, `github_branch` equal, path glob matches any
+   changed file (empty pattern = match all). No match → 200.
+6. For each match, newest-wins: if the same environment has an
+   in-flight (`building`) deployment from an earlier push, mark it
+   `cancelled` and create a new deployment row (status `queued`).
+7. Trigger the existing build runner with:
+   - clone ref = branch head at `after` sha,
+   - dockerfile = `github_dockerfile`,
+   - build context root = `github_path`,
+   - image tag = derived from environment name + version.
+8. Status reporting timeline:
+   - queued → `POST /repos/{o}/{r}/statuses/{after}`: state `pending`,
+     context `hakobi/build`, target_url = deployment page.
+   - build ok → status `success`; deploy starts, second status context
+     `hakobi/deploy` pending.
+   - deploy ok → `hakobi/deploy` success, description `deployed v{N}`.
+   - any fail → matching context `failure` with error tail in
+     description (max 140 chars).
+   - PR pushes (`refs/pull/*/head` are not push targets; PRs are
+     covered because GitHub sends push events for the PR branch when
+     opened/synced from the same repo, and via `pull_request`
+     opened/synchronize we post one check run `hakobi/deploy`).
+9. Installation tokens: minted per API call from the JWT-signed app
+   auth (`POST /app/installations/{id}/access_tokens`), 1h TTL, never
+   stored; regenerated on demand. User access tokens (from OAuth) are
+   only used for the repo/branch/tree pickers and identity, never for
+   deploys.
+
+#### 14.8 API surface (new, session-authenticated)
+
+- `GET  /api/github/status` — app installed? user connected?
+- `GET  /api/github/repos` — installation repos (cached 5 min)
+- `GET  /api/github/repos/{owner}/{name}/branches` — branches (cached)
+- `GET  /api/github/repos/{owner}/{name}/tree?ref=` — file tree
+  (cached 5 min) used by the detector
+- `POST /settings/github/install` — start manifest flow (admin)
+- `GET  /webhooks/github/callback` — manifest code exchange (public,
+  admin-only by GitHub install rights)
+- `POST /settings/github/connect` — start user OAuth (session)
+- `GET  /settings/github/callback` — user OAuth callback (session)
+- `DELETE /settings/github` — disconnect user token (session)
+
+#### 14.9 Security rules
+
+- Webhook: constant-time HMAC compare; raw body (not re-serialized).
+- GitHub secrets encrypted at rest with the existing vault key.
+- `session.secret`-style file protection applies to nothing here:
+  GitHub credentials live only in the catalog DB (encrypted).
+- OAuth `state` parameter = session-bound CSRF token.
+- Path globs validated: no absolute paths, no `..`.
+- Installation tokens never logged, never rendered.
+- Webhook endpoint exempt from session auth but rate-limited
+  (60/min/IP) and HMAC-verified.
+
+#### 14.10 UI
+
+- Settings page gains a "GitHub" card: install state, connected user,
+  install badge, disconnect button.
+- Environment form gains "Source" section per 14.6 with the detector
+  UX.
+- Deployment history rows gain: commit SHA (short), branch, triggered
+  by "push".
+- Environment detail gains a "Retrigger" button (manual redeploy of
+  latest pushed sha).
+
+#### 14.11 Tests
+
+- HMAC verification: valid, invalid, missing, replayed delivery.
+- Path glob matching: exact dir, recursive glob, empty pattern,
+  no-match.
+- Monorepo match: two environments same repo/branch different paths,
+  push touching one file deploys only one.
+- Concurrency: second push cancels first in-flight deployment.
+- Status client: pending/success/failure payloads hit the right
+  endpoints (mock server).
+- Detector: single Dockerfile, monorepo multi-Dockerfile, none found.
+- Auth: OAuth state mismatch rejected; token refresh on expiry.
+- Schema migration v5→v6 preserves environments rows.
+
+#### 14.12 CP9 Checklist — Build-Test-Fix
+
+- [ ] BUILD: schema v6 migration (github columns + tables)
+- [ ] BUILD: GitHub App manifest setup flow + credential storage
+- [ ] BUILD: user OAuth connect flow
+- [ ] BUILD: installation token minting client
+- [ ] BUILD: webhook HMAC verify + dedupe + event routing
+- [ ] BUILD: push matcher (repo/branch/path glob, concurrency cancel)
+- [ ] BUILD: commit status client (pending/success/failure)
+- [ ] BUILD: repo/branch/tree picker endpoints with cache
+- [ ] BUILD: environment form source section with detector
+- [ ] BUILD: Settings GitHub card
+- [ ] BUILD: retrigger button on environment detail
+- [ ] TEST: unit tests per 14.11
+- [ ] TEST: `cargo fmt --check`
+- [ ] TEST: `cargo clippy --all-targets -- -D warnings`
+- [ ] TEST: `cargo test`
+- [ ] IF FAIL: fix and re-test
+- [ ] IF PASS: mark all CP9 checklist items as `[x]`
+- [ ] UPDATE: commit and push
+
 ## 14. Bug Registry
 
 ### 14.1 Known bugs at time of PRD creation

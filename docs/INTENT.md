@@ -58,3 +58,17 @@ flat environments. Create one, get a webhook, deploy images to a host.
 Code reality: Flat `environments` table (schema v5), CRUD UI at
 `/environments`, webhook-driven pipeline (CP6).
 Gap: none.
+
+### GitHub integration (CP9)
+User intent: Connect Hakobi fully to GitHub, Cloudflare-Workers-style.
+Sign in with GitHub inside the dashboard after Hakobi login (so other
+users can use it later). Environments bind to repo+branch+path and
+auto-deploy on push. Webhook setup should be automated (no manual
+payload copying). PR statuses reported back. Monorepos AND single repos
+must both work — the Environment points at a path inside the repo, and
+a path-scanner recommends the Dockerfile/directory instead of the user
+typing it.
+Code reality: CP9 PRD written (PRD.md 14.1-14.12, schema v6 planned:
+github columns on environments, github_app/github_connections/
+webhook_deliveries tables). Not yet implemented.
+Gap: pending implementation.
