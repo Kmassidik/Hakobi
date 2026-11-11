@@ -9,6 +9,7 @@ use serde::Deserialize;
 
 use super::super::templates;
 use super::super::AppState;
+use super::github::manifest_exchange_inner;
 use super::{authenticated, html_response};
 use hakobi::catalog::Catalog;
 use maud::{html, Markup};
@@ -74,7 +75,6 @@ fn github_settings_page_markup(
                         }
                         @if !app_installed {
                             form method="post" action="/settings/github/install" {
-                                input type="hidden" name="csrf_token" value="";
                                 button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Install GitHub App" }
                                 p class="m-0 mt-2 text-xs text-muted" {
                                     "Opens github.com to approve access. Hakobi never receives your GitHub password."
@@ -209,4 +209,64 @@ pub(crate) async fn github_disconnect(
     };
     let _ = catalog.delete_github_connection(&state.config.username);
     axum::response::Redirect::to("/settings/github").into_response()
+}
+
+/// POST /settings/github/install — generates the App manifest and redirects
+/// the admin to GitHub's manifest submission page.
+pub(crate) async fn github_install_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    let mut suffix = [0u8; 3];
+    rand::rngs::OsRng.fill_bytes(&mut suffix);
+    let name = format!("hakobi-{}", hex::encode(suffix));
+    let base = state.config.base_url.trim_end_matches('/');
+    let flow_state = hex::encode(suffix);
+    let manifest = serde_json::json!({
+        "name": name,
+        "url": base,
+        "hook_attributes": { "url": format!("{base}/webhooks/github"), "active": true },
+        "redirect_url": format!("{base}/settings/github/manifest-callback"),
+        "callback_urls": [format!("{base}/settings/github/callback")],
+        "public": false,
+        "request_oauth_on_install": true,
+        "default_permissions": {
+            "contents": "read",
+            "commit_statuses": "write",
+            "metadata": "read",
+            "pull_requests": "read"
+        },
+        "default_events": ["push", "ping", "installation", "installation_repositories"],
+    });
+    let cookie_value = format!(
+        "{flow_state}:{}",
+        serde_json::to_string(&manifest).unwrap_or_default()
+    );
+    let cookie =
+        crate::web::auth::create_cookie(&state.config, "hakobi_gh_manifest", &cookie_value, 3600);
+    let target = format!("https://github.com/settings/apps/new?state={flow_state}");
+    let mut response = axum::response::Redirect::to(&target).into_response();
+    response
+        .headers_mut()
+        .insert(axum::http::header::SET_COOKIE, cookie.parse().unwrap());
+    response
+}
+
+/// GET /settings/github/manifest-callback — GitHub redirects here after the
+/// admin approves, appending ?code= which converts to real credentials.
+pub(crate) async fn github_manifest_post_install(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    let Some(code) = query.get("code") else {
+        return (StatusCode::BAD_REQUEST, "missing manifest code").into_response();
+    };
+    manifest_exchange_inner(&state, code).await
 }

@@ -148,7 +148,7 @@ pub(crate) async fn manifest_callback(
     manifest_exchange_inner(&state, &query.code).await
 }
 
-async fn manifest_exchange_inner(state: &AppState, code: &str) -> Response {
+pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Response {
     let http = reqwest::Client::builder()
         .user_agent("hakobi-control-plane")
         .build()

@@ -260,6 +260,8 @@ pub(crate) fn router_with_pipeline(
         .route("/api/github/detect", get(handlers::github_detect))
         .route("/settings/github", get(handlers::github_settings_page))
         .route("/settings/github/connect", post(handlers::github_connect_start))
+        .route("/settings/github/install", post(handlers::github_install_start))
+        .route("/settings/github/manifest-callback", get(handlers::github_manifest_post_install))
         .route("/settings/github/callback", get(handlers::github_connect_callback))
         .route("/settings/github/delete", post(handlers::github_disconnect))
         .route("/deployment", get(handlers::deployment_page))
