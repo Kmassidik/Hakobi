@@ -245,6 +245,21 @@ pub(crate) async fn asset(axum::extract::Path(path): axum::extract::Path<String>
         .into_response()
 }
 
+/// Serves the favicon at the conventional /favicon.ico path.
+pub(crate) async fn asset_favicon() -> Response {
+    let Some(content) = Assets::get("assets/favicon.ico") else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/x-icon".to_string()),
+            (CACHE_CONTROL, "public, max-age=604800".to_string()),
+        ],
+        content.data.into_owned(),
+    )
+        .into_response()
+}
+
 /// Renders the login page; kept in mod.rs since it is shared by auth routes.
 pub(crate) async fn login_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let session = cookie_value(&headers, state.config.session_cookie_name());

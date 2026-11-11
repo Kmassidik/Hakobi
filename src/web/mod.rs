@@ -289,6 +289,7 @@ pub(crate) fn router_with_pipeline(
         .route("/healthz", get(|| async { "OK" }))
         .route("/partials/status", get(handlers::status))
         .route("/assets/{*path}", get(handlers::asset))
+        .route("/favicon.ico", get(handlers::asset_favicon))
         .fallback(|| async { StatusCode::NOT_FOUND })
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(16 * 1024))
@@ -299,7 +300,7 @@ pub(crate) fn router_with_pipeline(
         .layer(SetResponseHeaderLayer::overriding(
             CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
-                "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'sha256-faU7yAF8NxuMTNEwVmBz+VcYeIoBQ2EMHW3WaVxCvnk='; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com; frame-ancestors 'none'",
+                "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com 'sha256-6K7TdWRsrATvM1Ny7ztRvNVS5Gpo1MkMNVxEwPPEzog='; style-src 'self' 'sha256-faU7yAF8NxuMTNEwVmBz+VcYeIoBQ2EMHW3WaVxCvnk='; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com; frame-ancestors 'none'",
             ),
         ))
         .layer(SetResponseHeaderLayer::overriding(
