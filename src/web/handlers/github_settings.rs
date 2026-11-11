@@ -32,6 +32,7 @@ pub(crate) async fn github_settings_page(
         .ok()
         .flatten();
     let markup = github_settings_page_markup(
+        &state.config.base_url,
         &state.config.username,
         app_installed,
         connection.as_ref().map(|c| c.github_login.as_str()),
@@ -40,6 +41,7 @@ pub(crate) async fn github_settings_page(
 }
 
 fn github_settings_page_markup(
+    base_url: &str,
     username: &str,
     app_installed: bool,
     github_login: Option<&str>,
@@ -48,7 +50,7 @@ fn github_settings_page_markup(
         "GitHub · Hakobi",
         html! {
             div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {
-                (templates::sidebar("providers", "", username, ""))
+                (templates::sidebar("settings", base_url, username, ""))
                 (templates::mobile_header("", username))
                 main class="mx-auto w-[92%] max-w-[44rem] pb-24 pt-10 lg:pt-16" {
                     p class="mb-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-brand-bright" { "Settings" }

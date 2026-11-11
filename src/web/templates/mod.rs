@@ -113,11 +113,9 @@ pub(crate) fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: 
             nav class="mt-7 flex flex-col gap-0.5" aria-label="Primary" {
                 (nav_item(active, "overview", "/dashboard", "fa-square-poll-vertical", "Dashboard"))
                 (nav_item(active, "environments", "/environments", "fa-layer-group", "Environments"))
-                (nav_item(active, "stacks", "/stacks", "fa-cubes-stacked", "Stacks"))
                 (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
-                (nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infrastructure"))
-                (nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
                 (nav_item(active, "deployment", "/hosts", "fa-rocket", "Deployment"))
+                (nav_item(active, "settings", "/settings/github", "fa-gear", "Settings"))
             }
             div class="mt-auto pt-4" {
                 div class="rounded-xl bg-[#f5f5f7] p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
@@ -246,11 +244,9 @@ fn mobile_sidebar(active: &str, _base_url: &str, _username: &str, _csrf_token: &
                 div class="mx-auto grid max-w-md grid-cols-6 gap-0.5" {
                     (mobile_nav_item(active, "overview", "/dashboard", "fa-square-poll-vertical", "Dashboard"))
                     (mobile_nav_item(active, "environments", "/environments", "fa-layer-group", "Envs"))
-                    (mobile_nav_item(active, "stacks", "/stacks", "fa-cubes-stacked", "Stacks"))
                     (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
-                    (mobile_nav_item(active, "infrastructure", "/infrastructure", "fa-server", "Infra"))
-                    (mobile_nav_item(active, "providers", "/providers", "fa-plug", "Providers"))
                     (mobile_nav_item(active, "deployment", "/hosts", "fa-rocket", "Deploy"))
+                    (mobile_nav_item(active, "settings", "/settings/github", "fa-gear", "Settings"))
                 }
             }
     }
