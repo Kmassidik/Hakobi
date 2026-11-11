@@ -250,22 +250,16 @@ pub(crate) async fn github_install_start(
     );
     let cookie =
         crate::web::auth::create_cookie(&state.config, "hakobi_gh_manifest", &cookie_value, 3600);
-    let manifest_b64 = {
-        use base64::Engine as _;
-        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(manifest.to_string())
-    };
-    // GitHub's manifest flow requires a form POST of `manifest` (JSON string)
-    // plus `state`; an auto-submitting form bridges the cross-origin hop
-    // (form-action allows github.com).
+    // GitHub's manifest flow: form POST of `manifest` (raw JSON string) to
+    // github.com/settings/apps/new with `state` in the query string.
     let page = html! {
         head {
             title { "Redirecting to GitHub…" }
         }
         body {
             form id="gh-manifest" method="post"
-                action="https://github.com/settings/apps/new" {
-                input type="hidden" name="manifest" value=(manifest_b64);
-                input type="hidden" name="state" value=(flow_state);
+                action=(format!("https://github.com/settings/apps/new?state={flow_state}")) {
+                input type="hidden" name="manifest" value=(manifest.to_string());
             }
             noscript {
                 button type="submit" form="gh-manifest" { "Continue to GitHub" }
