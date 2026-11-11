@@ -115,7 +115,7 @@ pub(crate) fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: 
                 (nav_item(active, "environments", "/environments", "fa-layer-group", "Environments"))
                 (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                 (nav_item(active, "deployment", "/hosts", "fa-rocket", "Deployment"))
-                (nav_item(active, "settings", "/settings/github", "fa-gear", "Settings"))
+                (nav_item(active, "settings", "/settings", "fa-gear", "Settings"))
             }
             div class="mt-auto pt-4" {
                 div class="rounded-xl bg-[#f5f5f7] p-3 shadow-[0_1px_3px_rgba(0,0,0,0.04)]" {
@@ -246,7 +246,7 @@ fn mobile_sidebar(active: &str, _base_url: &str, _username: &str, _csrf_token: &
                     (mobile_nav_item(active, "environments", "/environments", "fa-layer-group", "Envs"))
                     (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
                     (mobile_nav_item(active, "deployment", "/hosts", "fa-rocket", "Deploy"))
-                    (mobile_nav_item(active, "settings", "/settings/github", "fa-gear", "Settings"))
+                    (mobile_nav_item(active, "settings", "/settings", "fa-gear", "Settings"))
                 }
             }
     }

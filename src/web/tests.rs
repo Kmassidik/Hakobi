@@ -290,7 +290,7 @@ async fn login_dashboard_and_logout_enforce_the_session() {
     assert!(body.contains("Runtime activity"));
     assert!(body.contains("aria-label=\"Mobile primary\""));
     assert!(body.contains("href=\"/environments\""));
-    assert!(body.contains("href=\"/settings/github\""));
+    assert!(body.contains("href=\"/settings\""));
 
     let status = app
         .clone()
