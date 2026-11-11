@@ -238,11 +238,11 @@ pub(crate) async fn github_install_start(
         "request_oauth_on_install": true,
         "default_permissions": {
             "contents": "read",
-            "commit_statuses": "write",
+            "statuses": "write",
             "metadata": "read",
             "pull_requests": "read"
         },
-        "default_events": ["push", "ping", "installation", "installation_repositories"],
+        "default_events": ["push", "pull_request"],
     });
     let cookie_value = format!(
         "{flow_state}:{}",
