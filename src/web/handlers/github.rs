@@ -227,9 +227,36 @@ pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Res
         &conversion.pem,
         installation.id,
     ) {
-        Ok(()) => axum::response::Redirect::to("/settings/github").into_response(),
+        Ok(()) => github_connected_page().into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+/// Renders the post-install success page shown after the manifest exchange.
+pub(crate) fn github_connected_page() -> axum::response::Response {
+    use crate::web::templates;
+    use maud::html;
+    let page = templates::page(
+        "GitHub connected · Hakobi",
+        html! {
+            div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {
+                (templates::sidebar("settings", "", "admin", ""))
+                main class="px-6 py-10 lg:px-10" {
+                    div class="mx-auto max-w-lg rounded-[0.85rem] border border-line bg-surface p-8 text-center" {
+                        div class="mx-auto grid size-12 place-items-center rounded-full bg-emerald-100 text-emerald-700" {
+                            i class="fas fa-check" aria-hidden="true" {}
+                        }
+                        h1 class="mt-4 text-xl font-bold" { "GitHub App connected" }
+                        p class="mt-2 text-sm text-muted" {
+                            "Repositories can now be picked in environment forms, pushes build automatically, and deploy statuses land on commits."
+                        }
+                        a href="/settings" class="mt-6 inline-block rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white no-underline" { "Back to Settings" }
+                    }
+                }
+            }
+        },
+    );
+    axum::response::Html(page.into_string()).into_response()
 }
 
 /// POST /webhooks/github — the webhook receiver (HMAC-authenticated).
