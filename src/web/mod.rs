@@ -299,7 +299,7 @@ pub(crate) fn router_with_pipeline(
         .layer(SetResponseHeaderLayer::overriding(
             CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
-                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+                "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self' 'sha256-faU7yAF8NxuMTNEwVmBz+VcYeIoBQ2EMHW3WaVxCvnk='; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com; frame-ancestors 'none'",
             ),
         ))
         .layer(SetResponseHeaderLayer::overriding(
