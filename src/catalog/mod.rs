@@ -6,6 +6,7 @@
 
 mod deployments;
 mod environments;
+mod github;
 mod hosts;
 mod legacy;
 mod providers;
@@ -21,6 +22,7 @@ pub use environments::{
     validate_deployment_status, validate_environment_name, validate_log_level,
     validate_source_pair, Environment,
 };
+pub use github::{GithubApp, GithubConnection};
 pub use hosts::HostAgent;
 pub use legacy::{AuditEvent, Service};
 pub use providers::ProviderConnection;
@@ -41,7 +43,7 @@ use rusqlite::{params, Connection, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// Capabilities a provider connection may be granted.
 const CAPABILITIES: [&str; 3] = ["read", "operate", "admin"];
@@ -248,6 +250,9 @@ impl Catalog {
         transaction
             .execute_batch(SCHEMA)
             .context("create catalog schema")?;
+        if current < 6 {
+            migrate_v6_github(&transaction)?;
+        }
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .context("set schema version")?;
@@ -290,6 +295,43 @@ impl Catalog {
 /// SQLite rewrites the `services` foreign key to point at
 /// `legacy_environments`, so legacy rows stay fully consistent. A no-op when
 /// the rename already happened.
+/// CP9 schema v6: GitHub integration tables and environment source columns.
+fn migrate_v6_github(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS github_app (
+            id              TEXT PRIMARY KEY NOT NULL,
+            app_id          INTEGER NOT NULL,
+            client_id       TEXT NOT NULL,
+            client_secret   TEXT NOT NULL,
+            webhook_secret  TEXT NOT NULL,
+            private_key_pem TEXT NOT NULL,
+            installation_id INTEGER NOT NULL,
+            installed_at    TEXT NOT NULL CHECK (length(installed_at) > 0)
+        );
+        CREATE TABLE IF NOT EXISTS github_connections (
+            id              TEXT PRIMARY KEY NOT NULL,
+            user_id         TEXT NOT NULL,
+            github_login    TEXT NOT NULL,
+            github_user_id  INTEGER NOT NULL,
+            access_token    TEXT NOT NULL,
+            refresh_token   TEXT,
+            token_expires_at TEXT NOT NULL,
+            created_at      TEXT NOT NULL CHECK (length(created_at) > 0)
+        );
+        CREATE TABLE IF NOT EXISTS webhook_deliveries (
+            delivery_id TEXT PRIMARY KEY NOT NULL,
+            received_at TEXT NOT NULL
+        );
+        ALTER TABLE environments ADD COLUMN github_repo TEXT;
+        ALTER TABLE environments ADD COLUMN github_branch TEXT;
+        ALTER TABLE environments ADD COLUMN github_path TEXT;
+        ALTER TABLE environments ADD COLUMN github_dockerfile TEXT;
+        ALTER TABLE environments ADD COLUMN github_auto_deploy INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE environments ADD COLUMN github_installation_id INTEGER;",
+    )?;
+    Ok(())
+}
+
 fn rename_legacy_environments(transaction: &Transaction<'_>) -> Result<()> {
     let renamed_already: bool = transaction.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master \

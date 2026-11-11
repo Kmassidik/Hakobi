@@ -159,6 +159,34 @@ impl Catalog {
     }
 
     /// Lists deployments for an environment, newest version first.
+    /// Cancels every non-terminal deployment for one environment
+    /// (newest push wins; the superseded builds stop mattering).
+    pub fn cancel_in_flight_deployments(&mut self, environment_id: &str) -> Result<u32> {
+        let updated = self.connection.execute(
+            "UPDATE deployments SET status = 'rolled_back', \
+             completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+             WHERE environment_id = ?1 AND status IN ('pending', 'building', 'deploying')",
+            params![environment_id],
+        )?;
+        Ok(updated as u32)
+    }
+
+    /// Returns the in-flight deployment id for an environment, if any.
+    pub fn latest_in_flight_deployment(&self, environment_id: &str) -> Result<Option<String>> {
+        let id = self.connection.query_row(
+            "SELECT id FROM deployments \
+             WHERE environment_id = ?1 AND status IN ('pending', 'building', 'deploying') \
+             ORDER BY version DESC, rowid DESC LIMIT 1",
+            params![environment_id],
+            |row| row.get::<_, String>(0),
+        );
+        match id {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     pub fn list_deployments(&self, environment_id: &str) -> Result<Vec<Deployment>> {
         let mut statement = self.connection.prepare(&format!(
             "SELECT {DEPLOYMENT_COLUMNS} FROM deployments \

@@ -8,7 +8,7 @@ fn catalog_persists_hierarchy_across_reopen() {
     let service_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 5);
+        assert_eq!(catalog.schema_version().expect("schema version"), 6);
 
         let organization_id = catalog
             .create_organization("default", "Default")
@@ -42,7 +42,7 @@ fn catalog_persists_hierarchy_across_reopen() {
     }
 
     let catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 5);
+    assert_eq!(catalog.schema_version().expect("schema version"), 6);
     assert_eq!(catalog.list_services().expect("list services").len(), 1);
 }
 
@@ -214,7 +214,7 @@ fn environments_crud_round_trip() {
     let environment_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 5);
+        assert_eq!(catalog.schema_version().expect("schema version"), 6);
         let host_id = catalog
             .create_host_agent("env-host", "https://env.example.com", "tok_env_0123456789")
             .expect("create host");

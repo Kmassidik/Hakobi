@@ -252,6 +252,12 @@ pub(crate) fn router_with_pipeline(
             get(handlers::environment_webhook_page).post(handlers::environment_webhook_submit),
         )
         .route("/webhook/{environment_id}/{secret}", post(webhook::webhook_receive))
+        .route("/webhooks/github", post(handlers::github_webhook))
+        .route("/webhooks/github/callback", get(handlers::github_manifest_callback))
+        .route("/api/github/status", get(handlers::github_status))
+        .route("/api/github/repos", get(handlers::github_repos))
+        .route("/api/github/branches", get(handlers::github_branches_api))
+        .route("/api/github/detect", get(handlers::github_detect))
         .route("/deployment", get(handlers::deployment_page))
         .route("/deployment/list", get(handlers::deployment_list_partial))
         .route("/infrastructure", get(handlers::infrastructure))

@@ -40,6 +40,8 @@ uuid = { version = "1.16", features = ["serde", "v4"] }
 zeroize = { version = "1.8", features = ["derive"] }
 tempfile = "3.19"
 jsonwebtoken = "9"
+hmac = "0.12"
+hex = "0.4.3"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

@@ -23,6 +23,12 @@ pub struct Environment {
     pub status: String,
     pub webhook_secret: Option<String>,
     pub webhook_enabled: bool,
+    pub github_repo: Option<String>,
+    pub github_branch: Option<String>,
+    pub github_path: Option<String>,
+    pub github_dockerfile: Option<String>,
+    pub github_auto_deploy: bool,
+    pub github_installation_id: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -111,13 +117,21 @@ fn read_environment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Environment
         status: row.get(8)?,
         webhook_secret: row.get(9)?,
         webhook_enabled: row.get::<_, i64>(10)? != 0,
-        created_at: row.get(11)?,
-        updated_at: row.get(12)?,
+        github_repo: row.get(11)?,
+        github_branch: row.get(12)?,
+        github_path: row.get(13)?,
+        github_dockerfile: row.get(14)?,
+        github_auto_deploy: row.get::<_, i64>(15)? != 0,
+        github_installation_id: row.get(16)?,
+        created_at: row.get(17)?,
+        updated_at: row.get(18)?,
     })
 }
 
 const ENVIRONMENT_COLUMNS: &str = "id, name, host_id, build_type, source_type, git_url, \
-     git_branch, registry_mode, status, webhook_secret, webhook_enabled, created_at, updated_at";
+     git_branch, registry_mode, status, webhook_secret, webhook_enabled, github_repo, \
+     github_branch, github_path, github_dockerfile, github_auto_deploy, github_installation_id, \
+     created_at, updated_at";
 
 impl Catalog {
     /// Creates a CP5 environment bound to an enrolled host agent.
