@@ -14,6 +14,7 @@ mod hosts;
 mod infrastructure;
 mod partials;
 mod providers;
+mod settings;
 
 pub(crate) use auth::{login, logout};
 pub(crate) use container_detail::{
@@ -53,6 +54,7 @@ pub(crate) use partials::{
 pub(crate) use providers::{
     add_provider, delete_provider, providers, test_provider, toggle_provider,
 };
+pub(crate) use settings::settings_page;
 
 use std::{fmt::Write as _, sync::LazyLock};
 

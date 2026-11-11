@@ -8,13 +8,18 @@ await mkdir(`${assets}/vendor/fontawesome/webfonts`, { recursive: true });
 
 const baseCss = await readFile(`${fontAwesome}/css/fontawesome.min.css`, "utf8");
 const solidCss = await readFile(`${fontAwesome}/css/solid.min.css`, "utf8");
+const brandsCss = await readFile(`${fontAwesome}/css/brands.min.css`, "utf8");
 await writeFile(
   `${assets}/vendor/fontawesome/css/all.min.css`,
-  `${baseCss}\n${solidCss}`,
+  `${baseCss}\n${solidCss}\n${brandsCss}`,
 );
 await copyFile(
   `${fontAwesome}/webfonts/fa-solid-900.woff2`,
   `${assets}/vendor/fontawesome/webfonts/fa-solid-900.woff2`,
+);
+await copyFile(
+  `${fontAwesome}/webfonts/fa-brands-400.woff2`,
+  `${assets}/vendor/fontawesome/webfonts/fa-brands-400.woff2`,
 );
 await copyFile(
   `${fontAwesome}/LICENSE.txt`,

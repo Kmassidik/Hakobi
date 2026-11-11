@@ -258,6 +258,7 @@ pub(crate) fn router_with_pipeline(
         .route("/api/github/repos", get(handlers::github_repos))
         .route("/api/github/branches", get(handlers::github_branches_api))
         .route("/api/github/detect", get(handlers::github_detect))
+        .route("/settings", get(handlers::settings_page))
         .route("/settings/github", get(handlers::github_settings_page))
         .route("/settings/github/connect", post(handlers::github_connect_start))
         .route("/settings/github/install", post(handlers::github_install_start))

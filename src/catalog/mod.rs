@@ -39,7 +39,7 @@ use base64::Engine as _;
 use chacha20poly1305::aead::{Aead, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use rand::RngCore;
-use rusqlite::{params, Connection, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
@@ -260,6 +260,30 @@ impl Catalog {
         Ok(())
     }
 
+    /// Reads one settings key.
+    pub fn settings_get(&self, key: &str) -> Result<Option<String>> {
+        self.connection
+            .query_row(
+                "SELECT value FROM settings_kv WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("read settings key")
+    }
+
+    /// Writes one settings key.
+    pub fn settings_set(&self, key: &str, value: &str) -> Result<()> {
+        self.connection
+            .execute(
+                "INSERT INTO settings_kv (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value],
+            )
+            .context("write settings key")?;
+        Ok(())
+    }
+
     fn encrypt_secret(&self, secret: &str) -> Result<String> {
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&self.key));
         let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -327,7 +351,11 @@ fn migrate_v6_github(transaction: &Transaction<'_>) -> Result<()> {
         ALTER TABLE environments ADD COLUMN github_path TEXT;
         ALTER TABLE environments ADD COLUMN github_dockerfile TEXT;
         ALTER TABLE environments ADD COLUMN github_auto_deploy INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE environments ADD COLUMN github_installation_id INTEGER;",
+        ALTER TABLE environments ADD COLUMN github_installation_id INTEGER;
+        CREATE TABLE IF NOT EXISTS settings_kv (
+            key   TEXT PRIMARY KEY NOT NULL,
+            value TEXT NOT NULL
+        );",
     )?;
     Ok(())
 }
