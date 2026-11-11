@@ -18,6 +18,7 @@ pub(crate) use container_detail::{
     container_stats_section, ContainerDetailData,
 };
 pub use containers::{container_form, containers, ContainerFormValues};
+pub(crate) use dashboard::mobile_header;
 pub use dashboard::{
     chart_section, dashboard, metrics_section, ActivityRow, DashboardMetrics, DashboardView,
 };
@@ -105,7 +106,7 @@ fn mobile_nav_item(active: &str, key: &str, href: &str, icon: &str, label: &str)
     }
 }
 
-fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Markup {
+pub(crate) fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: &str) -> Markup {
     html! {
         aside class="fixed inset-y-0 left-0 z-40 hidden w-60 flex-col overflow-y-auto bg-white px-4 py-5 lg:flex" aria-label="Sidebar" {
             div class="px-1" { (brand("Hakobi dashboard")) }

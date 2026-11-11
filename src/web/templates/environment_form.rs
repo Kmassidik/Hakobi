@@ -57,6 +57,32 @@ pub fn environment_form(
                     @if let Some(message) = error {
                         div class="mb-6 mt-6 border-l-[3px] border-danger bg-danger/5 px-4 py-3.5 text-sm leading-normal text-danger" role="alert" { (message) }
                     }
+                    div class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+                        p class=(format!("{EYEBROW} mb-1 mt-0 text-brand-bright")) { "GitHub source" }
+                        p class="m-0 text-sm leading-relaxed text-muted" {
+                            "Bind this environment to a repository. On push, Hakobi rebuilds and redeploys automatically."
+                        }
+                        div id="gh-source-picker" data-gh-picker class="mt-4 grid grid-cols-1 gap-4" {
+                            label class="grid gap-1.5" {
+                                span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Repository" }
+                                select name="github_repo" data-gh-repos class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
+                                    option value="" { "Loading repositories…" }
+                                }
+                            }
+                            label class="grid gap-1.5" {
+                                span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Branch" }
+                                select name="github_branch" data-gh-branches class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
+                                    option value="main" { "main" }
+                                }
+                            }
+                            div data-gh-apps class="grid grid-cols-1 gap-3" {}
+                            label class="grid gap-1.5" {
+                                span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Auto-deploy on push" }
+                                input name="github_auto_deploy" type="checkbox" value="1" checked class="size-4 justify-self-start";
+                            }
+                        }
+                        p data-gh-status class="m-0 text-xs text-muted" { "Checking GitHub connection…" }
+                    }
                     form method="post" action=(action) class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
                         label class="flex flex-col gap-2 text-[0.8rem] font-bold" {

@@ -9,6 +9,7 @@ mod deployment_pages;
 mod environment_pages;
 mod environments;
 mod github;
+mod github_settings;
 mod hosts;
 mod infrastructure;
 mod partials;
@@ -36,6 +37,9 @@ pub(crate) use github::{
     branches as github_branches_api, detect as github_detect,
     manifest_callback as github_manifest_callback, repos as github_repos, status as github_status,
     webhook as github_webhook,
+};
+pub(crate) use github_settings::{
+    github_connect_callback, github_connect_start, github_disconnect, github_settings_page,
 };
 pub(crate) use hosts::{
     host_history, host_resources, host_resources_partial, hosts_create, hosts_delete, hosts_list,

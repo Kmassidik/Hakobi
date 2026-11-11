@@ -392,3 +392,128 @@
     init();
   }
 })();
+
+/* GitHub source picker: populates repo/branch dropdowns, runs the Dockerfile
+   detector, pre-fills path recommendations. Zeroes stay editable. */
+(function () {
+  "use strict";
+  function init() {
+    var grid = document.querySelector("[data-gh-picker]");
+    if (!grid) return;
+    var reposSel = grid.querySelector("[data-gh-repos]");
+    var branchSel = grid.querySelector("[data-gh-branches]");
+    var appsBox = grid.querySelector("[data-gh-apps]");
+    var status = document.querySelector("[data-gh-status]");
+    if (!reposSel) return;
+
+    async function loadBranches(repo) {
+      branchSel.innerHTML = "";
+      try {
+        var res = await fetch("/api/github/branches?repo=" + encodeURIComponent(repo));
+        var data = await res.json();
+        (data.branches || []).forEach(function (name) {
+          var opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          if (name === "main") opt.selected = true;
+          branchSel.appendChild(opt);
+        });
+        if (!branchSel.value && branchSel.options.length) branchSel.selectedIndex = 0;
+        detect();
+      } catch (e) {
+        setStatus("Could not load branches.");
+      }
+    }
+
+    function setStatus(text) {
+      if (status) status.textContent = text;
+    }
+
+    async function detect() {
+      var repo = reposSel.value;
+      var branch = branchSel.value;
+      if (!repo || !branch) return;
+      appsBox.innerHTML = "<p class='m-0 text-xs text-muted'>Scanning for Dockerfiles…</p>";
+      try {
+        var res = await fetch(
+          "/api/github/detect?repo=" + encodeURIComponent(repo) + "&branch=" + encodeURIComponent(branch)
+        );
+        var data = await res.json();
+        appsBox.innerHTML = "";
+        var apps = data.apps || [];
+        if (!apps.length) {
+          appsBox.innerHTML =
+            "<p class='m-0 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900'>No Dockerfile found at branch head. Add one, or adjust the branch.</p>";
+          return;
+        }
+        apps.forEach(function (app, i) {
+          var label = document.createElement("label");
+          label.className = "flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm";
+          var input = document.createElement("input");
+          input.type = "radio";
+          input.name = "github_app_path";
+          input.value = app.path;
+          input.dataset.dockerfile = app.dockerfile;
+          if (i === 0) input.checked = true;
+          input.addEventListener("change", sync);
+          label.appendChild(input);
+          var text = document.createElement("span");
+          text.textContent = app.path === "" ? "/ (repo root)" : app.path + "/";
+          label.appendChild(text);
+          appsBox.appendChild(label);
+        });
+        setStatus(apps.length === 1 ? "Detected one buildable app." : "Detected " + apps.length + " buildable apps — pick one.");
+        sync();
+      } catch (e) {
+        appsBox.innerHTML = "<p class='m-0 text-xs text-danger'>Scan failed.</p>";
+      }
+    }
+
+    function sync() {
+      var checked = appsBox.querySelector("input:checked");
+      if (!checked) return;
+      var dockerfileInput = document.querySelector("[name=github_dockerfile]");
+      if (dockerfileInput) dockerfileInput.value = checked.dataset.dockerfile;
+    }
+
+    fetch("/api/github/status")
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.app_installed || !data.user_connected) {
+          grid.style.display = "none";
+          setStatus(
+            data.app_installed
+              ? "Connect your GitHub identity under Settings → GitHub to pick repositories."
+              : "Connect GitHub under Settings → GitHub first."
+          );
+          return;
+        }
+        setStatus("Connected as " + (data.github_login || "") + ".");
+        return fetch("/api/github/repos")
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            reposSel.innerHTML = "";
+            var placeholder = document.createElement("option");
+            placeholder.value = "";
+            placeholder.textContent = "Pick a repository…";
+            reposSel.appendChild(placeholder);
+            (data.repos || []).forEach(function (repo) {
+              var opt = document.createElement("option");
+              opt.value = repo.full_name;
+              opt.textContent = repo.full_name + (repo.private ? " (private)" : "");
+              reposSel.appendChild(opt);
+            });
+            reposSel.addEventListener("change", function () {
+              if (reposSel.value) loadBranches(reposSel.value);
+            });
+          });
+      })
+      .catch(function () { setStatus("Could not reach GitHub."); });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();

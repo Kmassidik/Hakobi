@@ -68,7 +68,7 @@ impl LiveStats {
     }
 }
 
-fn mobile_header(csrf_token: &str, username: &str) -> Markup {
+pub(crate) fn mobile_header(csrf_token: &str, username: &str) -> Markup {
     html! {
                     header class="bg-[#f5f5f7]/90 backdrop-blur lg:hidden" {
                         div class=(format!("{CONTENT_WIDTH} flex h-[5rem] items-center justify-between")) {
