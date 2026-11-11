@@ -54,6 +54,8 @@ pub(crate) fn page(title: &str, content: Markup) -> Markup {
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 meta name="color-scheme" content="light";
                 title { (title) }
+                link rel="icon" type="image/x-icon" href=(super::handlers::asset_url("favicon.ico"));
+                link rel="apple-touch-icon" href=(super::handlers::asset_url("art/mascot/hako-idle.webp"));
                 link rel="stylesheet" href=(super::handlers::asset_url("app.css"));
                 link rel="stylesheet" href=(super::handlers::asset_url("vendor/fontawesome/css/all.min.css"));
                 script src=(super::handlers::asset_url("htmx.min.js")) defer {}
