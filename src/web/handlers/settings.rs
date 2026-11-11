@@ -77,7 +77,7 @@ fn settings_page_markup(
     default_branch: &str,
     auto_deploy: bool,
 ) -> Markup {
-crate::web::templates::page(
+    crate::web::templates::page(
         "Settings · Hakobi",
         html! {
             div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {

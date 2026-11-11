@@ -213,8 +213,9 @@ pub(crate) async fn github_disconnect(
     axum::response::Redirect::to("/settings/github").into_response()
 }
 
-/// POST /settings/github/install — generates the App manifest and redirects
-/// the admin to GitHub's manifest submission page.
+/// POST /settings/github/install — generates the App manifest and returns an
+/// auto-submitting form that POSTs it to GitHub's manifest submission page
+/// (GitHub requires the manifest as form fields, not a redirect).
 pub(crate) async fn github_install_start(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -249,8 +250,30 @@ pub(crate) async fn github_install_start(
     );
     let cookie =
         crate::web::auth::create_cookie(&state.config, "hakobi_gh_manifest", &cookie_value, 3600);
-    let target = format!("https://github.com/settings/apps/new?state={flow_state}");
-    let mut response = axum::response::Redirect::to(&target).into_response();
+    let manifest_b64 = {
+        use base64::Engine as _;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(manifest.to_string())
+    };
+    // GitHub's manifest flow requires a form POST of `manifest` (JSON string)
+    // plus `state`; an auto-submitting form bridges the cross-origin hop
+    // (form-action allows github.com).
+    let page = html! {
+        head {
+            title { "Redirecting to GitHub…" }
+        }
+        body {
+            form id="gh-manifest" method="post"
+                action="https://github.com/settings/apps/new" {
+                input type="hidden" name="manifest" value=(manifest_b64);
+                input type="hidden" name="state" value=(flow_state);
+            }
+            noscript {
+                button type="submit" form="gh-manifest" { "Continue to GitHub" }
+            }
+            script { "document.getElementById('gh-manifest').submit();" }
+        }
+    };
+    let mut response = super::html_response(StatusCode::OK, page, Vec::new());
     response
         .headers_mut()
         .insert(axum::http::header::SET_COOKIE, cookie.parse().unwrap());
