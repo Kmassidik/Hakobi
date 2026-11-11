@@ -127,9 +127,8 @@ crate::web::templates::page(
                         p class="m-0 mt-1 text-sm text-muted" {
                             "Detected on the control-plane host. An environment can use a tool once its badge is green."
                         }
-                        div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" {
+                        div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" {
                             (tool_tile("fab fa-docker", "Docker", &readiness.docker, "Container builds, compose, deploys"))
-                            (tool_tile("fab fa-golang", "Go builds", &readiness.docker, "Via Docker multi-stage builds"))
                             (tool_tile("fas fa-cube", "Nixpacks", &readiness.nixpacks, "Zero-config builds — pick as build type"))
                             (tool_tile("fas fa-dharmachakra", "Kubernetes", &readiness.kubectl, "Planned — deploy target not wired yet"))
                         }
