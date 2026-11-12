@@ -1,3 +1,4 @@
+pub mod apps_route;
 pub mod tunnel;
 
 use std::time::Duration;
@@ -34,6 +35,22 @@ impl Drop for CreatedTunnel {
     fn drop(&mut self) {
         self.token.zeroize();
     }
+}
+
+/// One ingress rule in a remotely-managed tunnel configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IngressRule {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+    pub service: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_request: Option<Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TunnelConfig {
+    #[serde(default)]
+    ingress: Vec<IngressRule>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -214,5 +231,85 @@ impl CloudflareClient {
             bail!("Cloudflare API returned HTTP {status}: {details}");
         }
         envelope.result.context("Cloudflare API returned no result")
+    }
+
+    /// Fetches the tunnel's current ingress rules.
+    pub async fn get_tunnel_ingress(
+        &self,
+        account_id: &str,
+        tunnel_id: Uuid,
+    ) -> Result<Vec<IngressRule>> {
+        let response: TunnelConfig = self
+            .send(self.request(
+                Method::GET,
+                &format!("/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations"),
+            ))
+            .await?;
+        Ok(response.ingress)
+    }
+
+    /// Adds (or replaces) an ingress rule mapping `hostname` to the given
+    /// host port, preserving all other rules and the catch-all.
+    pub async fn upsert_ingress_route(
+        &self,
+        account_id: &str,
+        tunnel_id: Uuid,
+        hostname: &str,
+        listen_port: u16,
+    ) -> Result<()> {
+        let mut rules = self.get_tunnel_ingress(account_id, tunnel_id).await?;
+        let service = format!("http://127.0.0.1:{listen_port}");
+        if let Some(existing) = rules
+            .iter_mut()
+            .find(|rule| rule.hostname.as_deref() == Some(hostname))
+        {
+            existing.service = service;
+        } else {
+            // Insert before the catch-all (last rule).
+            let insert_at = rules.len().saturating_sub(1);
+            rules.insert(
+                insert_at,
+                IngressRule {
+                    hostname: Some(hostname.to_owned()),
+                    service,
+                    origin_request: None,
+                },
+            );
+        }
+        self.put_ingress(account_id, tunnel_id, rules).await
+    }
+
+    /// Removes the ingress rule for `hostname` if present.
+    pub async fn remove_ingress_route(
+        &self,
+        account_id: &str,
+        tunnel_id: Uuid,
+        hostname: &str,
+    ) -> Result<()> {
+        let mut rules = self.get_tunnel_ingress(account_id, tunnel_id).await?;
+        let before = rules.len();
+        rules.retain(|rule| rule.hostname.as_deref() != Some(hostname));
+        if rules.len() == before {
+            return Ok(());
+        }
+        self.put_ingress(account_id, tunnel_id, rules).await
+    }
+
+    async fn put_ingress(
+        &self,
+        account_id: &str,
+        tunnel_id: Uuid,
+        rules: Vec<IngressRule>,
+    ) -> Result<()> {
+        let body = json!({ "config": { "ingress": rules } });
+        self.send::<Value>(
+            self.request(
+                Method::PUT,
+                &format!("/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations"),
+            )
+            .json(&body),
+        )
+        .await?;
+        Ok(())
     }
 }

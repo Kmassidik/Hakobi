@@ -37,7 +37,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 
 /// Capabilities a provider connection may be granted.
 const CAPABILITIES: [&str; 3] = ["read", "operate", "admin"];
@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS apps (
     github_auto_deploy INTEGER NOT NULL DEFAULT 0,
     -- runtime
     container_port     INTEGER,
+    host_port          INTEGER,
     webhook_secret     TEXT,
     webhook_enabled    INTEGER NOT NULL DEFAULT 0,
     status             TEXT NOT NULL DEFAULT 'idle'
@@ -227,6 +228,11 @@ impl Catalog {
         if (1..9).contains(&current) {
             migrate_v9_apps(&transaction)?;
         }
+        if (9..10).contains(&current) {
+            transaction
+                .execute("ALTER TABLE apps ADD COLUMN host_port INTEGER", [])
+                .context("add apps.host_port")?;
+        }
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .context("set schema version")?;
@@ -271,7 +277,7 @@ impl Catalog {
         Ok(BASE64.encode(payload))
     }
 
-    fn decrypt_secret(&self, encoded: &str) -> Result<String> {
+    pub fn decrypt_secret(&self, encoded: &str) -> Result<String> {
         let payload = BASE64
             .decode(encoded)
             .context("decode provider secret encoding")?;
@@ -307,6 +313,7 @@ fn migrate_v9_apps(transaction: &Transaction<'_>) -> Result<()> {
             github_dockerfile  TEXT DEFAULT 'Dockerfile',
             github_auto_deploy INTEGER NOT NULL DEFAULT 0,
             container_port     INTEGER,
+            host_port          INTEGER,
             webhook_secret     TEXT,
             webhook_enabled    INTEGER NOT NULL DEFAULT 0,
             status             TEXT NOT NULL DEFAULT 'idle'

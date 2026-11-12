@@ -11,6 +11,8 @@ use hakobi::providers::docker::validate_image_reference;
 use super::stages::{
     container_name_for, BuildContext, STAGE_BUILDING, STAGE_DEPLOYING, STAGE_FAILED, STAGE_RUNNING,
 };
+use hakobi::catalog::Catalog;
+
 use super::{run_catalog_op, ExecutorDeps};
 
 /// Pause after starting the container before the first state poll.
@@ -58,7 +60,41 @@ pub(super) async fn run_pipeline(
     {
         return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
     }
-    transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await
+    transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await?;
+
+    // Publish the public subdomain when Cloudflare is configured.
+    let path = deps.catalog_path.clone();
+    let owned_app_id = app_id.to_owned();
+    let app_name = run_catalog_op(path.clone(), move |catalog| {
+        Ok(catalog
+            .get_app(&owned_app_id)?
+            .map(|app| (app.name, app.host_port)))
+    });
+    if let Ok(Some((app_name, Some(host_port)))) = app_name {
+        tokio::spawn(async move {
+            let cf_path = path.clone();
+            let settings = tokio::task::spawn_blocking(move || {
+                let catalog = Catalog::open(&cf_path)?;
+                crate::cloudflare::apps_route::load_settings(&catalog)
+            })
+            .await
+            .unwrap_or_else(|error| Err(anyhow::anyhow!(error.to_string())));
+            let settings = match settings {
+                Ok(settings) => settings,
+                Err(error) => {
+                    tracing::warn!(error = %error, app = %app_name, "cloudflare settings unavailable");
+                    return;
+                }
+            };
+            if let Err(error) =
+                crate::cloudflare::apps_route::sync_app_route_with(&settings, &app_name, host_port)
+                    .await
+            {
+                tracing::warn!(error = %error, app = %app_name, "cloudflare route sync skipped");
+            }
+        });
+    }
+    Ok(())
 }
 
 /// Runs the build through the configured build runner and returns the image
@@ -156,6 +192,11 @@ async fn deploy_image(
         .run_container(&endpoint, image_tag, &container_name, container_port)
         .await
         .context("agent could not start the new container")?;
+    let host_port = run.host_port;
+    let persisted_app_id = app_id.to_owned();
+    let _ = run_catalog_op(deps.catalog_path.clone(), move |catalog| {
+        catalog.set_app_host_port(&persisted_app_id, Some(host_port))
+    });
     super::stages::log(
         deps,
         deployment_id,

@@ -426,15 +426,40 @@ pub(crate) async fn app_delete(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    // Best-effort container cleanup; the DB delete is authoritative.
+    // Best-effort cleanup: container + Cloudflare route. The DB delete is
+    // authoritative.
     let container = crate::web::deployment::container_name_for(&id);
+    let mut app_snapshot = None;
     if let Ok(Some(app)) = load_app(&state, &id).await {
         let _ = state
             .backend
             .remove_container(&format!("agent://{}", app.host_id), &container)
             .await;
+        app_snapshot = Some((app.name, app.host_port));
     }
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
+    if result.is_ok() {
+        if let Some((app_name, _host_port)) = app_snapshot {
+            let cf_path = state.catalog_path.clone();
+            tokio::spawn(async move {
+                let settings = tokio::task::spawn_blocking(move || {
+                    let catalog = hakobi::catalog::Catalog::open(cf_path.as_ref())?;
+                    crate::cloudflare::apps_route::load_settings(&catalog)
+                })
+                .await
+                .unwrap_or_else(|error| Err(anyhow::anyhow!(error.to_string())));
+                let settings = match settings {
+                    Ok(settings) => settings,
+                    Err(_) => return,
+                };
+                if let Err(error) =
+                    crate::cloudflare::apps_route::remove_app_route_with(&settings, &app_name).await
+                {
+                    tracing::warn!(error = %error, app = %app_name, "cloudflare route removal skipped");
+                }
+            });
+        }
+    }
     match result {
         Ok(()) => redirect_with_notice("/apps", "App deleted."),
         Err(error) if error.to_string().contains("not found") => {

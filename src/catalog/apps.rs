@@ -22,6 +22,8 @@ pub struct App {
     pub github_dockerfile: Option<String>,
     pub github_auto_deploy: bool,
     pub container_port: Option<u16>,
+    /// Host port the current deployment publishes (None = not running).
+    pub host_port: Option<u16>,
     pub status: String,
     pub webhook_secret: Option<String>,
     pub webhook_enabled: bool,
@@ -96,19 +98,29 @@ fn read_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<App> {
         github_dockerfile: row.get(7)?,
         github_auto_deploy: row.get::<_, i64>(8)? != 0,
         container_port: row.get(9)?,
-        status: row.get(10)?,
-        webhook_secret: row.get(11)?,
-        webhook_enabled: row.get::<_, i64>(12)? != 0,
-        created_at: row.get(13)?,
-        updated_at: row.get(14)?,
+        host_port: row.get::<_, Option<i64>>(10)?.map(|v| v as u16),
+        status: row.get(11)?,
+        webhook_secret: row.get(12)?,
+        webhook_enabled: row.get::<_, i64>(13)? != 0,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
     })
 }
 
 const APP_COLUMNS: &str = "id, name, host_id, build_type, github_repo, \
-     github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, \
+     github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, host_port, \
      status, webhook_secret, webhook_enabled, created_at, updated_at";
 
 impl Catalog {
+    /// Persists the host port published by the latest deployment.
+    pub fn set_app_host_port(&self, id: &str, host_port: Option<u16>) -> Result<()> {
+        self.connection.execute(
+            "UPDATE apps SET host_port = ?2 WHERE id = ?1",
+            params![id, host_port.map(i64::from)],
+        )?;
+        Ok(())
+    }
+
     /// Creates a CP9 app bound to an enrolled host agent.
     ///
     /// The host must exist and be enabled. The name must be a unique ASCII
