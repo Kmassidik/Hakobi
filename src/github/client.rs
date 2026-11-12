@@ -190,7 +190,7 @@ impl GithubClient {
         if !status.is_success() {
             anyhow::bail!("GET {url} returned {status}");
         }
-        response.json().await.context("decode github response")
+        response.json().await.context(format!("decode github response from {url}"))
     }
 
     /// Repositories the installation can access.
