@@ -152,10 +152,12 @@ CREATE TABLE IF NOT EXISTS deployment_logs (
     message       TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_apps_host ON apps (host_id);
-CREATE INDEX IF NOT EXISTS idx_deployments_app ON deployments (app_id, version);
 CREATE INDEX IF NOT EXISTS idx_deployment_logs_deployment ON deployment_logs (deployment_id);
 "#;
+
+/// v9 indexes — created only after apps/deployments exist in their final shape.
+const APP_INDEXES: &str = "CREATE INDEX IF NOT EXISTS idx_apps_host ON apps (host_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_app ON deployments (app_id, version);";
 
 /// Handle to the catalog database.
 pub struct Catalog {
@@ -206,6 +208,11 @@ impl Catalog {
         transaction
             .execute_batch(SCHEMA)
             .context("create catalog schema")?;
+        if current == 0 {
+            transaction
+                .execute_batch(APP_INDEXES)
+                .context("create app indexes")?;
+        }
         if current < 6 {
             migrate_v6_github(&transaction)?;
         }
