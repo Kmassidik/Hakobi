@@ -235,10 +235,11 @@ async fn run() -> Result<()> {
         },
         build: agent_build::BuildState {
             runs_root: std::path::PathBuf::from(
-                env::var("HAKOBI_AGENT_BUILDS")
-                    .unwrap_or_else(|_| "/tmp/hakobi-builds".to_owned()),
+                env::var("HAKOBI_AGENT_BUILDS").unwrap_or_else(|_| "/tmp/hakobi-builds".to_owned()),
             ),
-            slots: Arc::new(tokio::sync::Semaphore::new(agent_build::MAX_CONCURRENT_BUILDS)),
+            slots: Arc::new(tokio::sync::Semaphore::new(
+                agent_build::MAX_CONCURRENT_BUILDS,
+            )),
         },
     };
     axum::serve(listener, app(state))

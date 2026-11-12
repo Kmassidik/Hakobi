@@ -47,11 +47,20 @@ fn truncate_tail(log: &str) -> (String, bool) {
     }
     let start = log.len() - MAX_LOG_TAIL;
     // Skip to the next newline so the tail starts on a whole line.
-    let offset = log[start..].find('\n').map(|i| start + i + 1).unwrap_or(start);
+    let offset = log[start..]
+        .find('\n')
+        .map(|i| start + i + 1)
+        .unwrap_or(start);
     (log[offset..].to_owned(), true)
 }
 
-fn outcome(status: &str, exit_code: i32, started: Instant, log: &str, detail: Option<String>) -> BuildOutcome {
+fn outcome(
+    status: &str,
+    exit_code: i32,
+    started: Instant,
+    log: &str,
+    detail: Option<String>,
+) -> BuildOutcome {
     let (log_tail, truncated) = truncate_tail(log);
     BuildOutcome {
         status: status.to_owned(),
@@ -64,7 +73,13 @@ fn outcome(status: &str, exit_code: i32, started: Instant, log: &str, detail: Op
 }
 
 fn error_outcome(started: Instant, error: anyhow::Error) -> BuildOutcome {
-    outcome("failed", 1, started, &format!("{error:#}"), Some(error.to_string()))
+    outcome(
+        "failed",
+        1,
+        started,
+        &format!("{error:#}"),
+        Some(error.to_string()),
+    )
 }
 
 /// Sanitizes the repo URL into a short directory name.
@@ -136,10 +151,28 @@ pub fn run_build(runs_root: &Path, job: &BuildJob) -> BuildOutcome {
                 .replacen("https://", &format!("https://x-access-token:{token}@"), 1)
         })
         .unwrap_or_else(|| job.git_url.clone());
-    let (code, log) = run_capture(&workdir, "git", &["clone", "--depth", "1", "--branch", &job.branch, &clone_url, "repo"]);
+    let (code, log) = run_capture(
+        &workdir,
+        "git",
+        &[
+            "clone",
+            "--depth",
+            "1",
+            "--branch",
+            &job.branch,
+            &clone_url,
+            "repo",
+        ],
+    );
     let mut log = log;
     if code != 0 {
-        return outcome("failed", code, started, &log, Some("git clone failed".to_owned()));
+        return outcome(
+            "failed",
+            code,
+            started,
+            &log,
+            Some("git clone failed".to_owned()),
+        );
     }
 
     let repo = workdir.join("repo");
@@ -153,7 +186,13 @@ pub fn run_build(runs_root: &Path, job: &BuildJob) -> BuildOutcome {
     );
     log.push_str(&build_log);
     if code != 0 {
-        return outcome("failed", code, started, &log, Some("docker build failed".to_owned()));
+        return outcome(
+            "failed",
+            code,
+            started,
+            &log,
+            Some("docker build failed".to_owned()),
+        );
     }
     outcome("succeeded", 0, started, &log, None)
 }
@@ -203,7 +242,10 @@ async fn handle_build(state: BuildState, job: BuildJob) -> Response {
     let outcome = tokio::task::spawn_blocking(move || run_build(&runs_root, &job))
         .await
         .unwrap_or_else(|error| {
-            error_outcome(Instant::now(), anyhow::anyhow!("build task failed: {error}"))
+            error_outcome(
+                Instant::now(),
+                anyhow::anyhow!("build task failed: {error}"),
+            )
         });
     axum::Json(outcome).into_response()
 }

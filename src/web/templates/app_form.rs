@@ -58,7 +58,8 @@ pub fn app_form(
                     @if let Some(message) = error {
                         div class="mb-6 mt-6 border-l-[3px] border-danger bg-danger/5 px-4 py-3.5 text-sm leading-normal text-danger" role="alert" { (message) }
                     }
-                    div class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+                    form method="post" action=(action) class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+                        input type="hidden" name="csrf_token" value=(csrf_token);
                         p class=(format!("{EYEBROW} mb-1 mt-0 text-brand-bright")) { "GitHub source" }
                         p class="m-0 text-sm leading-relaxed text-muted" {
                             "Bind this app to a repository. On push, Hakobi rebuilds and redeploys automatically."
@@ -83,9 +84,6 @@ pub fn app_form(
                             }
                         }
                         p data-gh-status class="m-0 text-xs text-muted" { "Checking GitHub connection…" }
-                    }
-                    form method="post" action=(action) class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
-                        input type="hidden" name="csrf_token" value=(csrf_token);
                         label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
                             "Name"
                             p class="m-0 text-xs font-normal leading-relaxed text-muted" {
