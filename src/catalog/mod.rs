@@ -37,7 +37,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 
 /// Capabilities a provider connection may be granted.
 const CAPABILITIES: [&str; 3] = ["read", "operate", "admin"];
@@ -235,12 +235,14 @@ impl Catalog {
         }
         // settings_kv arrived with v6 on some databases; guarantee it exists
         // for every database crossing the v10 boundary.
-        transaction
-            .execute(
-                "CREATE TABLE IF NOT EXISTS settings_kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)",
-                [],
-            )
-            .context("create settings_kv")?;
+        if (1..11).contains(&current) {
+            transaction
+                .execute(
+                    "CREATE TABLE IF NOT EXISTS settings_kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)",
+                    [],
+                )
+                .context("create settings_kv")?;
+        }
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .context("set schema version")?;
