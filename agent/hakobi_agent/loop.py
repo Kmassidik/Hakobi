@@ -195,9 +195,7 @@ def run_task(
             }
         )
         diff_digest = workspace.diff_digest()
-        signature = hashlib.sha256(
-            (diff_digest + json.dumps([result.as_dict() for result in results], sort_keys=True)).encode()
-        ).hexdigest()
+        signature = diff_digest
 
         if state["tokens_used"] > task.token_budget:
             state["feedback"] = "Token budget exceeded."
