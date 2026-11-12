@@ -3,5 +3,6 @@ pub mod catalog;
 pub mod github;
 pub mod host_agent;
 pub mod install;
+pub mod agent_build;
 pub mod metrics;
 pub mod providers;

@@ -36,7 +36,7 @@ use hakobi::{
 };
 use subtle::ConstantTimeEq;
 
-mod agent_build;
+use hakobi::agent_build;
 use sysinfo::{Disks, Networks, System};
 use tokio::{net::TcpListener, process::Command, sync::Mutex, time::timeout};
 
