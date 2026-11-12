@@ -45,11 +45,20 @@ pub(crate) async fn repos(State(state): State<AppState>, headers: HeaderMap) -> 
     };
     match client.list_repos().await {
         Ok(repos) => Json(serde_json::json!({ "repos": repos })).into_response(),
-        Err(error) => (
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": error.to_string() })),
-        )
-            .into_response(),
+        Err(error) => {
+            let mut chain = error.to_string();
+            let mut source = error.source();
+            while let Some(cause) = source {
+                chain.push_str(" <- ");
+                chain.push_str(&cause.to_string());
+                source = cause.source();
+            }
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({ "error": chain })),
+            )
+                .into_response()
+        }
     }
 }
 
