@@ -170,6 +170,7 @@ pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Res
     #[derive(serde::Deserialize)]
     struct ManifestConversion {
         id: i64,
+        slug: Option<String>,
         client_id: String,
         client_secret: String,
         webhook_secret: String,
@@ -190,8 +191,10 @@ pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Res
     {
         let _ = catalog.set_github_installation(installation);
     }
+    let slug = conversion.slug.clone().unwrap_or_default();
     match catalog.save_github_app(
         conversion.id,
+        &slug,
         &conversion.client_id,
         &conversion.client_secret,
         &conversion.webhook_secret,

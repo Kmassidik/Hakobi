@@ -36,20 +36,22 @@ impl Catalog {
     pub fn save_github_app(
         &self,
         app_id: i64,
+        app_slug: &str,
         client_id: &str,
         client_secret: &str,
         webhook_secret: &str,
         private_key_pem: &str,
     ) -> Result<()> {
         self.connection.execute(
-            "INSERT INTO github_app (id, app_id, client_id, client_secret, webhook_secret, \
+            "INSERT INTO github_app (id, app_id, app_slug, client_id, client_secret, webhook_secret, \
              private_key_pem) \
-             VALUES ('app', ?1, ?2, ?3, ?4, ?5) \
-             ON CONFLICT(id) DO UPDATE SET app_id=excluded.app_id, client_id=excluded.client_id, \
-             client_secret=excluded.client_secret, webhook_secret=excluded.webhook_secret, \
+             VALUES ('app', ?1, ?2, ?3, ?4, ?5, ?6) \
+             ON CONFLICT(id) DO UPDATE SET app_id=excluded.app_id, app_slug=excluded.app_slug, \
+             client_id=excluded.client_id, client_secret=excluded.client_secret, webhook_secret=excluded.webhook_secret, \
              private_key_pem=excluded.private_key_pem",
             params![
                 app_id,
+                app_slug,
                 client_id,
                 self.encrypt_secret(client_secret)?,
                 self.encrypt_secret(webhook_secret)?,
@@ -57,6 +59,20 @@ impl Catalog {
             ],
         )?;
         Ok(())
+    }
+
+    /// The app slug (GitHub URL name), if registered.
+    pub fn github_app_slug(&self) -> Result<Option<String>> {
+        let slug: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT app_slug FROM github_app WHERE id = 'app'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("load github app slug")?;
+        Ok(slug)
     }
 
     /// Records the installation id once the app is installed on GitHub.

@@ -29,6 +29,7 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
     };
     let app_installed = catalog.github_app_installed().unwrap_or(false);
     let app_registered = catalog.github_app_registered().unwrap_or(false);
+    let app_slug = catalog.github_app_slug().unwrap_or(None);
     let connection = catalog
         .load_github_connection(&state.config.username)
         .ok()
@@ -50,6 +51,7 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         username: &state.config.username,
         app_installed,
         app_registered,
+        app_slug: app_slug.as_deref(),
         github_login: connection.as_ref().map(|c| c.github_login.as_str()),
         default_branch: &default_branch,
         auto_deploy,
@@ -77,6 +79,7 @@ struct SettingsPage<'a> {
     username: &'a str,
     app_installed: bool,
     app_registered: bool,
+    app_slug: Option<&'a str>,
     github_login: Option<&'a str>,
     default_branch: &'a str,
     auto_deploy: bool,
@@ -122,13 +125,14 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                                     }
                                 }
                             } @else if page.app_registered {
-                                form method="post" action="/settings/github/recheck" class="m-0" {
-                                    button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Check installation" }
+                                @if let Some(slug) = page.app_slug {
+                                    a href=(format!("https://github.com/apps/{slug}/installations/new"))
+                                        class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white no-underline" {
+                                        "Install on GitHub"
+                                    }
                                 }
-                                span class="text-xs text-muted" {
-                                    "App registered. Open GitHub → Settings → Installed GitHub Apps → "
-                                    i class="fa-brands fa-github text-[0.75rem]" aria-hidden="true" {}
-                                    " Hakobi → Configure → Install, then press Check installation."
+                                form method="post" action="/settings/github/recheck" class="m-0" {
+                                    button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Check installation" }
                                 }
                             } @else {
                                 form method="post" action="/settings/github/install" class="m-0" {

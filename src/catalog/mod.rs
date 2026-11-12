@@ -43,7 +43,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 7;
+const SCHEMA_VERSION: i64 = 8;
 
 /// Capabilities a provider connection may be granted.
 const CAPABILITIES: [&str; 3] = ["read", "operate", "admin"];
@@ -255,6 +255,11 @@ impl Catalog {
         }
         if (1..7).contains(&current) {
             migrate_v7_github_installation(&transaction)?;
+        }
+        if (1..8).contains(&current) {
+            transaction
+                .execute("ALTER TABLE github_app ADD COLUMN app_slug TEXT", [])
+                .context("add github_app.app_slug")?;
         }
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
