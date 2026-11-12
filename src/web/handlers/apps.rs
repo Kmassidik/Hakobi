@@ -426,6 +426,14 @@ pub(crate) async fn app_delete(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    // Best-effort container cleanup; the DB delete is authoritative.
+    let container = crate::web::deployment::container_name_for(&id);
+    if let Ok(Some(app)) = load_app(&state, &id).await {
+        let _ = state
+            .backend
+            .remove_container(&format!("agent://{}", app.host_id), &container)
+            .await;
+    }
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
     match result {
         Ok(()) => redirect_with_notice("/apps", "App deleted."),

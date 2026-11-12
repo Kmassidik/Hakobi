@@ -5,7 +5,8 @@
 //! catalog plumbing both stages use.
 
 pub(crate) mod executor;
-mod stages;
+pub(crate) mod stages;
+pub(crate) use stages::container_name_for;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
