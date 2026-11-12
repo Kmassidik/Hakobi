@@ -71,7 +71,7 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
         &headers,
         &hosts,
         &values,
-        "/apps/new",
+        "/apps",
         "New app",
         "Create app",
         None,
