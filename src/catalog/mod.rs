@@ -233,6 +233,14 @@ impl Catalog {
                 .execute("ALTER TABLE apps ADD COLUMN host_port INTEGER", [])
                 .context("add apps.host_port")?;
         }
+        // settings_kv arrived with v6 on some databases; guarantee it exists
+        // for every database crossing the v10 boundary.
+        transaction
+            .execute(
+                "CREATE TABLE IF NOT EXISTS settings_kv (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)",
+                [],
+            )
+            .context("create settings_kv")?;
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .context("set schema version")?;
