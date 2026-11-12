@@ -35,6 +35,8 @@ use hakobi::{
     },
 };
 use subtle::ConstantTimeEq;
+
+mod agent_build;
 use sysinfo::{Disks, Networks, System};
 use tokio::{net::TcpListener, process::Command, sync::Mutex, time::timeout};
 
@@ -53,6 +55,13 @@ struct AgentState {
     token: Arc<str>,
     jobs: Arc<Mutex<HashMap<String, InstallJob>>>,
     system: Arc<Mutex<SystemSampler>>,
+    build: agent_build::BuildState,
+}
+
+impl axum::extract::FromRef<AgentState> for agent_build::BuildState {
+    fn from_ref(state: &AgentState) -> Self {
+        state.build.clone()
+    }
 }
 
 struct SystemSampler {
@@ -224,6 +233,13 @@ async fn run() -> Result<()> {
             tokio::spawn(SystemSampler::run_refresh_loop(Arc::clone(&sampler)));
             sampler
         },
+        build: agent_build::BuildState {
+            runs_root: std::path::PathBuf::from(
+                env::var("HAKOBI_AGENT_BUILDS")
+                    .unwrap_or_else(|_| "/tmp/hakobi-builds".to_owned()),
+            ),
+            slots: Arc::new(tokio::sync::Semaphore::new(agent_build::MAX_CONCURRENT_BUILDS)),
+        },
     };
     axum::serve(listener, app(state))
         .await
@@ -257,6 +273,9 @@ fn app(state: AgentState) -> Router {
         )
         .route("/v1/docker/snapshot", get(docker_snapshot))
         .route("/v1/docker/containers/run", post(docker_run))
+        .route("/build/dockerfile", post(agent_build::build_dockerfile))
+        .route("/build/compose", post(agent_build::build_compose))
+        .route("/build/nixpacks", post(agent_build::build_nixpacks))
         .route("/v1/docker/containers/{name}/start", post(docker_start))
         .route("/v1/docker/containers/{name}/stop", post(docker_stop))
         .route("/v1/docker/containers/{name}/restart", post(docker_restart))
