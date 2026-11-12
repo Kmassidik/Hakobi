@@ -966,6 +966,10 @@ mod tests {
                 tokio::spawn(SystemSampler::run_refresh_loop(Arc::clone(&sampler)));
                 sampler
             },
+            build: agent_build::BuildState {
+                runs_root: std::env::temp_dir().join("hakobi-agent-tests"),
+                slots: Arc::new(tokio::sync::Semaphore::new(1)),
+            },
         }
     }
 
