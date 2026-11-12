@@ -198,7 +198,16 @@ pub(crate) async fn github_connect_callback(
     {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     }
-    axum::response::Redirect::to("/settings/github").into_response()
+    // Auto-complete installation: this callback fires immediately after the
+    // user installs (request_oauth_on_install), so the installation now exists.
+    if !catalog.github_app_installed().unwrap_or(false) {
+        if let Ok(Some(installation_id)) =
+            super::github::fetch_first_installation(&http, app.app_id, &app.private_key_pem).await
+        {
+            let _ = catalog.set_github_installation(installation_id);
+        }
+    }
+    axum::response::Redirect::to("/settings").into_response()
 }
 
 /// DELETE /settings/github — disconnect the user's GitHub identity.
