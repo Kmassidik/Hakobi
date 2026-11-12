@@ -292,3 +292,44 @@ pub(crate) async fn github_manifest_post_install(
     };
     manifest_exchange_inner(&state, code).await
 }
+
+/// POST /settings/github/recheck — polls GitHub for the installation using the
+/// stored app credentials and records it if present.
+pub(crate) async fn github_recheck_installation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    if !authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    let Ok(catalog) = Catalog::open((*state.catalog_path).clone()) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let Some(app) = catalog.load_github_app().ok().flatten() else {
+        return (StatusCode::BAD_REQUEST, "app not registered").into_response();
+    };
+    let http = reqwest::Client::builder()
+        .user_agent("hakobi-control-plane")
+        .build()
+        .unwrap_or_default();
+    match super::github::fetch_first_installation(&http, app.app_id, &app.private_key_pem).await {
+        Ok(Some(installation_id)) => {
+            if catalog.set_github_installation(installation_id).is_ok() {
+                axum::response::Redirect::to("/settings").into_response()
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        }
+        _ => {
+            let markup = maud::html! {
+                head { title { "Not installed yet · Hakobi" } }
+                body style="font-family: system-ui, sans-serif; padding: 4rem; text-align: center;" {
+                    h1 { "No installation found" }
+                    p { "Install the app on GitHub first: Settings → Installed GitHub Apps → Hakobi → Configure → Install." }
+                    a href="/settings" { "Back to Settings" }
+                }
+            };
+            super::html_response(StatusCode::OK, markup, Vec::new())
+        }
+    }
+}

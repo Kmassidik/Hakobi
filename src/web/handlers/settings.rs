@@ -28,6 +28,7 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let app_installed = catalog.github_app_installed().unwrap_or(false);
+    let app_registered = catalog.github_app_registered().unwrap_or(false);
     let connection = catalog
         .load_github_connection(&state.config.username)
         .ok()
@@ -48,6 +49,7 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         base_url: &state.config.base_url,
         username: &state.config.username,
         app_installed,
+        app_registered,
         github_login: connection.as_ref().map(|c| c.github_login.as_str()),
         default_branch: &default_branch,
         auto_deploy,
@@ -74,6 +76,7 @@ struct SettingsPage<'a> {
     base_url: &'a str,
     username: &'a str,
     app_installed: bool,
+    app_registered: bool,
     github_login: Option<&'a str>,
     default_branch: &'a str,
     auto_deploy: bool,
@@ -100,6 +103,8 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                             }
                             @if page.app_installed {
                                 span class="rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700" { "Connected" }
+                            } @else if page.app_registered {
+                                span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Registered — install pending" }
                             } @else {
                                 span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Not connected" }
                             }
@@ -115,6 +120,15 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                                     form method="post" action="/settings/github/connect" class="m-0" {
                                         button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Sign in with GitHub" }
                                     }
+                                }
+                            } @else if page.app_registered {
+                                form method="post" action="/settings/github/recheck" class="m-0" {
+                                    button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Check installation" }
+                                }
+                                span class="text-xs text-muted" {
+                                    "App registered. Open GitHub → Settings → Installed GitHub Apps → "
+                                    i class="fa-brands fa-github text-[0.75rem]" aria-hidden="true" {}
+                                    " Hakobi → Configure → Install, then press Check installation."
                                 }
                             } @else {
                                 form method="post" action="/settings/github/install" class="m-0" {

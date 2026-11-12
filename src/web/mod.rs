@@ -261,6 +261,7 @@ pub(crate) fn router_with_pipeline(
         .route("/settings", get(handlers::settings_page))
         .route("/settings/github", get(handlers::github_settings_page))
         .route("/settings/github/connect", post(handlers::github_connect_start))
+        .route("/settings/github/recheck", post(handlers::github_recheck_installation))
         .route("/settings/github/install", post(handlers::github_install_start))
         .route("/settings/github/manifest-callback", get(handlers::github_manifest_post_install))
         .route("/settings/github/callback", get(handlers::github_connect_callback))

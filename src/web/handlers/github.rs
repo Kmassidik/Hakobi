@@ -203,7 +203,7 @@ pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Res
 }
 
 /// App-JWT lookup of the first installation, if one exists.
-async fn fetch_first_installation(
+pub(crate) async fn fetch_first_installation(
     http: &reqwest::Client,
     app_id: i64,
     pem: &str,

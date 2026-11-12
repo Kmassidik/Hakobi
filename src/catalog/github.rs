@@ -124,6 +124,16 @@ impl Catalog {
         Ok(())
     }
 
+    /// Whether the app credentials exist (registered), regardless of install.
+    pub fn github_app_registered(&self) -> Result<bool> {
+        let registered: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM github_app WHERE id = 'app')",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(registered)
+    }
+
     /// Whether the admin completed the App installation.
     pub fn github_app_installed(&self) -> Result<bool> {
         let installed: bool = self.connection.query_row(
