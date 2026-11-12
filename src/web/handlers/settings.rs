@@ -2,6 +2,7 @@
 //! detection), deployment defaults, and instance info — grid layout.
 
 use axum::{
+    extract::Form,
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -9,7 +10,12 @@ use axum::{
 use maud::{html, Markup};
 
 use super::super::AppState;
-use super::{authenticated, html_response, page_csrf};
+use serde::Deserialize;
+
+use super::{
+    authenticated, html_response, internal_error, page_csrf, post_is_allowed, redirect_with_notice,
+    with_catalog,
+};
 use anyhow::Context as _;
 use hakobi::catalog::Catalog;
 use hakobi::install::{Readiness, ToolStatus};
@@ -175,7 +181,31 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                         }
                     }
 
-                    // ---------- Instance ----------
+                    // ---------- Cloudflare ----------
+                section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="cf-heading" {
+                    h2 id="cf-heading" class="m-0 text-[1.05rem] font-bold" { "Cloudflare (app domains)" }
+                    p class="m-0 mt-1 text-sm text-muted" {
+                        "Each deployed app gets a public subdomain on your domain through your Cloudflare Tunnel."
+                    }
+                    form method="post" action="/settings/cloudflare" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2" {
+                        input type="hidden" name="csrf_token" value=(page.csrf_token);
+                        label class="grid gap-1 text-sm" { "Account ID"
+                            input name="account_id" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+                        label class="grid gap-1 text-sm" { "Zone ID"
+                            input name="zone_id" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+                        label class="grid gap-1 text-sm" { "Tunnel ID"
+                            input name="tunnel_id" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+                        label class="grid gap-1 text-sm" { "Root domain (e.g. glicc.id)"
+                            input name="domain" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+                        label class="grid gap-1 text-sm sm:col-span-2" { "API token (Tunnel:Edit + DNS:Edit) — stored encrypted"
+                            input name="api_token" type="password" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+                        div class="sm:col-span-2" {
+                            button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Save Cloudflare settings" }
+                        }
+                    }
+                }
+
+                // ---------- Instance ----------
                     section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="instance-heading" {
                         h2 id="instance-heading" class="m-0 text-[1.05rem] font-bold" { "Instance" }
                         div class="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_1fr]" {
@@ -215,4 +245,50 @@ fn tool_tile(icon: &str, name: &str, status: &ToolStatus, description: &str) -> 
             p class="m-0 mt-0.5 text-xs leading-snug text-muted" { (description) }
         }
     }
+}
+
+/// POST /settings/cloudflare — saves tunnel + DNS credentials.
+pub(crate) async fn cloudflare_save(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<CloudflareForm>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let result = with_catalog(&state, move |catalog| {
+        catalog.settings_set(
+            crate::cloudflare::apps_route::KEY_ACCOUNT_ID,
+            &form.account_id,
+        )?;
+        catalog.settings_set(crate::cloudflare::apps_route::KEY_ZONE_ID, &form.zone_id)?;
+        catalog.settings_set(
+            crate::cloudflare::apps_route::KEY_TUNNEL_ID,
+            &form.tunnel_id,
+        )?;
+        catalog.settings_set(crate::cloudflare::apps_route::KEY_DOMAIN, &form.domain)?;
+        catalog.settings_set_encrypted(
+            crate::cloudflare::apps_route::KEY_API_TOKEN,
+            &form.api_token,
+        )?;
+        Ok(())
+    })
+    .await;
+    match result {
+        Ok(()) => redirect_with_notice("/settings", "Cloudflare settings saved."),
+        Err(error) => internal_error(error),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CloudflareForm {
+    pub(crate) csrf_token: String,
+    pub(crate) account_id: String,
+    pub(crate) zone_id: String,
+    pub(crate) tunnel_id: String,
+    pub(crate) domain: String,
+    pub(crate) api_token: String,
 }

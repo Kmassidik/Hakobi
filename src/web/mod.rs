@@ -221,6 +221,7 @@ pub(crate) fn router_with_pipeline(
         .route("/settings/github/manifest-callback", get(handlers::github_manifest_post_install))
         .route("/settings/github/callback", get(handlers::github_connect_callback))
         .route("/settings/github/delete", post(handlers::github_disconnect))
+        .route("/settings/cloudflare", post(handlers::cloudflare_save))
         .route("/login",
             get(handlers::login_page).post(handlers::login),
         )

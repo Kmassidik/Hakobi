@@ -253,6 +253,12 @@ impl Catalog {
     }
 
     /// Writes one settings key.
+    /// Writes a settings key with the value encrypted via the vault.
+    pub fn settings_set_encrypted(&self, key: &str, value: &str) -> Result<()> {
+        let encrypted = self.encrypt_secret(value)?;
+        self.settings_set(key, &encrypted)
+    }
+
     pub fn settings_set(&self, key: &str, value: &str) -> Result<()> {
         self.connection
             .execute(
@@ -264,7 +270,7 @@ impl Catalog {
         Ok(())
     }
 
-    fn encrypt_secret(&self, secret: &str) -> Result<String> {
+    pub fn encrypt_secret(&self, secret: &str) -> Result<String> {
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&self.key));
         let mut nonce_bytes = [0u8; NONCE_LEN];
         rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);

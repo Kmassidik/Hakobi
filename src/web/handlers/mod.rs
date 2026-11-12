@@ -12,6 +12,7 @@ mod github;
 mod github_settings;
 mod partials;
 mod settings;
+pub(crate) use settings::{cloudflare_save, settings_page};
 
 pub(crate) use app_deploy::{app_deploy, app_rollback};
 pub(crate) use apps::{
@@ -37,7 +38,6 @@ pub(crate) use github_settings::{
     github_manifest_post_install, github_recheck_installation, github_settings_page,
 };
 pub(crate) use partials::{charts_partial, metrics_partial, readiness_partial, status};
-pub(crate) use settings::settings_page;
 
 use std::{fmt::Write as _, sync::LazyLock};
 
