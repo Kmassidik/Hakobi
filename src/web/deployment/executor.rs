@@ -47,7 +47,15 @@ pub(super) async fn run_pipeline(
             return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
         }
     };
-    if let Err(error) = deploy_image(deps, app_id, deployment_id, &image_tag, context.container_port).await {
+    if let Err(error) = deploy_image(
+        deps,
+        app_id,
+        deployment_id,
+        &image_tag,
+        context.container_port,
+    )
+    .await
+    {
         return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
     }
     transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await
@@ -102,12 +110,12 @@ async fn build_image(deps: &ExecutorDeps, app_id: &str, deployment_id: &str) -> 
 
 /// Stops the old container, starts the built image, and verifies it runs.
 async fn deploy_image(
-        deps: &ExecutorDeps,
-        app_id: &str,
-        deployment_id: &str,
-        image_tag: &str,
-        container_port: u16,
-    ) -> Result<()> {
+    deps: &ExecutorDeps,
+    app_id: &str,
+    deployment_id: &str,
+    image_tag: &str,
+    container_port: u16,
+) -> Result<()> {
     validate_image_reference(image_tag)?;
     let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
     let container_name = container_name_for(app_id);

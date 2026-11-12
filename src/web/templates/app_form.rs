@@ -141,10 +141,10 @@ pub fn app_form(
     )
 }
 
-pub(crate) fn delete_app_dialog(csrf_token: &str) -> Markup {
+pub(crate) fn delete_app_dialog(app_id: &str, csrf_token: &str) -> Markup {
     html! {
         dialog id="delete-app" class="w-[90%] max-w-[44rem] rounded-[0.85rem] border border-line bg-surface p-6 text-ink" aria-labelledby="delete-app-title" {
-            form method="post" action="/apps" class="m-0" {
+            form method="post" action=(format!("/apps/{app_id}/delete")) class="m-0" {
                 input type="hidden" name="csrf_token" value=(csrf_token);
                 h2 id="delete-app-title" class="m-0 font-display text-[1.5rem] font-normal" { "Delete app?" }
                 p class="mt-3 text-sm leading-relaxed text-muted" {

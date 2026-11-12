@@ -170,7 +170,7 @@ pub fn app_detail(
                             }
                         }
                     }
-                    (super::app_form::delete_app_dialog(csrf_token))
+                    (super::app_form::delete_app_dialog(&app.id, csrf_token))
                     (app_status_body(app, latest))
                     div class="mt-6 grid gap-4 md:grid-cols-2" {
                         article class="rounded-[0.85rem] border border-line bg-surface/45 p-5" {
