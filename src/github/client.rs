@@ -190,7 +190,9 @@ impl GithubClient {
         if !status.is_success() {
             anyhow::bail!("GET {url} returned {status}");
         }
-        response.json().await.context(format!("decode github response from {url}"))
+        let body = response.text().await.context("read github response body")?;
+        serde_json::from_str(&body)
+            .with_context(|| format!("decode github response from {url}: {}", &body[..body.len().min(200)]))
     }
 
     /// Repositories the installation can access.
