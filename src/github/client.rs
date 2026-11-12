@@ -191,8 +191,7 @@ impl GithubClient {
             anyhow::bail!("GET {url} returned {status}");
         }
         let body = response.text().await.context("read github response body")?;
-        serde_json::from_str(&body)
-            .with_context(|| format!("decode github response from {url}: {}", &body[..body.len().min(200)]))
+        serde_json::from_str(&body).with_context(|| format!("decode github response from {url}"))
     }
 
     /// Repositories the installation can access.
@@ -204,12 +203,17 @@ impl GithubClient {
         let mut repos = Vec::new();
         let mut page = 1;
         loop {
-            let dtos: Vec<RepoDto> = self
+            #[derive(Deserialize)]
+            struct RepoPage {
+                repositories: Vec<RepoDto>,
+            }
+            let page_dto: RepoPage = self
                 .get_json(
                     &format!("{GITHUB_API}/installation/repositories?per_page=100&page={page}"),
                     &token,
                 )
                 .await?;
+            let dtos = page_dto.repositories;
             let done = dtos.len() < 100;
             repos.extend(dtos);
             if done || page >= 10 {
