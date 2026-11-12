@@ -19,6 +19,8 @@ pub(super) struct BuildContext {
     pub dockerfile_path: Option<String>,
     pub context_dir: Option<String>,
     pub image_tag: String,
+    /// Container port the app listens on (host port maps to this).
+    pub container_port: u16,
 }
 
 /// Appends a log line to a deployment.

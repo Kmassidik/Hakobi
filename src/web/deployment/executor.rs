@@ -13,9 +13,6 @@ use super::stages::{
 };
 use super::{run_catalog_op, ExecutorDeps};
 
-/// Port published on the host for the deployed container.
-const DEPLOY_CONTAINER_PORT: u16 = 8080;
-
 /// Pause after starting the container before the first state poll.
 const CONTAINER_SETTLE: Duration = Duration::from_secs(2);
 
@@ -44,7 +41,13 @@ pub(super) async fn run_pipeline(
     .await?;
 
     transition(deps, deployment_id, STAGE_DEPLOYING, "Deploying to host").await?;
-    if let Err(error) = deploy_image(deps, app_id, deployment_id, &image_tag).await {
+    let context = match load_build_context(deps, app_id, deployment_id).await {
+        Ok(context) => context,
+        Err(error) => {
+            return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
+        }
+    };
+    if let Err(error) = deploy_image(deps, app_id, deployment_id, &image_tag, context.container_port).await {
         return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
     }
     transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await
@@ -99,11 +102,12 @@ async fn build_image(deps: &ExecutorDeps, app_id: &str, deployment_id: &str) -> 
 
 /// Stops the old container, starts the built image, and verifies it runs.
 async fn deploy_image(
-    deps: &ExecutorDeps,
-    app_id: &str,
-    deployment_id: &str,
-    image_tag: &str,
-) -> Result<()> {
+        deps: &ExecutorDeps,
+        app_id: &str,
+        deployment_id: &str,
+        image_tag: &str,
+        container_port: u16,
+    ) -> Result<()> {
     validate_image_reference(image_tag)?;
     let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
     let container_name = container_name_for(app_id);
@@ -141,7 +145,7 @@ async fn deploy_image(
     }
     let run = deps
         .backend
-        .run_container(&endpoint, image_tag, &container_name, DEPLOY_CONTAINER_PORT)
+        .run_container(&endpoint, image_tag, &container_name, container_port)
         .await
         .context("agent could not start the new container")?;
     super::stages::log(
@@ -245,6 +249,7 @@ async fn load_build_context(
         let build_type = app.build_type.clone();
         let is_compose = build_type == "compose";
         Ok(BuildContext {
+            container_port: app.container_port.unwrap_or(8080),
             build_type,
             branch: app
                 .github_branch
