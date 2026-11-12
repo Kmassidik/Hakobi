@@ -226,7 +226,11 @@ pub fn create_cookie(config: &PublicConfig, name: &str, value: &str, max_age: u6
     } else {
         ""
     };
-    format!("{name}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure}")
+    // SameSite=Lax: cross-site top-level GET navigations (GitHub manifest/OAuth
+    // callbacks) must carry the session cookie. Lax still withholds cookies on
+    // cross-site POSTs, so CSRF protection is unaffected; forms also carry a
+    // CSRF token.
+    format!("{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}{secure}")
 }
 
 pub fn clear_cookie(config: &PublicConfig, name: &str) -> String {
