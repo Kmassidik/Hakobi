@@ -40,7 +40,10 @@ else
   # 5. Ask GitHub directly via our recheck endpoint (server-side app JWT)
   code=$(curl -s -b "$JAR" -o /tmp/recheck.html -w '%{http_code}' -X POST \
     -H "Origin: $BASE_URL" "$BASE_URL/settings/github/recheck")
-  if grep -q "No installation found" /tmp/recheck.html 2>/dev/null; then
+  if [ "$code" = "400" ]; then
+    step PASS "clean state — no app registered yet"
+    step NEXT  "Settings -> Install GitHub App -> Create GitHub App -> Install -> Check installation"
+  elif grep -q "No installation found" /tmp/recheck.html 2>/dev/null; then
     step WAIT "registered but NOT installed on github.com"
     step NEXT  "Settings -> Install on GitHub -> select repos -> Install -> Check installation"
   elif [ "$code" = "303" ]; then
