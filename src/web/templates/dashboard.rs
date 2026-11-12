@@ -306,6 +306,8 @@ pub struct DashboardView<'a> {
     pub live: &'a [hakobi::metrics::LatestLive],
     /// Most recent deployments across all environments.
     pub activity: &'a [ActivityRow<'a>],
+    /// CSRF token embedded in the sidebar sign-out form.
+    pub csrf_token: &'a str,
 }
 
 /// One row of the recent-activity feed.
@@ -325,14 +327,15 @@ pub fn dashboard(view: DashboardView<'_>) -> Markup {
         history_points,
         live,
         activity,
+        csrf_token,
     } = view;
     let stats = LiveStats::from_samples(live, metrics);
     page(
         "Dashboard · Hakobi",
         html! {
             div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {
-                (sidebar("overview", "", username, ""))
-                (mobile_header("", username))
+                (sidebar("overview", "", username, csrf_token))
+                (mobile_header(csrf_token, username))
                 main class="mx-auto w-[92%] max-w-[96rem] pb-16 pt-8 lg:pt-9" {
                     (dashboard_alerts(agent_configured, agent_online, notice))
                     (dashboard_header(username))

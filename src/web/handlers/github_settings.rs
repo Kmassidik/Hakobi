@@ -10,7 +10,7 @@ use serde::Deserialize;
 use super::super::templates;
 use super::super::AppState;
 use super::github::manifest_exchange_inner;
-use super::{authenticated, html_response};
+use super::{authenticated, html_response, page_csrf};
 use hakobi::catalog::Catalog;
 use maud::{html, Markup};
 use rand::RngCore;
@@ -31,13 +31,15 @@ pub(crate) async fn github_settings_page(
         .load_github_connection(&state.config.username)
         .ok()
         .flatten();
+    let (csrf_token, cookies) = page_csrf(&state, &headers);
     let markup = github_settings_page_markup(
         &state.config.base_url,
         &state.config.username,
         app_installed,
         connection.as_ref().map(|c| c.github_login.as_str()),
+        &csrf_token,
     );
-    html_response(StatusCode::OK, markup, Vec::new())
+    html_response(StatusCode::OK, markup, cookies)
 }
 
 fn github_settings_page_markup(
@@ -45,13 +47,14 @@ fn github_settings_page_markup(
     username: &str,
     app_installed: bool,
     github_login: Option<&str>,
+    csrf_token: &str,
 ) -> Markup {
     templates::page(
         "GitHub · Hakobi",
         html! {
             div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {
-                (templates::sidebar("settings", base_url, username, ""))
-                (templates::mobile_header("", username))
+                (templates::sidebar("settings", base_url, username, csrf_token))
+                (templates::mobile_header(csrf_token, username))
                 main class="mx-auto w-[92%] max-w-[44rem] pb-24 pt-10 lg:pt-16" {
                     p class="mb-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-brand-bright" { "Settings" }
                     h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "GitHub" }

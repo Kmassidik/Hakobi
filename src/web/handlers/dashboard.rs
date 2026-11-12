@@ -10,7 +10,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{authenticated, html_response, load_providers, with_catalog, ProviderNotice};
+use super::{
+    authenticated, html_response, load_providers, page_csrf, with_catalog, ProviderNotice,
+};
 use crate::web::{agent_client::HostAgent, templates, AppState};
 use hakobi::providers::ContainerRow;
 
@@ -23,7 +25,7 @@ pub(crate) async fn dashboard(
         return axum::response::Redirect::to("/login").into_response();
     }
 
-    let cookies = Vec::new();
+    let (csrf_token, cookies) = page_csrf(&state, &headers);
     let agent = HostAgent::from_env();
     let agent_configured = agent.is_some();
     let (_, agent_online) = match load_readiness(agent.as_ref()).await {
@@ -51,6 +53,7 @@ pub(crate) async fn dashboard(
         history_points: &history_points,
         live: &live,
         activity: &activity_views,
+        csrf_token: &csrf_token,
     });
     html_response(StatusCode::OK, markup, cookies)
 }
