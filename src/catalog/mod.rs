@@ -43,7 +43,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// Capabilities a provider connection may be granted.
 const CAPABILITIES: [&str; 3] = ["read", "operate", "admin"];
@@ -253,6 +253,9 @@ impl Catalog {
         if current < 6 {
             migrate_v6_github(&transaction)?;
         }
+        if (1..7).contains(&current) {
+            migrate_v7_github_installation(&transaction)?;
+        }
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
             .context("set schema version")?;
@@ -317,6 +320,29 @@ impl Catalog {
 /// `environments` table can claim its name.
 ///
 /// SQLite rewrites the `services` foreign key to point at
+/// v7: installation becomes optional — the manifest flow creates the app
+/// before the user installs it, so installation_id/installed_at are nullable.
+fn migrate_v7_github_installation(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS github_app_v7 (
+            id              TEXT PRIMARY KEY NOT NULL,
+            app_id          INTEGER NOT NULL,
+            client_id       TEXT NOT NULL,
+            client_secret   TEXT NOT NULL,
+            webhook_secret  TEXT NOT NULL,
+            private_key_pem TEXT NOT NULL,
+            installation_id INTEGER,
+            installed_at    TEXT
+        );
+        INSERT OR IGNORE INTO github_app_v7
+            SELECT id, app_id, client_id, client_secret, webhook_secret,
+                   private_key_pem, installation_id, installed_at FROM github_app;
+        DROP TABLE github_app;
+        ALTER TABLE github_app_v7 RENAME TO github_app;",
+    )?;
+    Ok(())
+}
+
 /// `legacy_environments`, so legacy rows stay fully consistent. A no-op when
 /// the rename already happened.
 /// CP9 schema v6: GitHub integration tables and environment source columns.
@@ -329,8 +355,8 @@ fn migrate_v6_github(transaction: &Transaction<'_>) -> Result<()> {
             client_secret   TEXT NOT NULL,
             webhook_secret  TEXT NOT NULL,
             private_key_pem TEXT NOT NULL,
-            installation_id INTEGER NOT NULL,
-            installed_at    TEXT NOT NULL CHECK (length(installed_at) > 0)
+            installation_id INTEGER,
+            installed_at    TEXT
         );
         CREATE TABLE IF NOT EXISTS github_connections (
             id              TEXT PRIMARY KEY NOT NULL,

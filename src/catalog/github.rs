@@ -31,7 +31,8 @@ pub struct GithubConnection {
 }
 
 impl Catalog {
-    /// Stores (or replaces) the GitHub App credentials, encrypted.
+    /// Stores (or replaces) the GitHub App credentials, encrypted. Called at
+    /// manifest-exchange time, before the user installs the app.
     pub fn save_github_app(
         &self,
         app_id: i64,
@@ -39,25 +40,33 @@ impl Catalog {
         client_secret: &str,
         webhook_secret: &str,
         private_key_pem: &str,
-        installation_id: i64,
     ) -> Result<()> {
         self.connection.execute(
             "INSERT INTO github_app (id, app_id, client_id, client_secret, webhook_secret, \
-             private_key_pem, installation_id, installed_at) \
-             VALUES ('app', ?1, ?2, ?3, ?4, ?5, ?6, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+             private_key_pem) \
+             VALUES ('app', ?1, ?2, ?3, ?4, ?5) \
              ON CONFLICT(id) DO UPDATE SET app_id=excluded.app_id, client_id=excluded.client_id, \
              client_secret=excluded.client_secret, webhook_secret=excluded.webhook_secret, \
-             private_key_pem=excluded.private_key_pem, installation_id=excluded.installation_id, \
-             installed_at=excluded.installed_at",
+             private_key_pem=excluded.private_key_pem",
             params![
                 app_id,
                 client_id,
                 self.encrypt_secret(client_secret)?,
                 self.encrypt_secret(webhook_secret)?,
                 self.encrypt_secret(private_key_pem)?,
-                installation_id,
             ],
         )?;
+        Ok(())
+    }
+
+    /// Records the installation id once the app is installed on GitHub.
+    pub fn set_github_installation(&self, installation_id: i64) -> Result<()> {
+        let updated = self.connection.execute(
+            "UPDATE github_app SET installation_id = ?1, \
+             installed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = 'app'",
+            params![installation_id],
+        )?;
+        anyhow::ensure!(updated == 1, "github app row missing");
         Ok(())
     }
 
@@ -76,8 +85,8 @@ impl Catalog {
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<i64>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
                     ))
                 },
             )
@@ -101,15 +110,24 @@ impl Catalog {
             client_secret: self.decrypt_secret(&client_secret)?,
             webhook_secret: self.decrypt_secret(&webhook_secret)?,
             private_key_pem: self.decrypt_secret(&private_key_pem)?,
-            installation_id,
-            installed_at,
+            installation_id: installation_id.unwrap_or(0),
+            installed_at: installed_at.unwrap_or_default(),
         }))
+    }
+
+    /// Clears the installation after the app is uninstalled.
+    pub fn clear_github_installation(&self) -> Result<()> {
+        self.connection.execute(
+            "UPDATE github_app SET installation_id = NULL, installed_at = NULL WHERE id = 'app'",
+            [],
+        )?;
+        Ok(())
     }
 
     /// Whether the admin completed the App installation.
     pub fn github_app_installed(&self) -> Result<bool> {
         let installed: bool = self.connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM github_app WHERE id = 'app')",
+            "SELECT EXISTS(SELECT 1 FROM github_app WHERE id = 'app' AND installation_id IS NOT NULL)",
             [],
             |row| row.get(0),
         )?;

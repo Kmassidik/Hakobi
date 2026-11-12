@@ -178,57 +178,84 @@ pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Res
     let Ok(conversion) = response.json::<ManifestConversion>().await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let claims = serde_json::json!({
-        "iss": conversion.id.to_string(),
-        "iat": now.saturating_sub(60),
-        "exp": now + 600,
-    });
-    let Ok(key) = jsonwebtoken::EncodingKey::from_rsa_pem(conversion.pem.as_bytes()) else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-    let Ok(app_jwt) = jsonwebtoken::encode(
-        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
-        &claims,
-        &key,
-    ) else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-    let installations = http
-        .get("https://api.github.com/app/installations")
-        .header("Authorization", format!("Bearer {app_jwt}"))
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await;
-    let Ok(installations) = installations else {
-        return StatusCode::BAD_GATEWAY.into_response();
-    };
-    #[derive(serde::Deserialize)]
-    struct Installation {
-        id: i64,
-    }
-    let Ok(list) = installations.json::<Vec<Installation>>().await else {
-        return StatusCode::BAD_GATEWAY.into_response();
-    };
-    let Some(installation) = list.first() else {
-        return (StatusCode::BAD_REQUEST, "app not installed yet").into_response();
-    };
+    // Registration and installation are separate steps (GitHub manifest flow):
+    // the app exists after this exchange; the installation id arrives later via
+    // the `installation` webhook or the settings re-check.
     let Ok(catalog) = Catalog::open((*state.catalog_path).clone()) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
+    // Best effort: the app may already be installed (re-install flow).
+    if let Ok(Some(installation)) =
+        fetch_first_installation(&http, conversion.id, &conversion.pem).await
+    {
+        let _ = catalog.set_github_installation(installation);
+    }
     match catalog.save_github_app(
         conversion.id,
         &conversion.client_id,
         &conversion.client_secret,
         &conversion.webhook_secret,
         &conversion.pem,
-        installation.id,
     ) {
         Ok(()) => github_connected_page().into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// App-JWT lookup of the first installation, if one exists.
+async fn fetch_first_installation(
+    http: &reqwest::Client,
+    app_id: i64,
+    pem: &str,
+) -> anyhow::Result<Option<i64>> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let claims = serde_json::json!({
+        "iss": app_id.to_string(),
+        "iat": now.saturating_sub(60),
+        "exp": now + 600,
+    });
+    let key = jsonwebtoken::EncodingKey::from_rsa_pem(pem.as_bytes())?;
+    let app_jwt = jsonwebtoken::encode(
+        &jsonwebtoken::Header::new(jsonwebtoken::Algorithm::RS256),
+        &claims,
+        &key,
+    )?;
+    let response = http
+        .get("https://api.github.com/app/installations")
+        .header("Authorization", format!("Bearer {app_jwt}"))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await?;
+    #[derive(serde::Deserialize)]
+    struct Installation {
+        id: i64,
+    }
+    let list = response.json::<Vec<Installation>>().await?;
+    Ok(list.first().map(|i| i.id))
+}
+
+/// Records the installation id from the `installation` webhook event.
+fn handle_installation(catalog: &mut Catalog, payload: &serde_json::Value) -> Response {
+    let Some(action) = payload.get("action").and_then(|a| a.as_str()) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let Some(installation) = payload.get("installation") else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let id = installation.get("id").and_then(|i| i.as_i64());
+    match (action, id) {
+        ("created", Some(id)) => match catalog.set_github_installation(id) {
+            Ok(()) => StatusCode::OK.into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        },
+        ("deleted", _) => {
+            let _ = catalog.clear_github_installation();
+            StatusCode::OK.into_response()
+        }
+        _ => StatusCode::OK.into_response(),
     }
 }
 
@@ -303,7 +330,10 @@ pub(crate) async fn webhook(
         .unwrap_or_default();
     match event {
         "ping" => StatusCode::OK.into_response(),
-        "push" => handle_push(&state, &mut catalog, &payload).await,
+        "installation" => handle_installation(&mut catalog, &payload),
+        "push" if catalog.github_app_installed().unwrap_or(false) => {
+            handle_push(&state, &mut catalog, &payload).await
+        }
         _ => StatusCode::OK.into_response(),
     }
 }
