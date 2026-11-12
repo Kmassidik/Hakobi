@@ -39,7 +39,7 @@ pub(crate) struct ExecutorDeps {
     pub backend: Arc<dyn ContainerBackend>,
 }
 
-/// Guard that allows only one active deployment per environment.
+/// Guard that allows only one active deployment per app.
 ///
 /// Claims are inserted when a deployment is queued and removed when the
 /// executor task finishes, success or failure. Clones share the same claim
@@ -54,21 +54,21 @@ impl DeploymentGuard {
         Self::default()
     }
 
-    /// Claims the environment for a deployment. `false` means another
+    /// Claims the app for a deployment. `false` means another
     /// deployment is already active.
-    pub fn try_claim(&self, environment_id: &str) -> bool {
+    pub fn try_claim(&self, app_id: &str) -> bool {
         self.active
             .lock()
             .expect("deployment guard mutex poisoned")
-            .insert(environment_id.to_owned())
+            .insert(app_id.to_owned())
     }
 
     /// Releases the claim after the executor finishes.
-    pub fn release(&self, environment_id: &str) {
+    pub fn release(&self, app_id: &str) {
         self.active
             .lock()
             .expect("deployment guard mutex poisoned")
-            .remove(environment_id);
+            .remove(app_id);
     }
 }
 
@@ -80,15 +80,15 @@ impl DeploymentGuard {
 pub(crate) fn start_deployment(
     deps: &ExecutorDeps,
     guard: &DeploymentGuard,
-    environment_id: &str,
+    app_id: &str,
     trigger: Trigger,
     commit_sha: Option<&str>,
     commit_message: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
-    if !guard.try_claim(environment_id) {
+    if !guard.try_claim(app_id) {
         return Ok(None);
     }
-    let environment = environment_id.to_owned();
+    let app = app_id.to_owned();
     let commit_sha = commit_sha
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -98,10 +98,10 @@ pub(crate) fn start_deployment(
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     // `create_deployment` derives the next version inside one transaction;
-    // the guard keeps this race-free per environment.
+    // the guard keeps this race-free per app.
     let deployment_id = run_catalog_op(deps.catalog_path.clone(), move |catalog| {
         let id = catalog.create_deployment(
-            &environment,
+            &app,
             trigger.as_str(),
             commit_sha.as_deref(),
             commit_message.as_deref(),
@@ -114,11 +114,11 @@ pub(crate) fn start_deployment(
 
     let deps = deps.clone();
     let guard = guard.clone();
-    let environment = environment_id.to_owned();
+    let app = app_id.to_owned();
     let pipeline_deployment = deployment_id.clone();
     tokio::spawn(async move {
-        let outcome = executor::run_pipeline(&deps, &environment, &pipeline_deployment).await;
-        guard.release(&environment);
+        let outcome = executor::run_pipeline(&deps, &app, &pipeline_deployment).await;
+        guard.release(&app);
         if let Err(error) = outcome {
             tracing::error!(
                 error = %error,

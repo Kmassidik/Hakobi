@@ -25,11 +25,11 @@ const CONTAINER_VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Executes the full pipeline for an existing pending deployment.
 pub(super) async fn run_pipeline(
     deps: &ExecutorDeps,
-    environment_id: &str,
+    app_id: &str,
     deployment_id: &str,
 ) -> Result<()> {
     transition(deps, deployment_id, STAGE_BUILDING, "Build started").await?;
-    let image_tag = match build_image(deps, environment_id, deployment_id).await {
+    let image_tag = match build_image(deps, app_id, deployment_id).await {
         Ok(tag) => tag,
         Err(error) => {
             return fail(deps, deployment_id, &format!("build failed: {error:#}")).await;
@@ -44,20 +44,16 @@ pub(super) async fn run_pipeline(
     .await?;
 
     transition(deps, deployment_id, STAGE_DEPLOYING, "Deploying to host").await?;
-    if let Err(error) = deploy_image(deps, environment_id, deployment_id, &image_tag).await {
+    if let Err(error) = deploy_image(deps, app_id, deployment_id, &image_tag).await {
         return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
     }
     transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await
 }
 
 /// Runs the build through the configured build runner and returns the image
-/// tag (`hakobi/{environment}:v{version}`).
-async fn build_image(
-    deps: &ExecutorDeps,
-    environment_id: &str,
-    deployment_id: &str,
-) -> Result<String> {
-    let context = load_build_context(deps, environment_id, deployment_id).await?;
+/// tag (`hakobi/{app}:v{version}`).
+async fn build_image(deps: &ExecutorDeps, app_id: &str, deployment_id: &str) -> Result<String> {
+    let context = load_build_context(deps, app_id, deployment_id).await?;
     let runner = deps
         .build_runner
         .as_ref()
@@ -74,7 +70,7 @@ async fn build_image(
         "compose" => runner.build_compose(&request).await,
         "dockerfile" => runner.build_dockerfile(&request).await,
         "nixpacks" => runner.build_nixpacks(&request).await,
-        other => bail!("environment has unsupported build type {other:?}"),
+        other => bail!("app has unsupported build type {other:?}"),
     }
     .context("build runner request failed")?;
     let output = format!(
@@ -104,13 +100,13 @@ async fn build_image(
 /// Stops the old container, starts the built image, and verifies it runs.
 async fn deploy_image(
     deps: &ExecutorDeps,
-    environment_id: &str,
+    app_id: &str,
     deployment_id: &str,
     image_tag: &str,
 ) -> Result<()> {
     validate_image_reference(image_tag)?;
-    let endpoint = load_deploy_endpoint(deps, environment_id, deployment_id).await?;
-    let container_name = container_name_for(environment_id);
+    let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
+    let container_name = container_name_for(app_id);
     if let Err(error) = deps
         .backend
         .stop_container(&endpoint, &container_name)
@@ -227,65 +223,60 @@ async fn transition(
 /// Reads everything the build stage needs in one catalog pass.
 async fn load_build_context(
     deps: &ExecutorDeps,
-    environment_id: &str,
+    app_id: &str,
     deployment_id: &str,
 ) -> Result<BuildContext> {
     let path = deps.catalog_path.clone();
-    let environment_id = environment_id.to_owned();
+    let app_id = app_id.to_owned();
     let deployment_id = deployment_id.to_owned();
     run_catalog_op(path, move |catalog| {
-        let environment = catalog
-            .get_environment(&environment_id)?
-            .context("environment disappeared mid-deployment")?;
+        let app = catalog
+            .get_app(&app_id)?
+            .context("app disappeared mid-deployment")?;
         let deployment = catalog
             .get_deployment(&deployment_id)?
             .context("deployment record disappeared mid-deployment")?;
-        if environment.source_type != "git" {
-            bail!(
-                "only git sources can be built; environment {} uses {}",
-                environment.name,
-                environment.source_type
-            );
-        }
-        let git_url = environment
-            .git_url
-            .clone()
+        let git_url = app
+            .github_repo
+            .as_deref()
+            .map(|repo| format!("https://github.com/{repo}.git"))
             .filter(|url| !url.trim().is_empty())
-            .context("environment has no git URL")?;
-        let build_type = environment.build_type.clone();
-        let is_dockerfile = build_type == "dockerfile";
+            .context("app has no GitHub repository configured")?;
+        let build_type = app.build_type.clone();
         let is_compose = build_type == "compose";
         Ok(BuildContext {
             build_type,
-            branch: environment
-                .git_branch
+            branch: app
+                .github_branch
                 .filter(|branch| !branch.trim().is_empty())
                 .unwrap_or_else(|| "main".to_owned()),
-            dockerfile_path: is_dockerfile.then(|| "Dockerfile".to_owned()),
+            dockerfile_path: app
+                .github_dockerfile
+                .filter(|value| !value.trim().is_empty()),
             context_dir: is_compose.then(|| ".".to_owned()),
-            image_tag: super::stages::image_tag_for(&environment.name, deployment.version),
+            image_tag: super::stages::image_tag_for(&app.name, deployment.version),
             git_url,
         })
     })
 }
 
-/// Resolves the `agent://{host_id}` endpoint for the environment's host.
+/// Resolves the `agent://{host_id}` endpoint for the app.s host.
 async fn load_deploy_endpoint(
     deps: &ExecutorDeps,
-    environment_id: &str,
+    app_id: &str,
     deployment_id: &str,
 ) -> Result<String> {
     let path = deps.catalog_path.clone();
-    let environment_id = environment_id.to_owned();
+    let app_id = app_id.to_owned();
     let deployment_id = deployment_id.to_owned();
     run_catalog_op(path, move |catalog| {
-        let environment = catalog
-            .get_environment(&environment_id)?
-            .context("environment disappeared mid-deployment")?;
+        let app = catalog
+            .get_app(&app_id)?
+            .context("app disappeared mid-deployment")?;
         catalog
             .get_deployment(&deployment_id)?
             .context("deployment record disappeared mid-deployment")?;
-        Ok(format!("agent://{}", environment.host_id))
+        Ok(format!("agent://{}", app.host_id))
     })
 }
 

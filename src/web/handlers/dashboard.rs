@@ -41,7 +41,7 @@ pub(crate) async fn dashboard(
         .iter()
         .map(|item| templates::ActivityRow {
             deployment: &item.deployment,
-            environment_name: &item.environment_name,
+            app_name: &item.app_name,
         })
         .collect();
     let markup = templates::dashboard(templates::DashboardView {
@@ -158,7 +158,7 @@ fn account_rows(
 
 /// Owned activity row so the view can borrow without lifetime knots.
 struct ActivityItem {
-    environment_name: String,
+    app_name: String,
     deployment: hakobi::catalog::Deployment,
 }
 
@@ -186,16 +186,16 @@ async fn load_dashboard_extras(
 
     let activity = with_catalog(state, |catalog| {
         let deployments = catalog.list_recent_deployments(10)?;
-        let environments = catalog.list_environments()?;
-        let names: std::collections::HashMap<&str, &str> = environments
+        let apps = catalog.list_apps()?;
+        let names: std::collections::HashMap<&str, &str> = apps
             .iter()
-            .map(|environment| (environment.id.as_str(), environment.name.as_str()))
+            .map(|app| (app.id.as_str(), app.name.as_str()))
             .collect();
         Ok(deployments
             .into_iter()
             .map(|deployment| ActivityItem {
-                environment_name: names
-                    .get(deployment.environment_id.as_str())
+                app_name: names
+                    .get(deployment.app_id.as_str())
                     .map(|name| (*name).to_owned())
                     .unwrap_or_else(|| "deleted".to_owned()),
                 deployment,

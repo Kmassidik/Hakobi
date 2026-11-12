@@ -1,32 +1,26 @@
-//! Persistent catalog for providers, hosts, stacks, environments, and
-//! deployments.
+//! Persistent catalog for apps, hosts, providers, and deployments.
 //!
 //! The catalog is a SQLite database. Its schema is versioned with
 //! `PRAGMA user_version`; opening an up-to-date database is a no-op.
 
+mod apps;
 mod deployments;
-mod environments;
 mod github;
 mod hosts;
-mod legacy;
 mod providers;
-mod stacks;
 
 /// Upper bound for [`Catalog::list_recent_deployments`].
 pub const DEPLOYMENT_PAGE_LIMIT: u32 = 100;
 
+pub use apps::{
+    validate_app_name, validate_app_status, validate_deployment_status, validate_log_level, App,
+};
 pub use deployments::{
     validate_build_type, validate_registry_mode, validate_source_type, Deployment, DeploymentLog,
 };
-pub use environments::{
-    validate_deployment_status, validate_environment_name, validate_log_level,
-    validate_source_pair, Environment,
-};
 pub use github::{GithubApp, GithubConnection};
 pub use hosts::HostAgent;
-pub use legacy::{AuditEvent, Service};
 pub use providers::ProviderConnection;
-pub use stacks::StackDefinition;
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -43,7 +37,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 
 /// Capabilities a provider connection may be granted.
 const CAPABILITIES: [&str; 3] = ["read", "operate", "admin"];
@@ -53,42 +47,6 @@ const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 
 const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS organizations (
-    id         TEXT PRIMARY KEY NOT NULL,
-    slug       TEXT NOT NULL UNIQUE,
-    name       TEXT NOT NULL,
-    created_at TEXT NOT NULL CHECK (length(created_at) > 0)
-);
-
-CREATE TABLE IF NOT EXISTS projects (
-    id              TEXT PRIMARY KEY NOT NULL,
-    organization_id TEXT NOT NULL REFERENCES organizations (id) ON DELETE CASCADE,
-    slug            TEXT NOT NULL,
-    name            TEXT NOT NULL,
-    created_at      TEXT NOT NULL CHECK (length(created_at) > 0),
-    UNIQUE (organization_id, slug)
-);
-
--- Kept for backward compatibility with the CP1 hierarchy. The CP5 flat
--- `environments` table below is independent of this legacy table.
-CREATE TABLE IF NOT EXISTS legacy_environments (
-    id         TEXT PRIMARY KEY NOT NULL,
-    project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
-    slug       TEXT NOT NULL,
-    name       TEXT NOT NULL,
-    created_at TEXT NOT NULL CHECK (length(created_at) > 0),
-    UNIQUE (project_id, slug)
-);
-
-CREATE TABLE IF NOT EXISTS services (
-    id             TEXT PRIMARY KEY NOT NULL,
-    environment_id TEXT NOT NULL REFERENCES legacy_environments (id) ON DELETE CASCADE,
-    slug           TEXT NOT NULL,
-    name           TEXT NOT NULL,
-    created_at     TEXT NOT NULL CHECK (length(created_at) > 0),
-    UNIQUE (environment_id, slug)
-);
-
 CREATE TABLE IF NOT EXISTS provider_connections (
     id               TEXT PRIMARY KEY NOT NULL,
     name             TEXT NOT NULL UNIQUE,
@@ -145,36 +103,35 @@ BEGIN
     SELECT RAISE(ABORT, 'audit events are immutable');
 END;
 
--- CP5: environments (flat, not nested)
-CREATE TABLE IF NOT EXISTS environments (
+-- v9: apps (Railway-style; replaces environments)
+CREATE TABLE IF NOT EXISTS apps (
     id                 TEXT PRIMARY KEY NOT NULL,
     name               TEXT NOT NULL UNIQUE,
-    host_id            TEXT NOT NULL REFERENCES host_agents (id),
-    build_type         TEXT NOT NULL CHECK (build_type IN ('compose', 'dockerfile', 'nixpacks')),
-    source_type        TEXT NOT NULL CHECK (source_type IN ('git', 'upload')),
-    git_url            TEXT,
-    git_branch         TEXT DEFAULT 'main',
-    git_deploy_key     TEXT,
-    upload_path        TEXT,
-    registry_mode      TEXT NOT NULL DEFAULT 'local' CHECK (registry_mode IN ('local', 'push')),
-    registry_url       TEXT,
-    registry_credentials TEXT,
+    host_id            TEXT REFERENCES host_agents (id),
+    build_type         TEXT NOT NULL DEFAULT 'dockerfile' CHECK (build_type IN ('dockerfile', 'nixpacks')),
+    -- GitHub source (CP9)
+    github_repo        TEXT,
+    github_branch      TEXT DEFAULT 'main',
+    github_path        TEXT,
+    github_dockerfile  TEXT DEFAULT 'Dockerfile',
+    github_auto_deploy INTEGER NOT NULL DEFAULT 0,
+    -- runtime
+    container_port     INTEGER,
     webhook_secret     TEXT,
     webhook_enabled    INTEGER NOT NULL DEFAULT 0,
-    auto_deploy        INTEGER NOT NULL DEFAULT 0,
     status             TEXT NOT NULL DEFAULT 'idle'
                        CHECK (status IN ('idle', 'building', 'deploying', 'running', 'failed')),
     created_at         TEXT NOT NULL CHECK (length(created_at) > 0),
     updated_at         TEXT NOT NULL CHECK (length(updated_at) > 0)
 );
 
--- CP5: deployments (versioned)
+-- v9: deployments (versioned, per app)
 CREATE TABLE IF NOT EXISTS deployments (
     id                 TEXT PRIMARY KEY NOT NULL,
-    environment_id     TEXT NOT NULL REFERENCES environments (id),
+    app_id             TEXT NOT NULL REFERENCES apps (id),
     version            INTEGER NOT NULL,
     status             TEXT NOT NULL DEFAULT 'pending'
-                       CHECK (status IN ('pending', 'building', 'deploying', 'running', 'failed', 'rolled_back')),
+                       CHECK (status IN ('pending', 'building', 'deploying', 'running', 'failed', 'cancelled', 'rolled_back')),
     trigger_type       TEXT NOT NULL CHECK (trigger_type IN ('manual', 'webhook')),
     git_commit_sha     TEXT,
     git_commit_message TEXT,
@@ -183,7 +140,7 @@ CREATE TABLE IF NOT EXISTS deployments (
     started_at         TEXT NOT NULL,
     completed_at       TEXT,
     created_at         TEXT NOT NULL CHECK (length(created_at) > 0),
-    UNIQUE (environment_id, version)
+    UNIQUE (app_id, version)
 );
 
 -- CP5: deployment logs
@@ -195,8 +152,8 @@ CREATE TABLE IF NOT EXISTS deployment_logs (
     message       TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_environments_host ON environments (host_id);
-CREATE INDEX IF NOT EXISTS idx_deployments_environment ON deployments (environment_id, version);
+CREATE INDEX IF NOT EXISTS idx_apps_host ON apps (host_id);
+CREATE INDEX IF NOT EXISTS idx_deployments_app ON deployments (app_id, version);
 CREATE INDEX IF NOT EXISTS idx_deployment_logs_deployment ON deployment_logs (deployment_id);
 "#;
 
@@ -246,7 +203,6 @@ impl Catalog {
         }
 
         let transaction = self.connection.transaction()?;
-        rename_legacy_environments(&transaction)?;
         transaction
             .execute_batch(SCHEMA)
             .context("create catalog schema")?;
@@ -260,6 +216,9 @@ impl Catalog {
             transaction
                 .execute("ALTER TABLE github_app ADD COLUMN app_slug TEXT", [])
                 .context("add github_app.app_slug")?;
+        }
+        if (1..9).contains(&current) {
+            migrate_v9_apps(&transaction)?;
         }
         transaction
             .pragma_update(None, "user_version", SCHEMA_VERSION)
@@ -321,10 +280,63 @@ impl Catalog {
     }
 }
 
-/// Moves the CP1 hierarchy `environments` table aside so the CP5 flat
-/// `environments` table can claim its name.
-///
-/// SQLite rewrites the `services` foreign key to point at
+/// v9: replace environments with apps; wipe all deploy data. Fresh start.
+fn migrate_v9_apps(transaction: &Transaction<'_>) -> Result<()> {
+    transaction.execute_batch(
+        "DROP TABLE IF EXISTS deployment_logs;
+         DROP TABLE IF EXISTS deployments;
+         DROP TABLE IF EXISTS legacy_environments;
+         DROP TABLE IF EXISTS environments;
+         DROP TABLE IF EXISTS services;
+         DROP TABLE IF EXISTS stack_definitions;
+         CREATE TABLE IF NOT EXISTS apps (
+            id                 TEXT PRIMARY KEY NOT NULL,
+            name               TEXT NOT NULL UNIQUE,
+            host_id            TEXT REFERENCES host_agents (id),
+            build_type         TEXT NOT NULL DEFAULT 'dockerfile' CHECK (build_type IN ('dockerfile', 'nixpacks')),
+            github_repo        TEXT,
+            github_branch      TEXT DEFAULT 'main',
+            github_path        TEXT,
+            github_dockerfile  TEXT DEFAULT 'Dockerfile',
+            github_auto_deploy INTEGER NOT NULL DEFAULT 0,
+            container_port     INTEGER,
+            webhook_secret     TEXT,
+            webhook_enabled    INTEGER NOT NULL DEFAULT 0,
+            status             TEXT NOT NULL DEFAULT 'idle'
+                               CHECK (status IN ('idle', 'building', 'deploying', 'running', 'failed')),
+            created_at         TEXT NOT NULL CHECK (length(created_at) > 0),
+            updated_at         TEXT NOT NULL CHECK (length(updated_at) > 0)
+         );
+         CREATE TABLE IF NOT EXISTS deployments (
+            id                 TEXT PRIMARY KEY NOT NULL,
+            app_id             TEXT NOT NULL REFERENCES apps (id),
+            version            INTEGER NOT NULL,
+            status             TEXT NOT NULL DEFAULT 'pending'
+                               CHECK (status IN ('pending', 'building', 'deploying', 'running', 'failed', 'cancelled', 'rolled_back')),
+            trigger_type       TEXT NOT NULL CHECK (trigger_type IN ('manual', 'webhook')),
+            git_commit_sha     TEXT,
+            git_commit_message TEXT,
+            build_output       TEXT,
+            deploy_output      TEXT,
+            started_at         TEXT NOT NULL,
+            completed_at       TEXT,
+            created_at         TEXT NOT NULL CHECK (length(created_at) > 0),
+            UNIQUE (app_id, version)
+         );
+         CREATE TABLE IF NOT EXISTS deployment_logs (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            deployment_id TEXT NOT NULL REFERENCES deployments (id),
+            timestamp     TEXT NOT NULL,
+            level         TEXT NOT NULL CHECK (level IN ('info', 'warn', 'error')),
+            message       TEXT NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_apps_host ON apps (host_id);
+         CREATE INDEX IF NOT EXISTS idx_deployments_app ON deployments (app_id, version);
+         CREATE INDEX IF NOT EXISTS idx_deployment_logs_deployment ON deployment_logs (deployment_id);",
+    )?;
+    Ok(())
+}
+
 /// v7: installation becomes optional — the manifest flow creates the app
 /// before the user installs it, so installation_id/installed_at are nullable.
 fn migrate_v7_github_installation(transaction: &Transaction<'_>) -> Result<()> {
@@ -348,9 +360,7 @@ fn migrate_v7_github_installation(transaction: &Transaction<'_>) -> Result<()> {
     Ok(())
 }
 
-/// `legacy_environments`, so legacy rows stay fully consistent. A no-op when
-/// the rename already happened.
-/// CP9 schema v6: GitHub integration tables and environment source columns.
+/// CP9 schema v6: GitHub integration tables.
 fn migrate_v6_github(transaction: &Transaction<'_>) -> Result<()> {
     transaction.execute_batch(
         "CREATE TABLE IF NOT EXISTS github_app (
@@ -377,39 +387,11 @@ fn migrate_v6_github(transaction: &Transaction<'_>) -> Result<()> {
             delivery_id TEXT PRIMARY KEY NOT NULL,
             received_at TEXT NOT NULL
         );
-        ALTER TABLE environments ADD COLUMN github_repo TEXT;
-        ALTER TABLE environments ADD COLUMN github_branch TEXT;
-        ALTER TABLE environments ADD COLUMN github_path TEXT;
-        ALTER TABLE environments ADD COLUMN github_dockerfile TEXT;
-        ALTER TABLE environments ADD COLUMN github_auto_deploy INTEGER NOT NULL DEFAULT 0;
-        ALTER TABLE environments ADD COLUMN github_installation_id INTEGER;
         CREATE TABLE IF NOT EXISTS settings_kv (
             key   TEXT PRIMARY KEY NOT NULL,
             value TEXT NOT NULL
         );",
     )?;
-    Ok(())
-}
-
-fn rename_legacy_environments(transaction: &Transaction<'_>) -> Result<()> {
-    let renamed_already: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master \
-         WHERE type = 'table' AND name = 'legacy_environments')",
-        [],
-        |row| row.get(0),
-    )?;
-    if renamed_already {
-        return Ok(());
-    }
-    let legacy_present: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master \
-         WHERE type = 'table' AND name = 'environments')",
-        [],
-        |row| row.get(0),
-    )?;
-    if legacy_present {
-        transaction.execute("ALTER TABLE environments RENAME TO legacy_environments", [])?;
-    }
     Ok(())
 }
 

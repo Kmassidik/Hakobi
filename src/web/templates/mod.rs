@@ -1,18 +1,14 @@
 //! Shared layout for Maud SSR templates: page shell, sidebar, and badges.
 
+pub(crate) mod app_form;
+mod apps;
 mod container_detail;
 mod containers;
 mod dashboard;
-pub(crate) mod deployment;
-mod environment_form;
-mod environments;
-mod history;
-mod hosts;
-mod infrastructure;
-mod providers;
 mod readiness;
-mod stacks;
 
+pub(crate) use app_form::{app_form, AppFormValues};
+pub(crate) use apps::{app_deployments, app_detail, app_logs, app_status_body, apps};
 pub(crate) use container_detail::{
     container_detail, container_logs_error, container_logs_section, container_stats_error,
     container_stats_section, ContainerDetailData,
@@ -22,18 +18,7 @@ pub(crate) use dashboard::mobile_header;
 pub use dashboard::{
     chart_section, dashboard, metrics_section, ActivityRow, DashboardMetrics, DashboardView,
 };
-pub use deployment::{deployment_page, deployment_rows, environment_webhook};
-pub use environment_form::{environment_form, EnvironmentFormValues};
-pub use environments::{
-    environment_deployments, environment_detail, environment_logs, environment_status_body,
-    environments,
-};
-pub use history::{history_panel, history_window_bounds, HistoryWindow};
-pub use hosts::{host_resources, host_resources_live, hosts};
-pub use infrastructure::infrastructure;
-pub use providers::providers;
 pub use readiness::readiness_section;
-pub use stacks::{stack_delete, stack_detail, stack_form, stacks, StackFormValues};
 
 use maud::{html, Markup, DOCTYPE};
 
@@ -112,9 +97,8 @@ pub(crate) fn sidebar(active: &str, base_url: &str, username: &str, csrf_token: 
             div class="px-1" { (brand("Hakobi dashboard")) }
             nav class="mt-7 flex flex-col gap-0.5" aria-label="Primary" {
                 (nav_item(active, "overview", "/dashboard", "fa-square-poll-vertical", "Dashboard"))
-                (nav_item(active, "environments", "/environments", "fa-layer-group", "Environments"))
+                (nav_item(active, "apps", "/apps", "fa-shapes", "Apps"))
                 (nav_item(active, "containers", "/containers", "fa-box", "Containers"))
-                (nav_item(active, "deployment", "/hosts", "fa-rocket", "Deployment"))
                 (nav_item(active, "settings", "/settings", "fa-gear", "Settings"))
             }
             div class="mt-auto pt-4" {
@@ -228,24 +212,13 @@ pub(crate) fn status_badge(label: &str, healthy: bool) -> Markup {
     }
 }
 
-pub(crate) fn format_bytes(bytes: u64) -> String {
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const MIB: f64 = 1024.0 * 1024.0;
-    if bytes as f64 >= GIB {
-        format!("{:.1} GB", bytes as f64 / GIB)
-    } else {
-        format!("{:.0} MB", bytes as f64 / MIB)
-    }
-}
-
 fn mobile_sidebar(active: &str, _base_url: &str, _username: &str, _csrf_token: &str) -> Markup {
     html! {
             nav class="fixed inset-x-0 bottom-0 z-40 bg-white/95 px-2 pb-2 pt-1.5 shadow-[0_-1px_3px_rgba(0,0,0,0.04)] backdrop-blur lg:hidden" aria-label="Mobile primary" {
-                div class="mx-auto grid max-w-md grid-cols-6 gap-0.5" {
+                div class="mx-auto grid max-w-md grid-cols-4 gap-0.5" {
                     (mobile_nav_item(active, "overview", "/dashboard", "fa-square-poll-vertical", "Dashboard"))
-                    (mobile_nav_item(active, "environments", "/environments", "fa-layer-group", "Envs"))
+                    (mobile_nav_item(active, "apps", "/apps", "fa-shapes", "Apps"))
                     (mobile_nav_item(active, "containers", "/containers", "fa-box", "Containers"))
-                    (mobile_nav_item(active, "deployment", "/hosts", "fa-rocket", "Deploy"))
                     (mobile_nav_item(active, "settings", "/settings", "fa-gear", "Settings"))
                 }
             }

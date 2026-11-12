@@ -113,7 +113,7 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                             }
                         }
                         p class="m-0 mt-2 max-w-[36rem] text-sm leading-relaxed text-muted" {
-                            "Install the Hakobi GitHub App to scan repositories, build on push, and report commit statuses. Sign in with GitHub to pick your repos in environment forms."
+                            "Install the Hakobi GitHub App to scan repositories, build on push, and report commit statuses. Sign in with GitHub to pick your repos in the app form."
                         }
                         div class="mt-4 flex flex-wrap items-center gap-3" {
                             @if page.app_installed {
@@ -147,7 +147,7 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                     section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="tools-heading" {
                         h2 id="tools-heading" class="m-0 text-[1.05rem] font-bold" { "Build tools" }
                         p class="m-0 mt-1 text-sm text-muted" {
-                            "Detected on the control-plane host. An environment can use a tool once its badge is green."
+                            "Detected on the control-plane host. An app can use a tool once its badge is green."
                         }
                         div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" {
                             (tool_tile("fab fa-docker", "Docker", &readiness.docker, "Container builds, compose, deploys"))
@@ -159,7 +159,7 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                     // ---------- Deployment defaults ----------
                     section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="defaults-heading" {
                         h2 id="defaults-heading" class="m-0 text-[1.05rem] font-bold" { "Deployment defaults" }
-                        p class="m-0 mt-1 text-sm text-muted" { "Applied to newly created environments." }
+                        p class="m-0 mt-1 text-sm text-muted" { "Applied to newly created apps." }
                         form method="post" action="/settings/defaults" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end" {
                             label class="grid gap-1.5" {
                                 span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Default branch" }

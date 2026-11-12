@@ -99,7 +99,7 @@ fn github_settings_page_markup(
                                 @if let Some(login) = github_login {
                                     p class="m-0 mt-1 text-sm text-muted" { "Signed in as " (login) }
                                 } @else {
-                                    p class="m-0 mt-1 text-sm text-muted" { "Connect to pick repositories in environment forms." }
+                                    p class="m-0 mt-1 text-sm text-muted" { "Connect to pick repositories in the app form." }
                                 }
                             }
                         }

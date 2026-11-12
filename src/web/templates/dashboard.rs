@@ -199,7 +199,7 @@ fn stat_cards(stats: &LiveStats, metrics: &DashboardMetrics) -> Markup {
             }
             (stat_card("Memory utilization", &format!("{:.1}%", stats.memory_percent), &format!("{:.1} / {:.1} GiB", stats.memory_used_gb, stats.memory_total_gb), "live", mem_class, "fa-memory"))
             (stat_card("Active containers", &format!("{} / {}", metrics.containers_healthy, metrics.containers_total.max(1)), &format!("{} restarting", metrics.containers_restarting), "provider trait", "delta good", "fa-cube"))
-            (stat_card("Environments", &format!("{}", metrics.stacks), "registered", &format!("{} hosts up", stats.hosts_reporting), host_delta, "fa-layer-group"))
+            (stat_card("Apps", &format!("{}", metrics.stacks), "registered", &format!("{} hosts up", stats.hosts_reporting), host_delta, "fa-layer-group"))
         }
     }
 }
@@ -304,7 +304,7 @@ pub struct DashboardView<'a> {
     pub history_points: &'a [hakobi::metrics::HistoryPoint],
     /// Newest live sample per host for the stat cards.
     pub live: &'a [hakobi::metrics::LatestLive],
-    /// Most recent deployments across all environments.
+    /// Most recent deployments across all apps.
     pub activity: &'a [ActivityRow<'a>],
     /// CSRF token embedded in the sidebar sign-out form.
     pub csrf_token: &'a str,
@@ -313,7 +313,7 @@ pub struct DashboardView<'a> {
 /// One row of the recent-activity feed.
 pub struct ActivityRow<'a> {
     pub deployment: &'a hakobi::catalog::Deployment,
-    pub environment_name: &'a str,
+    pub app_name: &'a str,
 }
 
 /// Renders the dashboard: stat cards, time-series charts, runtime activity.
@@ -374,13 +374,13 @@ fn runtime_activity(rows: &[ActivityRow<'_>]) -> Markup {
                         p class="m-0 text-[13px] font-bold" { "Recent deployments" }
                     }
                     @if rows.is_empty() {
-                        p class="m-0 px-4 py-4 text-sm text-muted" { "No deployments yet. Create an environment to deploy." }
+                        p class="m-0 px-4 py-4 text-sm text-muted" { "No deployments yet. Create an app to deploy." }
                     } @else {
                         div class="overflow-x-auto" {
                             table class="w-full whitespace-nowrap" {
                                 thead {
                                     tr {
-                                        th class="px-4 py-2.5 text-left text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Environment" }
+                                        th class="px-4 py-2.5 text-left text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "App" }
                                         th class="px-4 py-2.5 text-left text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Version" }
                                         th class="px-4 py-2.5 text-left text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Status" }
                                         th class="px-4 py-2.5 text-left text-[0.6rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Trigger" }
@@ -389,7 +389,7 @@ fn runtime_activity(rows: &[ActivityRow<'_>]) -> Markup {
                                 tbody {
                                     @for row in rows {
                                         tr class="border-t border-line" {
-                                            td class="px-4 py-2.5 text-[0.8rem] font-semibold" { (row.environment_name) }
+                                            td class="px-4 py-2.5 text-[0.8rem] font-semibold" { (row.app_name) }
                                             td class="px-4 py-2.5 font-mono text-xs" { "v" (row.deployment.version) }
                                             td class="px-4 py-2.5" { (status_tag(&row.deployment.status)) }
                                             td class="px-4 py-2.5 text-[0.8rem] text-[#57606a]" { (row.deployment.trigger_type) }

@@ -320,24 +320,3 @@ pub fn container_form(
         },
     )
 }
-
-pub(crate) fn mib(bytes: i64) -> String {
-    format!("{:.1} MiB", bytes as f64 / 1_048_576.0)
-}
-
-pub(crate) fn container_ports(container: &ContainerRow) -> Markup {
-    html! {
-        @if container.ports.is_empty() {
-            "—"
-        } @else {
-            @for port in &container.ports {
-                span class="block whitespace-nowrap" {
-                    @if let Some(host_port) = port.host_port {
-                        (host_port) " → "
-                    }
-                    (port.container_port) "/" (port.protocol)
-                }
-            }
-        }
-    }
-}

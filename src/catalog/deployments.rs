@@ -3,14 +3,14 @@
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 
-use super::environments::{validate_deployment_status, validate_log_level};
+use super::apps::{validate_deployment_status, validate_log_level};
 use super::Catalog;
 
-/// An immutable, versioned deployment of an environment.
+/// An immutable, versioned deployment of an app.
 #[derive(Debug, Clone)]
 pub struct Deployment {
     pub id: String,
-    pub environment_id: String,
+    pub app_id: String,
     pub version: i64,
     pub status: String,
     pub trigger_type: String,
@@ -60,7 +60,7 @@ pub fn validate_registry_mode(value: &str) -> Result<()> {
 fn read_deployment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Deployment> {
     Ok(Deployment {
         id: row.get(0)?,
-        environment_id: row.get(1)?,
+        app_id: row.get(1)?,
         version: row.get(2)?,
         status: row.get(3)?,
         trigger_type: row.get(4)?,
@@ -74,15 +74,15 @@ fn read_deployment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Deployment> 
     })
 }
 
-const DEPLOYMENT_COLUMNS: &str = "id, environment_id, version, status, trigger_type, \
+const DEPLOYMENT_COLUMNS: &str = "id, app_id, version, status, trigger_type, \
      git_commit_sha, git_commit_message, build_output, deploy_output, started_at, \
      completed_at, created_at";
 
 impl Catalog {
-    /// Creates a pending deployment at the next version for an environment.
+    /// Creates a pending deployment at the next version for an app.
     pub fn create_deployment(
         &mut self,
-        environment_id: &str,
+        app_id: &str,
         trigger_type: &str,
         git_commit_sha: Option<&str>,
         git_commit_message: Option<&str>,
@@ -92,18 +92,18 @@ impl Catalog {
         }
         let id = super::new_id();
         let transaction = self.connection.transaction()?;
-        let environment_exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM environments WHERE id = ?1)",
-            params![environment_id],
+        let app_exists: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM apps WHERE id = ?1)",
+            params![app_id],
             |row| row.get(0),
         )?;
-        if !environment_exists {
-            bail!("environment {environment_id} not found");
+        if !app_exists {
+            bail!("app {app_id} not found");
         }
         let version: i64 = transaction.query_row(
             "SELECT COALESCE(MAX(version), 0) + 1 FROM deployments \
-                 WHERE environment_id = ?1",
-            params![environment_id],
+                 WHERE app_id = ?1",
+            params![app_id],
             |row| row.get(0),
         )?;
         let commit_message = git_commit_message
@@ -111,14 +111,14 @@ impl Catalog {
             .filter(|value| !value.is_empty());
         transaction.execute(
             "INSERT INTO deployments \
-                 (id, environment_id, version, status, trigger_type, git_commit_sha, \
+                 (id, app_id, version, status, trigger_type, git_commit_sha, \
                   git_commit_message, started_at, created_at) \
              VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6, \
                      strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
                      strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
             params![
                 id,
-                environment_id,
+                app_id,
                 version,
                 trigger_type,
                 git_commit_sha,
@@ -158,26 +158,26 @@ impl Catalog {
         Ok(())
     }
 
-    /// Lists deployments for an environment, newest version first.
-    /// Cancels every non-terminal deployment for one environment
+    /// Lists deployments for an app, newest version first.
+    /// Cancels every non-terminal deployment for one app
     /// (newest push wins; the superseded builds stop mattering).
-    pub fn cancel_in_flight_deployments(&mut self, environment_id: &str) -> Result<u32> {
+    pub fn cancel_in_flight_deployments(&mut self, app_id: &str) -> Result<u32> {
         let updated = self.connection.execute(
             "UPDATE deployments SET status = 'rolled_back', \
              completed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-             WHERE environment_id = ?1 AND status IN ('pending', 'building', 'deploying')",
-            params![environment_id],
+             WHERE app_id = ?1 AND status IN ('pending', 'building', 'deploying')",
+            params![app_id],
         )?;
         Ok(updated as u32)
     }
 
-    /// Returns the in-flight deployment id for an environment, if any.
-    pub fn latest_in_flight_deployment(&self, environment_id: &str) -> Result<Option<String>> {
+    /// Returns the in-flight deployment id for an app, if any.
+    pub fn latest_in_flight_deployment(&self, app_id: &str) -> Result<Option<String>> {
         let id = self.connection.query_row(
             "SELECT id FROM deployments \
-             WHERE environment_id = ?1 AND status IN ('pending', 'building', 'deploying') \
+             WHERE app_id = ?1 AND status IN ('pending', 'building', 'deploying') \
              ORDER BY version DESC, rowid DESC LIMIT 1",
-            params![environment_id],
+            params![app_id],
             |row| row.get::<_, String>(0),
         );
         match id {
@@ -187,18 +187,18 @@ impl Catalog {
         }
     }
 
-    pub fn list_deployments(&self, environment_id: &str) -> Result<Vec<Deployment>> {
+    pub fn list_deployments(&self, app_id: &str) -> Result<Vec<Deployment>> {
         let mut statement = self.connection.prepare(&format!(
             "SELECT {DEPLOYMENT_COLUMNS} FROM deployments \
-             WHERE environment_id = ?1 ORDER BY version DESC, rowid DESC"
+             WHERE app_id = ?1 ORDER BY version DESC, rowid DESC"
         ))?;
         let rows = statement
-            .query_map(params![environment_id], read_deployment_row)?
+            .query_map(params![app_id], read_deployment_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
 
-    /// Lists the most recent deployments across all environments, newest
+    /// Lists the most recent deployments across all apps, newest
     /// first. `limit` bounds the result.
     pub fn list_recent_deployments(&self, limit: u32) -> Result<Vec<Deployment>> {
         let mut statement = self.connection.prepare(&format!(
@@ -215,12 +215,7 @@ impl Catalog {
     ///
     /// The secret must be a non-empty opaque token; an empty secret clears it
     /// and disables the trigger.
-    pub fn set_environment_webhook(
-        &mut self,
-        id: &str,
-        secret: Option<&str>,
-        enabled: bool,
-    ) -> Result<()> {
+    pub fn set_app_webhook(&mut self, id: &str, secret: Option<&str>, enabled: bool) -> Result<()> {
         if let Some(secret) = secret.map(str::trim).filter(|value| !value.is_empty()) {
             if secret.len() > 256 {
                 bail!("webhook secret must be at most 256 characters");
@@ -231,34 +226,34 @@ impl Catalog {
         }
         let secret = secret.map(str::trim).filter(|value| !value.is_empty());
         let updated = self.connection.execute(
-            "UPDATE environments \
+            "UPDATE apps \
              SET webhook_secret = ?2, webhook_enabled = ?3, \
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
              WHERE id = ?1",
             params![id, secret, i64::from(enabled)],
         )?;
         if updated == 0 {
-            bail!("environment {id} not found");
+            bail!("app {id} not found");
         }
         Ok(())
     }
 
-    /// Returns the highest-version deployment for an environment.
-    pub fn get_latest_deployment(&self, environment_id: &str) -> Result<Option<Deployment>> {
+    /// Returns the highest-version deployment for an app.
+    pub fn get_latest_deployment(&self, app_id: &str) -> Result<Option<Deployment>> {
         self.connection
             .query_row(
                 &format!(
                     "SELECT {DEPLOYMENT_COLUMNS} FROM deployments \
-                     WHERE environment_id = ?1 ORDER BY version DESC, rowid DESC LIMIT 1"
+                     WHERE app_id = ?1 ORDER BY version DESC, rowid DESC LIMIT 1"
                 ),
-                params![environment_id],
+                params![app_id],
                 read_deployment_row,
             )
             .optional()
             .context("load latest deployment")
     }
 
-    /// Loads a single deployment by id, regardless of environment.
+    /// Loads a single deployment by id, regardless of app.
     pub fn get_deployment(&self, id: &str) -> Result<Option<Deployment>> {
         self.connection
             .query_row(

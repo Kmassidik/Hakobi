@@ -5,4 +5,3 @@ pub mod host_agent;
 pub mod install;
 pub mod metrics;
 pub mod providers;
-pub mod stacks;

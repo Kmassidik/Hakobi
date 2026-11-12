@@ -1,9 +1,9 @@
-//! Webhook receiver: `POST /webhook/{environment_id}/{secret}` triggers a
+//! Webhook receiver: `POST /webhook/{app_id}/{secret}` triggers a
 //! deployment after verifying the secret and parsing the commit metadata.
 //!
 //! GitHub and GitLab both POST JSON; we accept either payload shape plus a
 //! bare `{"commit_sha": "…"}` for simple CI systems. Authentication is the
-//! URL secret compared against the environment's `webhook_secret` in
+//! URL secret compared against the app's `webhook_secret` in
 //! constant time.
 
 use axum::{
@@ -92,21 +92,21 @@ pub(crate) fn secret_matches(expected: &str, submitted: &str) -> bool {
 /// is the credential, so no session cookie or CSRF token applies.
 pub(crate) async fn webhook_receive(
     State(state): State<AppState>,
-    Path((environment_id, secret)): Path<(String, String)>,
+    Path((app_id, secret)): Path<(String, String)>,
     body: axum::body::Bytes,
 ) -> Response {
     if body.len() > MAX_WEBHOOK_BODY {
         return (StatusCode::PAYLOAD_TOO_LARGE, "webhook payload too large").into_response();
     }
-    let environment_key = environment_id.clone();
+    let app_key = app_id.clone();
     let submitted_secret = secret.clone();
     let decision = match with_catalog(&state, move |catalog| {
-        let Some(environment) = catalog.get_environment(&environment_key)? else {
-            return Ok(WebhookDecision::UnknownEnvironment);
+        let Some(app) = catalog.get_app(&app_key)? else {
+            return Ok(WebhookDecision::UnknownApp);
         };
         Ok(decide_webhook(
-            &environment.webhook_secret,
-            environment.webhook_enabled,
+            &app.webhook_secret,
+            app.webhook_enabled,
             &submitted_secret,
         ))
     })
@@ -116,7 +116,7 @@ pub(crate) async fn webhook_receive(
         Err(error) => return internal_error(error),
     };
     match decision {
-        WebhookDecision::UnknownEnvironment | WebhookDecision::Disabled => {
+        WebhookDecision::UnknownApp | WebhookDecision::Disabled => {
             return StatusCode::NOT_FOUND.into_response();
         }
         WebhookDecision::BadSecret => return StatusCode::FORBIDDEN.into_response(),
@@ -145,7 +145,7 @@ pub(crate) async fn webhook_receive(
     match start_deployment(
         &deps,
         &guard,
-        &environment_id,
+        &app_id,
         Trigger::Webhook,
         Some(&sha),
         message,
@@ -164,10 +164,10 @@ pub(crate) async fn webhook_receive(
     }
 }
 
-/// What the receiver should do after checking the environment row.
+/// What the receiver should do after checking the app row.
 enum WebhookDecision {
     Accepted,
-    UnknownEnvironment,
+    UnknownApp,
     Disabled,
     BadSecret,
 }

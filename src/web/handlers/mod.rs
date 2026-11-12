@@ -1,21 +1,23 @@
 //! Shared plumbing for HTTP handlers: auth checks, CSRF, catalog access,
 //! response helpers, and embedded assets.
 
+pub(crate) mod app_deploy;
+pub(crate) mod app_form;
+mod apps;
 mod auth;
 mod container_detail;
 mod containers;
 mod dashboard;
-mod deployment_pages;
-mod environment_pages;
-mod environments;
 mod github;
 mod github_settings;
-mod hosts;
-mod infrastructure;
 mod partials;
-mod providers;
 mod settings;
 
+pub(crate) use app_deploy::{app_deploy, app_rollback};
+pub(crate) use apps::{
+    app_create, app_delete, app_deployments, app_detail, app_edit_page, app_edit_submit, app_list,
+    app_logs, app_new, app_status_partial,
+};
 pub(crate) use auth::{login, logout};
 pub(crate) use container_detail::{
     container_detail, container_detail_logs_partial, container_detail_stats_partial,
@@ -25,15 +27,6 @@ pub(crate) use containers::{
     container_stop, containers,
 };
 pub(crate) use dashboard::{dashboard, dashboard_redirect};
-pub(crate) use deployment_pages::{
-    deployment_list_partial, deployment_page, environment_webhook_page, environment_webhook_submit,
-};
-pub(crate) use environment_pages::{
-    environment_delete, environment_deploy, environment_deployments, environment_detail,
-    environment_edit_page, environment_edit_submit, environment_logs, environment_rollback,
-    environment_status_partial,
-};
-pub(crate) use environments::{environment_create, environment_list, environment_new};
 pub(crate) use github::{
     branches as github_branches_api, detect as github_detect,
     manifest_callback as github_manifest_callback, repos as github_repos, status as github_status,
@@ -43,17 +36,7 @@ pub(crate) use github_settings::{
     github_connect_callback, github_connect_start, github_disconnect, github_install_start,
     github_manifest_post_install, github_recheck_installation, github_settings_page,
 };
-pub(crate) use hosts::{
-    host_history, host_resources, host_resources_partial, hosts_create, hosts_delete, hosts_list,
-    hosts_test, hosts_toggle,
-};
-pub(crate) use infrastructure::{infrastructure, stack_detail, stacks};
-pub(crate) use partials::{
-    charts_partial, install_tool, metrics_partial, readiness_partial, status,
-};
-pub(crate) use providers::{
-    add_provider, delete_provider, providers, test_provider, toggle_provider,
-};
+pub(crate) use partials::{charts_partial, metrics_partial, readiness_partial, status};
 pub(crate) use settings::settings_page;
 
 use std::{fmt::Write as _, sync::LazyLock};

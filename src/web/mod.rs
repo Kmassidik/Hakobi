@@ -2,7 +2,6 @@ mod agent_client;
 pub mod auth;
 mod deployment;
 mod handlers;
-mod stacks_admin;
 mod templates;
 #[cfg(test)]
 mod tests {
@@ -158,10 +157,6 @@ pub(crate) fn router_with_pipeline(
     Ok(Router::new()
         .route("/", get(handlers::dashboard_redirect))
         .route("/dashboard", get(handlers::dashboard))
-        .route("/providers", get(handlers::providers).post(handlers::add_provider))
-        .route("/providers/{id}/test", post(handlers::test_provider))
-        .route("/providers/{id}/toggle", post(handlers::toggle_provider))
-        .route("/providers/{id}/delete", post(handlers::delete_provider))
         .route("/containers", get(handlers::containers))
         .route(
             "/containers/{provider}/{name}",
@@ -175,7 +170,6 @@ pub(crate) fn router_with_pipeline(
             "/containers/{provider}/{name}/logs",
             get(handlers::container_detail_logs_partial),
         )
-        .route("/host/install/{tool}", post(handlers::install_tool))
         .route("/partials/metrics", get(handlers::metrics_partial))
         .route("/partials/charts", get(handlers::charts_partial))
         .route("/partials/readiness", get(handlers::readiness_partial))
@@ -199,59 +193,20 @@ pub(crate) fn router_with_pipeline(
             "/containers/{provider}/{name}/delete",
             post(handlers::container_delete),
         )
-        .route("/stacks", get(handlers::stacks))
+        .route("/apps", get(handlers::app_list).post(handlers::app_create))
+        .route("/apps/new", get(handlers::app_new))
+        .route("/apps/{id}", get(handlers::app_detail))
         .route(
-            "/stacks/new",
-            get(stacks_admin::stack_new).post(stacks_admin::stack_create),
+            "/apps/{id}/edit",
+            get(handlers::app_edit_page).post(handlers::app_edit_submit),
         )
-        .route(
-            "/stacks/{id}/edit",
-            get(stacks_admin::stack_edit).post(stacks_admin::stack_update),
-        )
-        .route(
-            "/stacks/{id}/delete",
-            post(stacks_admin::stack_delete),
-        )
-        .route("/stacks/runtime/{provider}/{name}", get(handlers::stack_detail))
-        .route(
-            "/environments",
-            get(handlers::environment_list).post(handlers::environment_create),
-        )
-        .route(
-            "/environments/new",
-            get(handlers::environment_new),
-        )
-        .route("/environments/{id}", get(handlers::environment_detail))
-        .route(
-            "/environments/{id}/edit",
-            get(handlers::environment_edit_page).post(handlers::environment_edit_submit),
-        )
-        .route(
-            "/environments/{id}/delete",
-            post(handlers::environment_delete),
-        )
-        .route(
-            "/environments/{id}/deploy",
-            post(handlers::environment_deploy),
-        )
-        .route(
-            "/environments/{id}/rollback",
-            post(handlers::environment_rollback),
-        )
-        .route(
-            "/environments/{id}/deployments",
-            get(handlers::environment_deployments),
-        )
-        .route("/environments/{id}/logs", get(handlers::environment_logs))
-        .route(
-            "/environments/{id}/status",
-            get(handlers::environment_status_partial),
-        )
-        .route(
-            "/environments/{id}/webhook",
-            get(handlers::environment_webhook_page).post(handlers::environment_webhook_submit),
-        )
-        .route("/webhook/{environment_id}/{secret}", post(webhook::webhook_receive))
+        .route("/apps/{id}/delete", post(handlers::app_delete))
+        .route("/apps/{id}/deploy", post(handlers::app_deploy))
+        .route("/apps/{id}/rollback", post(handlers::app_rollback))
+        .route("/apps/{id}/deployments", get(handlers::app_deployments))
+        .route("/apps/{id}/logs", get(handlers::app_logs))
+        .route("/apps/{id}/status", get(handlers::app_status_partial))
+        .route("/webhook/{app_id}/{secret}", post(webhook::webhook_receive))
         .route("/webhooks/github", post(handlers::github_webhook))
         .route("/webhooks/github/callback", get(handlers::github_manifest_callback))
         .route("/api/github/status", get(handlers::github_status))
@@ -266,24 +221,7 @@ pub(crate) fn router_with_pipeline(
         .route("/settings/github/manifest-callback", get(handlers::github_manifest_post_install))
         .route("/settings/github/callback", get(handlers::github_connect_callback))
         .route("/settings/github/delete", post(handlers::github_disconnect))
-        .route("/deployment", get(handlers::deployment_page))
-        .route("/deployment/list", get(handlers::deployment_list_partial))
-        .route("/infrastructure", get(handlers::infrastructure))
-        .route("/hosts", get(handlers::hosts_list).post(handlers::hosts_create))
-        .route("/hosts/{id}/resources", get(handlers::host_resources))
-        .route(
-            "/hosts/{id}/resources/history",
-            get(handlers::host_history),
-        )
-        .route(
-            "/hosts/{id}/resources/partial",
-            get(handlers::host_resources_partial),
-        )
-        .route("/hosts/{id}/test", post(handlers::hosts_test))
-        .route("/hosts/{id}/toggle", post(handlers::hosts_toggle))
-        .route("/hosts/{id}/delete", post(handlers::hosts_delete))
-        .route(
-            "/login",
+        .route("/login",
             get(handlers::login_page).post(handlers::login),
         )
         .route("/logout", post(handlers::logout))

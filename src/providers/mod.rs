@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod container_detail;
 pub mod docker;
+pub mod docker_exec;
 pub mod kubernetes;
 pub mod validate;
 

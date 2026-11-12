@@ -9,9 +9,9 @@ use futures_util::StreamExt;
 use super::container_detail::{DockerContainerUsage, DockerInspect, DockerLogs};
 use super::validate::connect;
 pub use super::validate::{validate_container_name, validate_endpoint, validate_image_reference};
-use crate::stacks::docker_exec::{remove_container as remove_docker_container, run_image};
+use crate::providers::docker_exec::{remove_container as remove_docker_container, run_image};
 
-pub use crate::stacks::docker_exec::RunResult;
+pub use crate::providers::docker_exec::RunResult;
 
 /// Upper bound of log lines the detail page and agent ever return.
 pub(crate) const MAX_LOG_LINES: usize = 500;

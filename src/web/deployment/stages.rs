@@ -53,12 +53,12 @@ pub(super) async fn record_build_output(
     })
 }
 
-/// Builds the versioned image tag for an environment deployment.
-pub(crate) fn image_tag_for(environment_name: &str, version: i64) -> String {
-    format!("hakobi/{environment_name}:v{version}")
+/// Builds the versioned image tag for an app deployment.
+pub(crate) fn image_tag_for(app_name: &str, version: i64) -> String {
+    format!("hakobi/{app_name}:v{version}")
 }
 
 /// Container name the pipeline manages on the target host.
-pub(crate) fn container_name_for(environment_id: &str) -> String {
-    format!("hakobi-{environment_id}")
+pub(crate) fn container_name_for(app_id: &str) -> String {
+    format!("hakobi-{app_id}")
 }

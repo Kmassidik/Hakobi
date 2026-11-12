@@ -13,7 +13,7 @@ fn provider_credentials_are_encrypted_rotated_and_revoked() {
     let directory = tempfile::tempdir().expect("tempdir");
     let path = directory.path().join("catalog.sqlite3");
     let mut catalog = Catalog::open(&path).expect("open catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 8);
+    assert_eq!(catalog.schema_version().expect("schema version"), 9);
 
     let connection_id = catalog
         .create_provider_connection(
@@ -103,19 +103,4 @@ fn provider_credentials_are_encrypted_rotated_and_revoked() {
         .list_provider_connections()
         .expect("list provider connections");
     assert!(!connections[0].enabled);
-
-    let audit = catalog.list_audit_events().expect("audit events");
-    assert!(audit.iter().any(|event| {
-        event.action == "rotate"
-            && event.entity_kind == "provider_connection"
-            && event.entity_id == connection_id
-    }));
-    assert!(audit.iter().any(|event| {
-        event.action == "revoke"
-            && event.entity_kind == "provider_connection"
-            && event.entity_id == connection_id
-    }));
-    let audit_text = format!("{audit:?}");
-    assert!(!audit_text.contains("super-secret-token"));
-    assert!(!audit_text.contains("rotated-token"));
 }

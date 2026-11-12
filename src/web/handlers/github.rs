@@ -278,7 +278,7 @@ pub(crate) fn github_connected_page() -> axum::response::Response {
                         }
                         h1 class="mt-4 text-xl font-bold" { "GitHub App connected" }
                         p class="mt-2 text-sm text-muted" {
-                            "Repositories can now be picked in environment forms, pushes build automatically, and deploy statuses land on commits."
+                            "Repositories can now be picked in app forms, pushes build automatically, and deploy statuses land on commits."
                         }
                         a href="/settings" class="mt-6 inline-block rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white no-underline" { "Back to Settings" }
                     }
@@ -341,7 +341,7 @@ pub(crate) async fn webhook(
     }
 }
 
-/// Push pipeline: match environments, cancel in-flight, trigger deploys.
+/// Push pipeline: match apps, cancel in-flight, trigger deploys.
 async fn handle_push(
     state: &AppState,
     catalog: &mut Catalog,
@@ -375,35 +375,29 @@ async fn handle_push(
         return handle_push_all(state, catalog, &repo, &branch, &sha, message.as_deref()).await;
     };
 
-    let environments = catalog.list_environments().unwrap_or_default();
+    let apps = catalog.list_apps().unwrap_or_default();
     let mut deployed = 0usize;
-    for environment in &environments {
-        let Some(env_repo) = environment.github_repo.as_deref() else {
+    for app in &apps {
+        let Some(app_repo) = app.github_repo.as_deref() else {
             continue;
         };
-        if env_repo != repo || environment.github_branch.as_deref() != Some(branch.as_str()) {
+        if app_repo != repo || app.github_branch.as_deref() != Some(branch.as_str()) {
             continue;
         }
-        if !environment.github_auto_deploy {
+        if !app.github_auto_deploy {
             continue;
         }
-        let pattern = environment.github_path.as_deref().unwrap_or("");
+        let pattern = app.github_path.as_deref().unwrap_or("");
         if !path_matches(pattern, &changed) {
             continue;
         }
-        deploy_environment(
-            state,
-            catalog,
-            environment.id.as_str(),
-            &sha,
-            message.as_deref(),
-        );
+        deploy_app(state, catalog, app.id.as_str(), &sha, message.as_deref());
         deployed += 1;
     }
     Json(serde_json::json!({ "deployments_triggered": deployed })).into_response()
 }
 
-/// No changed-file set (forced push / big push): rebuild every matching env.
+/// No changed-file set (forced push / big push): rebuild every matching app.
 async fn handle_push_all(
     state: &AppState,
     catalog: &mut Catalog,
@@ -412,33 +406,33 @@ async fn handle_push_all(
     sha: &str,
     message: Option<&str>,
 ) -> Response {
-    let environments = catalog.list_environments().unwrap_or_default();
+    let apps = catalog.list_apps().unwrap_or_default();
     let mut deployed = 0usize;
-    for environment in &environments {
-        if environment.github_repo.as_deref() != Some(repo)
-            || environment.github_branch.as_deref() != Some(branch)
-            || !environment.github_auto_deploy
+    for app in &apps {
+        if app.github_repo.as_deref() != Some(repo)
+            || app.github_branch.as_deref() != Some(branch)
+            || !app.github_auto_deploy
         {
             continue;
         }
-        deploy_environment(state, catalog, environment.id.as_str(), sha, message);
+        deploy_app(state, catalog, app.id.as_str(), sha, message);
         deployed += 1;
     }
     Json(serde_json::json!({ "deployments_triggered": deployed })).into_response()
 }
 
 /// Triggers one deployment; marks any in-flight deployment for the same
-/// environment as cancelled (newest push wins).
-fn deploy_environment(
+/// app as cancelled (newest push wins).
+fn deploy_app(
     state: &AppState,
     catalog: &mut Catalog,
-    environment_id: &str,
+    app_id: &str,
     sha: &str,
     message: Option<&str>,
 ) {
-    if let Ok(Some(_in_flight)) = catalog.latest_in_flight_deployment(environment_id) {
+    if let Ok(Some(_in_flight)) = catalog.latest_in_flight_deployment(app_id) {
         // Newest push wins: mark superseded builds so the UI reflects it.
-        let _ = catalog.cancel_in_flight_deployments(environment_id);
+        let _ = catalog.cancel_in_flight_deployments(app_id);
     }
     let deps = ExecutorDeps {
         catalog_path: (*state.catalog_path).clone(),
@@ -446,12 +440,5 @@ fn deploy_environment(
         backend: state.backend.clone(),
     };
     let guard = state.deployments.clone();
-    let _ = start_deployment(
-        &deps,
-        &guard,
-        environment_id,
-        Trigger::Webhook,
-        Some(sha),
-        message,
-    );
+    let _ = start_deployment(&deps, &guard, app_id, Trigger::Webhook, Some(sha), message);
 }

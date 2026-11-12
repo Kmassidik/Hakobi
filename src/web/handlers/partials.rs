@@ -6,70 +6,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use axum::extract::Form;
-use serde::Deserialize;
-
 use super::dashboard::{collect_dashboard_metrics, load_readiness};
-use super::{
-    authenticated, html_response, page_csrf, post_is_allowed, redirect_response, truncate,
-};
+use super::{authenticated, html_response, page_csrf};
 use crate::web::{agent_client::HostAgent, templates, AppState};
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct InstallToolForm {
-    csrf_token: String,
-}
-
-pub(crate) async fn install_tool(
-    axum::extract::State(state): axum::extract::State<AppState>,
-    headers: HeaderMap,
-    axum::extract::Path(tool): axum::extract::Path<String>,
-    Form(form): Form<InstallToolForm>,
-) -> Response {
-    if !authenticated(&state, &headers).await {
-        return axum::response::Redirect::to("/login").into_response();
-    }
-    if !post_is_allowed(&state, &headers, &form.csrf_token) {
-        return StatusCode::FORBIDDEN.into_response();
-    }
-    if !matches!(
-        tool.as_str(),
-        "docker" | "compose" | "kubectl" | "nix" | "nixpacks"
-    ) {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    let Some(agent) = HostAgent::from_env() else {
-        return dashboard_notice("Host agent is not configured.");
-    };
-    if let Err(error) = agent.install(&tool).await {
-        return dashboard_notice(&format!("{tool} install failed to start: {error}"));
-    }
-    let mut message = format!("{tool} installation is running on the host.");
-    for _ in 0..15 {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let Ok(jobs) = agent.install_status().await else {
-            continue;
-        };
-        let Some(job) = jobs.get(&tool) else {
-            continue;
-        };
-        if job.running {
-            continue;
-        }
-        message = if job.success {
-            format!("{tool} installed on the host.")
-        } else {
-            format!("{tool} install failed: {}", truncate(&job.output, 400))
-        };
-        break;
-    }
-    dashboard_notice(&message)
-}
-
-fn dashboard_notice(message: &str) -> Response {
-    let encoded: String = url::form_urlencoded::byte_serialize(message.as_bytes()).collect();
-    redirect_response(&format!("/?notice={encoded}"), Vec::new())
-}
 
 pub(crate) fn partial_unauthorized() -> Response {
     let mut response = StatusCode::UNAUTHORIZED.into_response();

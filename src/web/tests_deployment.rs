@@ -28,36 +28,38 @@ fn scripted_runner(script: PipelineScript) -> BuildRunnerClient {
     BuildRunnerClient::new(&base_url, None).unwrap()
 }
 
-fn seed_environment(path: &std::path::Path, secret: Option<&str>) -> (String, String) {
+fn seed_app(path: &std::path::Path, secret: Option<&str>) -> (String, String) {
     let mut catalog = hakobi::catalog::Catalog::open(path).unwrap();
     let host_id = catalog
         .create_host_agent("deploy-host", "https://deploy.example.com", "tok_deploy_01")
         .unwrap();
-    let environment_id = catalog
-        .create_environment(
+    let app_id = catalog
+        .create_app(
             "web",
             &host_id,
             "dockerfile",
-            "git",
-            Some("https://github.com/acme/app.git"),
+            Some("acme/app"),
             Some("main"),
-            "local",
+            None,
+            Some("Dockerfile"),
+            false,
+            Some(3000),
         )
         .unwrap();
     if let Some(secret) = secret {
         catalog
-            .set_environment_webhook(&environment_id, Some(secret), true)
+            .set_app_webhook(&app_id, Some(secret), true)
             .unwrap();
     }
-    (host_id, environment_id)
+    (host_id, app_id)
 }
 
-/// Waits until the environment's latest deployment reaches a terminal state.
-async fn await_terminal(path: &std::path::Path, environment_id: &str) -> String {
+/// Waits until the app's latest deployment reaches a terminal state.
+async fn await_terminal(path: &std::path::Path, app_id: &str) -> String {
     for _ in 0..200 {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         let catalog = hakobi::catalog::Catalog::open(path).unwrap();
-        if let Some(deployment) = catalog.get_latest_deployment(environment_id).unwrap() {
+        if let Some(deployment) = catalog.get_latest_deployment(app_id).unwrap() {
             if deployment.status == "running" || deployment.status == "failed" {
                 return deployment.status;
             }
@@ -71,10 +73,7 @@ fn deployment_guard_rejects_a_second_concurrent_claim() {
     let guard = DeploymentGuard::new();
     assert!(guard.try_claim("env-1"), "first claim should win");
     assert!(!guard.try_claim("env-1"), "second claim must be rejected");
-    assert!(
-        guard.try_claim("env-2"),
-        "a different environment may deploy"
-    );
+    assert!(guard.try_claim("env-2"), "a different app may deploy");
     guard.release("env-1");
     assert!(guard.try_claim("env-1"), "released claim may be re-taken");
 }
@@ -87,12 +86,12 @@ async fn manual_deploy_runs_the_full_pipeline() {
     });
     let (data, app) = pipeline_app(Some(runner));
     let path = data.path().join("catalog.sqlite3");
-    let (_host_id, environment_id) = seed_environment(&path, None);
+    let (_host_id, app_id) = seed_app(&path, None);
     let (authenticated, csrf) = sign_in(&app).await;
 
     let deploy = super::tests::post_form(
         &app,
-        &format!("/environments/{environment_id}/deploy"),
+        &format!("/apps/{app_id}/deploy"),
         &authenticated,
         "null",
         format!("csrf_token={csrf}"),
@@ -100,14 +99,11 @@ async fn manual_deploy_runs_the_full_pipeline() {
     .await;
     assert_eq!(deploy.status(), StatusCode::SEE_OTHER);
 
-    let status = await_terminal(&path, &environment_id).await;
+    let status = await_terminal(&path, &app_id).await;
     assert_eq!(status, "running");
 
     let catalog = hakobi::catalog::Catalog::open(&path).unwrap();
-    let deployment = catalog
-        .get_latest_deployment(&environment_id)
-        .unwrap()
-        .unwrap();
+    let deployment = catalog.get_latest_deployment(&app_id).unwrap().unwrap();
     assert_eq!(deployment.version, 1);
     assert!(deployment.completed_at.is_some());
     let logs = catalog.list_deployment_logs(&deployment.id).unwrap();
@@ -125,12 +121,12 @@ async fn build_failure_marks_deployment_failed() {
     });
     let (data, app) = pipeline_app(Some(runner));
     let path = data.path().join("catalog.sqlite3");
-    let (_host_id, environment_id) = seed_environment(&path, None);
+    let (_host_id, app_id) = seed_app(&path, None);
     let (authenticated, csrf) = sign_in(&app).await;
 
     let deploy = super::tests::post_form(
         &app,
-        &format!("/environments/{environment_id}/deploy"),
+        &format!("/apps/{app_id}/deploy"),
         &authenticated,
         "null",
         format!("csrf_token={csrf}"),
@@ -138,14 +134,11 @@ async fn build_failure_marks_deployment_failed() {
     .await;
     assert_eq!(deploy.status(), StatusCode::SEE_OTHER);
 
-    let status = await_terminal(&path, &environment_id).await;
+    let status = await_terminal(&path, &app_id).await;
     assert_eq!(status, "failed");
 
     let catalog = hakobi::catalog::Catalog::open(&path).unwrap();
-    let deployment = catalog
-        .get_latest_deployment(&environment_id)
-        .unwrap()
-        .unwrap();
+    let deployment = catalog.get_latest_deployment(&app_id).unwrap().unwrap();
     let logs = catalog.list_deployment_logs(&deployment.id).unwrap();
     assert!(
         logs.iter()
@@ -158,12 +151,12 @@ async fn build_failure_marks_deployment_failed() {
 async fn deploy_without_build_runner_fails_cleanly() {
     let (data, app) = pipeline_app(None);
     let path = data.path().join("catalog.sqlite3");
-    let (_host_id, environment_id) = seed_environment(&path, None);
+    let (_host_id, app_id) = seed_app(&path, None);
     let (authenticated, csrf) = sign_in(&app).await;
 
     let deploy = super::tests::post_form(
         &app,
-        &format!("/environments/{environment_id}/deploy"),
+        &format!("/apps/{app_id}/deploy"),
         &authenticated,
         "null",
         format!("csrf_token={csrf}"),
@@ -171,13 +164,10 @@ async fn deploy_without_build_runner_fails_cleanly() {
     .await;
     assert_eq!(deploy.status(), StatusCode::SEE_OTHER);
 
-    let status = await_terminal(&path, &environment_id).await;
+    let status = await_terminal(&path, &app_id).await;
     assert_eq!(status, "failed");
     let catalog = hakobi::catalog::Catalog::open(&path).unwrap();
-    let deployment = catalog
-        .get_latest_deployment(&environment_id)
-        .unwrap()
-        .unwrap();
+    let deployment = catalog.get_latest_deployment(&app_id).unwrap().unwrap();
     let logs = catalog.list_deployment_logs(&deployment.id).unwrap();
     assert!(
         logs.iter().any(|log| log.message.contains("build runner")),
@@ -198,12 +188,12 @@ async fn executor_records_pending_building_deploying_running() {
     let runner = BuildRunnerClient::new(&base_url, None).unwrap();
     let (data, app) = pipeline_app(Some(runner));
     let path = data.path().join("catalog.sqlite3");
-    let (_host_id, environment_id) = seed_environment(&path, None);
+    let (_host_id, app_id) = seed_app(&path, None);
     let (authenticated, csrf) = sign_in(&app).await;
 
     let deploy = super::tests::post_form(
         &app,
-        &format!("/environments/{environment_id}/deploy"),
+        &format!("/apps/{app_id}/deploy"),
         &authenticated,
         "null",
         format!("csrf_token={csrf}"),
@@ -216,7 +206,7 @@ async fn executor_records_pending_building_deploying_running() {
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         let catalog = hakobi::catalog::Catalog::open(&path).unwrap();
-        let Some(deployment) = catalog.get_latest_deployment(&environment_id).unwrap() else {
+        let Some(deployment) = catalog.get_latest_deployment(&app_id).unwrap() else {
             continue;
         };
         if seen.last().map(String::as_str) != Some(deployment.status.as_str()) {
@@ -256,10 +246,10 @@ async fn concurrent_deploy_is_rejected_with_conflict() {
     });
     let (data, app) = pipeline_app(Some(runner));
     let path = data.path().join("catalog.sqlite3");
-    let (_host_id, environment_id) = seed_environment(&path, None);
+    let (_host_id, app_id) = seed_app(&path, None);
     let (authenticated, csrf) = sign_in(&app).await;
 
-    // Simulate an in-flight deployment by claiming the environment and then
+    // Simulate an in-flight deployment by claiming the app and then
     // triggering a second deploy through the app's own guard. The handler
     // sees the claim because both share the app state's guard.
     // Instead of poking internals, start a real deploy whose scripted runner
@@ -293,7 +283,7 @@ async fn concurrent_deploy_is_rejected_with_conflict() {
     // by racing two webhooks: the first claims, the second conflicts.
     let first = super::tests::post_form(
         &app_with_stalled,
-        &format!("/environments/{environment_id}/deploy"),
+        &format!("/apps/{app_id}/deploy"),
         &authenticated.clone(),
         "null",
         format!("csrf_token={csrf}"),
@@ -307,7 +297,7 @@ async fn concurrent_deploy_is_rejected_with_conflict() {
     // first deploy is still running.
     let second = super::tests::post_form(
         &app,
-        &format!("/environments/{environment_id}/deploy"),
+        &format!("/apps/{app_id}/deploy"),
         &authenticated,
         "null",
         format!("csrf_token={csrf}"),
@@ -320,7 +310,7 @@ async fn concurrent_deploy_is_rejected_with_conflict() {
     // Either the second was rejected (conflict) or the first already
     // finished (v1 running). Both are valid; the guard unit test above pins
     // the strict rejection, this pins the HTTP contract stays a redirect.
-    assert!(location.starts_with("/environments/"), "{location}");
+    assert!(location.starts_with("/apps/"), "{location}");
     let _ = path;
 }
 
@@ -332,14 +322,14 @@ async fn rollback_redeploys_running_version_and_reports_missing() {
     });
     let (data, app) = pipeline_app(Some(runner));
     let path = data.path().join("catalog.sqlite3");
-    let (_host_id, environment_id) = seed_environment(&path, None);
+    let (_host_id, app_id) = seed_app(&path, None);
     let (authenticated, csrf) = sign_in(&app).await;
 
     // A prior running deployment (v1) recorded directly.
     {
         let mut catalog = hakobi::catalog::Catalog::open(&path).unwrap();
         let v1 = catalog
-            .create_deployment(&environment_id, "manual", None, None)
+            .create_deployment(&app_id, "manual", None, None)
             .unwrap();
         catalog
             .update_deployment_status(&v1, "running", None)
@@ -348,7 +338,7 @@ async fn rollback_redeploys_running_version_and_reports_missing() {
 
     let rollback = super::tests::post_form(
         &app,
-        &format!("/environments/{environment_id}/rollback"),
+        &format!("/apps/{app_id}/rollback"),
         &authenticated.clone(),
         "null",
         format!("csrf_token={csrf}"),
@@ -369,11 +359,11 @@ async fn rollback_redeploys_running_version_and_reports_missing() {
     // Without a running deployment, rollback redirects with the no-op notice.
     let (data2, app2) = pipeline_app(None);
     let path2 = data2.path().join("catalog.sqlite3");
-    let (_host2, environment2) = seed_environment(&path2, None);
+    let (_host2, app2_id) = seed_app(&path2, None);
     let (authenticated2, csrf2) = sign_in(&app2).await;
     let rollback_empty = super::tests::post_form(
         &app2,
-        &format!("/environments/{environment2}/rollback"),
+        &format!("/apps/{app2_id}/rollback"),
         &authenticated2,
         "null",
         format!("csrf_token={csrf2}"),

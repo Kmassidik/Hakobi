@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use axum::{
-    body::{to_bytes, Body},
+    body::Body,
     http::{header::CONTENT_TYPE, Request, StatusCode},
     Router,
 };
@@ -27,100 +27,19 @@ fn metrics_path(directory: &std::path::Path) -> std::path::PathBuf {
     hakobi::metrics::metrics_database_path(&directory.join("catalog.sqlite3"))
 }
 
-async fn body(response: axum::response::Response) -> String {
-    let bytes = to_bytes(response.into_body(), 256 * 1024).await.unwrap();
-    String::from_utf8(bytes.to_vec()).unwrap()
-}
-
 #[tokio::test]
 async fn history_endpoint_requires_authentication() {
     let (data, app) = app_with_tempdir();
     let _path = metrics_path(data.path());
     let response = app
         .oneshot(
-            Request::get("/hosts/local/resources/history")
+            Request::get("/partials/charts")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn history_endpoint_renders_chart_data_from_metrics_db() {
-    std::env::set_var("HAKOBI_AGENT_URL", "http://127.0.0.1:1");
-    std::env::set_var("HAKOBI_AGENT_TOKEN", "0123456789abcdef0123456789abcdef");
-    let (data, app) = app_with_tempdir();
-    let (cookies, _csrf) = sign_in(&app).await;
-    let path = metrics_path(data.path());
-
-    // Seed two minutes of rollup data through the public MetricsDb API.
-    // Two points are required for a polyline (>= 2 coordinates).
-    {
-        let db = MetricsDb::open(&path).unwrap();
-        let stamp = now_ms();
-        db.insert_1m_rollup(
-            "local",
-            stamp - 120_000,
-            &Rollup1m {
-                cpu_avg: 42.0,
-                cpu_max: 60.0,
-                memory_avg: 55.0,
-                memory_max: 70.0,
-                disk_used: 5 * 1_048_576,
-                network_rx_avg: 1_000.0,
-                network_tx_avg: 2_000.0,
-            },
-        )
-        .unwrap();
-        db.insert_1m_rollup(
-            "local",
-            stamp - 60_000,
-            &Rollup1m {
-                cpu_avg: 38.0,
-                cpu_max: 55.0,
-                memory_avg: 52.0,
-                memory_max: 68.0,
-                disk_used: 5 * 1_048_576,
-                network_rx_avg: 900.0,
-                network_tx_avg: 1_800.0,
-            },
-        )
-        .unwrap();
-    }
-    let response = app
-        .clone()
-        .oneshot(
-            Request::get("/hosts/local/resources/history?window=5m")
-                .header(axum::http::header::COOKIE, cookies)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let markup = body(response).await;
-    assert!(markup.contains("History"));
-    assert!(markup.contains("chart-line"));
-    assert!(markup.contains("viewBox"));
-    assert!(!markup.contains("style="), "no inline styles allowed");
-}
-
-#[tokio::test]
-async fn history_endpoint_unknown_host_is_not_found() {
-    let (_data, app) = app_with_tempdir();
-    let (cookies, _csrf) = sign_in(&app).await;
-    let response = app
-        .oneshot(
-            Request::get("/hosts/does-not-exist/resources/history")
-                .header(axum::http::header::COOKIE, cookies)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -219,7 +138,7 @@ async fn sampling_job_writes_rollups_to_the_database() {
     let (cookies, _csrf) = sign_in(&app).await;
     let response = app
         .oneshot(
-            Request::get("/hosts/local/resources/history")
+            Request::get("/partials/charts")
                 .header(axum::http::header::COOKIE, cookies)
                 .body(Body::empty())
                 .unwrap(),
