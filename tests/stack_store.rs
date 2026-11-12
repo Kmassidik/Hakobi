@@ -47,7 +47,7 @@ fn open_catalog() -> (tempfile::TempDir, std::path::PathBuf, Catalog) {
 #[test]
 fn stack_definitions_round_trip_through_the_catalog() {
     let (_directory, path, mut catalog) = open_catalog();
-    assert_eq!(catalog.schema_version().expect("schema version"), 7);
+    assert_eq!(catalog.schema_version().expect("schema version"), 8);
 
     let provider_id = catalog
         .create_provider_connection(
@@ -112,7 +112,7 @@ fn stack_definitions_round_trip_through_the_catalog() {
     drop(catalog);
 
     let mut catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 7);
+    assert_eq!(catalog.schema_version().expect("schema version"), 8);
     assert_eq!(
         catalog
             .get_stack(&stack_id)
@@ -357,7 +357,7 @@ fn catalog_migrates_v2_database_and_preserves_providers() {
     }
 
     let mut catalog = Catalog::open(&path).expect("migrate catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 7);
+    assert_eq!(catalog.schema_version().expect("schema version"), 8);
 
     let providers = catalog.list_provider_connections().expect("list providers");
     assert_eq!(providers.len(), 1);
