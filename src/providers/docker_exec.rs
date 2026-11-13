@@ -242,7 +242,8 @@ fn container_config(
 ) -> ContainerCreateBody {
     let key = format!("{container_port}/tcp");
     let binding = PortBinding {
-        host_ip: Some("0.0.0.0".to_owned()),
+        // Loopback only: the Cloudflare tunnel is the public entry point.
+        host_ip: Some("127.0.0.1".to_owned()),
         host_port: Some(host_port.to_string()),
     };
     let mut port_bindings: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
