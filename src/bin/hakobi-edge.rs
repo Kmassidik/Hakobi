@@ -36,29 +36,50 @@ pub struct Route {
     pub port: u16,
 }
 
+#[derive(Clone)]
+struct Upstream {
+    port: u16,
+    authority: hyper::http::uri::Authority,
+}
+
+impl Upstream {
+    fn new(port: u16) -> Self {
+        let authority = format!("127.0.0.1:{port}")
+            .parse()
+            .expect("a loopback socket authority is valid");
+        Self { port, authority }
+    }
+}
+
 /// Immutable routing snapshot. Readers clone the Arc; reloads swap it.
 pub struct RouteTable {
-    /// lowercased host → upstream port
-    routes: HashMap<String, u16>,
-    /// where unmatched hosts go (console, root domain, etc.)
-    pub fallback_port: Option<u16>,
+    routes: HashMap<String, Upstream>,
+    fallback: Option<Upstream>,
 }
 
 impl RouteTable {
     pub fn from_routes(routes: Vec<Route>, fallback_port: Option<u16>) -> Self {
         let map = routes
             .into_iter()
-            .map(|route| (route.host.to_lowercase(), route.port))
+            .map(|route| (route.host.to_lowercase(), Upstream::new(route.port)))
             .collect();
         Self {
             routes: map,
-            fallback_port,
+            fallback: fallback_port.map(Upstream::new),
         }
     }
 
-    /// O(1) lookup, zero allocation — the hot path.
-    pub fn port_for(&self, host: &str) -> Option<u16> {
-        self.routes.get(&host.to_ascii_lowercase()).copied()
+    /// Normal lowercase Host lookups allocate nothing and parse nothing.
+    fn upstream_for(&self, host: &str) -> Option<&Upstream> {
+        self.routes
+            .get(host)
+            .or_else(|| {
+                host.bytes()
+                    .any(|byte| byte.is_ascii_uppercase())
+                    .then(|| host.to_ascii_lowercase())
+                    .and_then(|lowercase| self.routes.get(&lowercase))
+            })
+            .or(self.fallback.as_ref())
     }
 
     pub fn routes_len(&self) -> usize {
@@ -167,7 +188,7 @@ async fn serve_connection(
     });
     hyper::server::conn::http1::Builder::new()
         .keep_alive(true)
-        .timer(hyper_util::rt::TokioTimer::new())
+        .timer(TokioTimer::new())
         .serve_connection(io, hyper_service)
         .await
         .context("connection error")
@@ -184,29 +205,26 @@ async fn proxy_request(
         .headers()
         .get(hyper::header::HOST)
         .and_then(|value| value.to_str().ok())
-        .map(|value| value.split(':').next().unwrap_or(value).to_owned())
+        .map(|value| value.split(':').next().unwrap_or(value))
         .context("missing Host header")?;
 
     let snapshot = table.load();
-    let port = snapshot
-        .port_for(&host)
-        .or(snapshot.fallback_port)
-        .context(format!("no route for {host}"))?;
+    let upstream = snapshot
+        .upstream_for(host)
+        .with_context(|| format!("no route for {host}"))?;
+    let port = upstream.port;
+    let authority = upstream.authority.clone();
     drop(snapshot);
 
     let mut uri = request.uri().clone().into_parts();
     uri.scheme = Some(hyper::http::uri::Scheme::HTTP);
-    uri.authority = Some(
-        format!("127.0.0.1:{port}")
-            .parse()
-            .context("invalid upstream authority")?,
-    );
+    uri.authority = Some(authority);
     *request.uri_mut() = hyper::Uri::from_parts(uri).context("invalid upstream URI")?;
 
     client
         .request(request)
         .await
-        .with_context(|| format!("upstream {host}:{port} request failed"))
+        .with_context(|| format!("upstream port {port} request failed"))
 }
 
 /// Builds the routing table from the catalog: apps (by name → host_port)
@@ -226,6 +244,8 @@ fn load_table(catalog_path: &std::path::Path) -> Result<RouteTable> {
         .collect();
     // Console (the control plane itself) is always reachable.
     let mut table = RouteTable::from_routes(routes, None);
-    table.routes.insert("console.glicc.id".to_owned(), 3000);
+    table
+        .routes
+        .insert("console.glicc.id".to_owned(), Upstream::new(3000));
     Ok(table)
 }
