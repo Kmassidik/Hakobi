@@ -70,12 +70,19 @@ pub fn app_form(
                                 span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Repository" }
                                 select name="github_repo" data-gh-repos class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
                                     option value="" { "Loading repositories…" }
+                                    @if let Some(current) = Some(values.github_repo.clone()).filter(|value| !value.is_empty()) {
+                                        option value=(current) selected { (current) }
+                                    }
                                 }
                             }
                             label class="grid gap-1.5" {
                                 span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Branch" }
                                 select name="github_branch" data-gh-branches class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
-                                    option value="main" { "main" }
+                                    @if let Some(current) = Some(values.github_branch.clone()).filter(|value| !value.is_empty()) {
+                                        option value=(current) selected { (current) }
+                                    } @else {
+                                        option value="main" { "main" }
+                                    }
                                 }
                             }
                             div data-gh-apps class="grid grid-cols-1 gap-3" {}
@@ -118,6 +125,10 @@ pub fn app_form(
                             label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
                                 "Container port"
                                 input class=(FIELD) name="container_port" type="number" value=(values.container_port) min="1" max="65535" placeholder="8080";
+                            }
+                            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
+                                "Environment variables (JSON, optional)"
+                                textarea class=(FIELD) name="env_json" rows="3" placeholder="{}" autocomplete="off" { (values.env_json) }
                             }
                         }
                         label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
