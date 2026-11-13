@@ -50,6 +50,12 @@ pub struct IngressRule {
 #[derive(Debug, Deserialize)]
 struct TunnelConfig {
     #[serde(default)]
+    config: Option<Config>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    #[serde(default)]
     ingress: Vec<IngressRule>,
 }
 
@@ -208,6 +214,13 @@ impl CloudflareClient {
             .bearer_auth(&self.api_token)
     }
 
+    async fn send_raw(&self, request: RequestBuilder) -> Result<(StatusCode, String)> {
+        let response = request.send().await?;
+        let status = response.status();
+        let text = response.text().await?;
+        Ok((status, text))
+    }
+
     async fn send<T: DeserializeOwned>(&self, request: RequestBuilder) -> Result<T> {
         let response = request
             .send()
@@ -245,7 +258,10 @@ impl CloudflareClient {
                 &format!("/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations"),
             ))
             .await?;
-        Ok(response.ingress)
+        Ok(response
+            .config
+            .map(|config| config.ingress)
+            .unwrap_or_default())
     }
 
     /// Adds (or replaces) an ingress rule mapping `hostname` to the given
@@ -302,14 +318,18 @@ impl CloudflareClient {
         rules: Vec<IngressRule>,
     ) -> Result<()> {
         let body = json!({ "config": { "ingress": rules } });
-        self.send::<Value>(
-            self.request(
-                Method::PUT,
-                &format!("/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations"),
+        let (status, text) = self
+            .send_raw(
+                self.request(
+                    Method::PUT,
+                    &format!("/accounts/{account_id}/cfd_tunnel/{tunnel_id}/configurations"),
+                )
+                .json(&body),
             )
-            .json(&body),
-        )
-        .await?;
+            .await?;
+        if !status.is_success() {
+            bail!("tunnel ingress PUT failed: {status} {text}");
+        }
         Ok(())
     }
 }
