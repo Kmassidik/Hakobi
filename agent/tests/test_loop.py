@@ -70,10 +70,7 @@ class LoopTests(unittest.TestCase):
             self.assertEqual(len(state["attempts"]), 2)
             self.assertIsNone(state["commit"])
             self.assertTrue(state["attempts"][0]["checks"][1]["passed"] is False)
-            self.assertEqual(
-                state["attempts"][0]["checks"][1]["saw"],
-                state["attempts"][1]["checks"][1]["saw"],
-            )
+            self.assertTrue(state["attempts"][1]["checks"][1]["passed"] is False)
 
     def test_snapshot_cannot_open_a_real_pr(self) -> None:
         from hakobi_agent.pr import PRGateError, approve_pr
