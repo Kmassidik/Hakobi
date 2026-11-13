@@ -16,6 +16,7 @@ pub struct AppFormValues {
     pub github_dockerfile: String,
     pub github_auto_deploy: bool,
     pub container_port: String,
+    pub env_json: String,
 }
 
 #[allow(clippy::too_many_arguments)]

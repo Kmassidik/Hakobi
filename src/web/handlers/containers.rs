@@ -240,6 +240,7 @@ pub(crate) async fn container_create(
             &values.image,
             &values.name,
             container_port,
+            &std::collections::HashMap::new(),
         )
         .await;
     match result {

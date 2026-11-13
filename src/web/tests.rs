@@ -101,7 +101,8 @@ impl ContainerBackend for FakeBackend {
         _image: &str,
         name: &str,
         _container_port: u16,
-    ) -> anyhow::Result<RunResult> {
+    _env: &std::collections::HashMap<String, String>,
+        ) -> anyhow::Result<RunResult> {
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),
             host_port: 18050,
@@ -189,7 +190,8 @@ impl ContainerBackend for PipelineBackend {
         image: &str,
         name: &str,
         _container_port: u16,
-    ) -> anyhow::Result<RunResult> {
+    _env: &std::collections::HashMap<String, String>,
+        ) -> anyhow::Result<RunResult> {
         *self.deployed.lock().await = Some((name.to_owned(), image.to_owned()));
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),
@@ -1421,7 +1423,8 @@ impl ContainerBackend for DetailBackend {
         _image: &str,
         name: &str,
         _container_port: u16,
-    ) -> anyhow::Result<RunResult> {
+    _env: &std::collections::HashMap<String, String>,
+        ) -> anyhow::Result<RunResult> {
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),
             host_port: 18050,

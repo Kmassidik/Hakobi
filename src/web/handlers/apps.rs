@@ -65,6 +65,7 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
         github_dockerfile: "Dockerfile".into(),
         github_auto_deploy: true,
         container_port: String::new(),
+        env_json: "{}".into(),
     };
     render_app_form(
         &state,
@@ -132,6 +133,7 @@ pub(crate) async fn app_create(
         )
     })
     .await;
+    // env_json saved via update below when editing; default {} on create.
     match result {
         Ok(_) => redirect_with_notice("/apps", "App created."),
         Err(error) => render_app_form(
@@ -325,6 +327,7 @@ pub(crate) async fn app_edit_page(
             .container_port
             .map(|port| port.to_string())
             .unwrap_or_default(),
+        env_json: app.env_json.clone(),
     };
     render_app_form(
         &state,
@@ -382,6 +385,7 @@ pub(crate) async fn app_edit_submit(
     let github_dockerfile = non_empty(&values.github_dockerfile);
     let github_auto_deploy = values.github_auto_deploy;
     let container_port = parse_port(&values.container_port);
+    let env_json = values.env_json.clone();
     let app_id = id.clone();
     let result = with_catalog(&state, move |catalog| {
         catalog.update_app(
@@ -395,6 +399,7 @@ pub(crate) async fn app_edit_submit(
             github_dockerfile.as_deref(),
             github_auto_deploy,
             container_port,
+            &env_json,
         )
     })
     .await;

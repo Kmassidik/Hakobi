@@ -208,6 +208,7 @@ pub trait ContainerBackend: Send + Sync {
         image: &str,
         name: &str,
         container_port: u16,
+        env: &std::collections::HashMap<String, String>,
     ) -> Result<RunResult>;
 
     /// Returns the full inspect data of one container.
@@ -471,8 +472,9 @@ impl ContainerBackend for DockerBackend {
         image: &str,
         name: &str,
         container_port: u16,
+        env: &std::collections::HashMap<String, String>,
     ) -> Result<RunResult> {
-        run_image(endpoint, image, name, container_port).await
+        run_image(endpoint, image, name, container_port, env).await
     }
 }
 

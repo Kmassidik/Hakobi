@@ -27,6 +27,8 @@ pub(crate) struct AppForm {
     pub(crate) github_auto_deploy: Option<String>,
     #[serde(default)]
     pub(crate) container_port: String,
+    #[serde(default)]
+    pub(crate) env_json: String,
     pub(crate) csrf_token: String,
 }
 
@@ -45,6 +47,11 @@ pub(crate) fn form_values(form: &AppForm) -> templates::AppFormValues {
         },
         github_auto_deploy: form.github_auto_deploy.as_deref() == Some("1"),
         container_port: form.container_port.trim().to_owned(),
+        env_json: if form.env_json.trim().is_empty() {
+            "{}".to_owned()
+        } else {
+            form.env_json.trim().to_owned()
+        },
     }
 }
 

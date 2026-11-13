@@ -785,6 +785,7 @@ async fn docker_run(
             &request.image,
             &request.name,
             request.container_port,
+            &request.env,
         ),
         DOCKER_RUN_TIMEOUT,
     )

@@ -199,6 +199,7 @@ impl ContainerBackend for AgentBackend {
         image: &str,
         name: &str,
         container_port: u16,
+        env: &std::collections::HashMap<String, String>,
     ) -> Result<RunResult> {
         ensure_local_endpoint(endpoint)?;
         validate_image_reference(image)?;
@@ -210,6 +211,7 @@ impl ContainerBackend for AgentBackend {
             image: image.to_owned(),
             name: name.to_owned(),
             container_port,
+            env: env.clone(),
         };
         let response: RunContainerResponse = self
             .post("/v1/docker/containers/run", &request, RUN_TIMEOUT)
@@ -442,10 +444,11 @@ impl ContainerBackend for RoutingBackend {
         image: &str,
         name: &str,
         container_port: u16,
+        env: &std::collections::HashMap<String, String>,
     ) -> Result<RunResult> {
         self.select(endpoint)
             .await?
-            .run_container(endpoint, image, name, container_port)
+            .run_container(endpoint, image, name, container_port, env)
             .await
     }
 
@@ -853,6 +856,7 @@ mod tests {
             _image: &str,
             _name: &str,
             _container_port: u16,
+            _env: &std::collections::HashMap<String, String>,
         ) -> Result<RunResult> {
             bail!("{} run", self.0)
         }
@@ -880,7 +884,13 @@ mod tests {
         );
         assert!(backend.snapshot("agent://local").await.is_err());
         assert!(backend
-            .run_container("agent://local", "alpine:3.20", "demo", 80)
+            .run_container(
+                "agent://local",
+                "alpine:3.20",
+                "demo",
+                80,
+                &std::collections::HashMap::new()
+            )
             .await
             .is_err());
     }
@@ -1448,7 +1458,13 @@ mod tests {
             .unwrap();
 
         let result = backend
-            .run_container(host_agent::LOCAL_ENDPOINT, "alpine:3.20", "demo-api", 8080)
+            .run_container(
+                host_agent::LOCAL_ENDPOINT,
+                "alpine:3.20",
+                "demo-api",
+                8080,
+                &Default::default(),
+            )
             .await
             .unwrap();
         assert_eq!(result.name, "demo-api");
@@ -1477,12 +1493,19 @@ mod tests {
                 host_agent::LOCAL_ENDPOINT,
                 "alpine latest",
                 "demo-api",
-                8080
+                8080,
+                &Default::default(),
             )
             .await
             .is_err());
         assert!(backend
-            .run_container(host_agent::LOCAL_ENDPOINT, "alpine:3.20", "demo-api", 0)
+            .run_container(
+                host_agent::LOCAL_ENDPOINT,
+                "alpine:3.20",
+                "demo-api",
+                0,
+                &Default::default()
+            )
             .await
             .is_err());
         assert!(backend.test("unix:///var/run/docker.sock").await.is_err());

@@ -55,6 +55,7 @@ pub(super) async fn run_pipeline(
         deployment_id,
         &image_tag,
         context.container_port,
+        &context.env_json,
     )
     .await
     {
@@ -151,6 +152,7 @@ async fn deploy_image(
     deployment_id: &str,
     image_tag: &str,
     container_port: u16,
+    env_json: &str,
 ) -> Result<()> {
     validate_image_reference(image_tag)?;
     let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
@@ -187,9 +189,11 @@ async fn deploy_image(
         )
         .await?;
     }
+    let env: std::collections::HashMap<String, String> =
+        serde_json::from_str(env_json).unwrap_or_default();
     let run = deps
         .backend
-        .run_container(&endpoint, image_tag, &container_name, container_port)
+        .run_container(&endpoint, image_tag, &container_name, container_port, &env)
         .await
         .context("agent could not start the new container")?;
     let host_port = run.host_port;
@@ -299,6 +303,7 @@ async fn load_build_context(
         let is_compose = build_type == "compose";
         Ok(BuildContext {
             container_port: app.container_port.unwrap_or(8080),
+            env_json: app.env_json.clone(),
             build_type,
             branch: app
                 .github_branch

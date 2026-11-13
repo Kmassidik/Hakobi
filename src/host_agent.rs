@@ -332,6 +332,9 @@ pub struct RunContainerRequest {
     pub name: String,
     #[serde(default)]
     pub container_port: u16,
+    /// Extra environment variables set inside the container.
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
 }
 
 /// Result of `POST /v1/docker/containers/run`.
@@ -541,6 +544,7 @@ mod tests {
     #[test]
     fn run_requests_and_results_round_trip_through_json() {
         let request = RunContainerRequest {
+            env: Default::default(),
             image: "alpine:3.20".into(),
             name: "demo-api".into(),
             container_port: 8080,

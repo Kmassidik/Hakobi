@@ -24,6 +24,8 @@ pub struct App {
     pub container_port: Option<u16>,
     /// Host port the current deployment publishes (None = not running).
     pub host_port: Option<u16>,
+    /// JSON object of environment variables passed to the container.
+    pub env_json: String,
     pub status: String,
     pub webhook_secret: Option<String>,
     pub webhook_enabled: bool,
@@ -99,19 +101,29 @@ fn read_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<App> {
         github_auto_deploy: row.get::<_, i64>(8)? != 0,
         container_port: row.get(9)?,
         host_port: row.get::<_, Option<i64>>(10)?.map(|v| v as u16),
-        status: row.get(11)?,
-        webhook_secret: row.get(12)?,
-        webhook_enabled: row.get::<_, i64>(13)? != 0,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        env_json: row.get(11)?,
+        status: row.get(12)?,
+        webhook_secret: row.get(13)?,
+        webhook_enabled: row.get::<_, i64>(14)? != 0,
+        created_at: row.get(15)?,
+        updated_at: row.get(16)?,
     })
 }
 
 const APP_COLUMNS: &str = "id, name, host_id, build_type, github_repo, \
      github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, host_port, \
-     status, webhook_secret, webhook_enabled, created_at, updated_at";
+     env_json, status, webhook_secret, webhook_enabled, created_at, updated_at";
 
 impl Catalog {
+    /// Replaces the app's container environment variables (JSON object).
+    pub fn set_app_env_json(&self, id: &str, env_json: &str) -> Result<()> {
+        self.connection.execute(
+            "UPDATE apps SET env_json = ?2 WHERE id = ?1",
+            params![id, env_json],
+        )?;
+        Ok(())
+    }
+
     /// Persists the host port published by the latest deployment.
     pub fn set_app_host_port(&self, id: &str, host_port: Option<u16>) -> Result<()> {
         self.connection.execute(
@@ -216,9 +228,15 @@ impl Catalog {
         github_dockerfile: Option<&str>,
         github_auto_deploy: bool,
         container_port: Option<u16>,
+        env_json: &str,
     ) -> Result<()> {
         let name = name.trim();
         validate_app_name(name)?;
+        let parsed: serde_json::Value = serde_json::from_str(env_json)
+            .map_err(|error| anyhow::anyhow!("env must be a JSON object: {error}"))?;
+        if !parsed.is_object() {
+            bail!("env must be a JSON object");
+        }
         validate_build_type(build_type)?;
         validate_port(container_port)?;
 
@@ -231,7 +249,7 @@ impl Catalog {
             "UPDATE apps \
              SET name = ?2, host_id = ?3, build_type = ?4, github_repo = ?5, \
                  github_branch = ?6, github_path = ?7, github_dockerfile = ?8, \
-                 github_auto_deploy = ?9, container_port = ?10, \
+                 github_auto_deploy = ?9, container_port = ?10, env_json = ?11, \
                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
              WHERE id = ?1",
             params![

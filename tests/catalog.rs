@@ -95,6 +95,7 @@ fn apps_crud_round_trip() {
                 Some("docker/Dockerfile"),
                 true,
                 None,
+                "{}",
             )
             .expect("update app");
         let updated = catalog
@@ -178,7 +179,8 @@ fn apps_validate_name_host_and_enums() {
             None,
             Some("Dockerfile"),
             false,
-            Some(0)
+            Some(0),
+            "{}"
         )
         .is_err());
 
@@ -194,7 +196,8 @@ fn apps_validate_name_host_and_enums() {
             None,
             None,
             false,
-            None
+            None,
+            "{}",
         )
         .is_err());
 }

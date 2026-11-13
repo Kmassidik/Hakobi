@@ -78,6 +78,7 @@ pub async fn run_image(
     image: &str,
     name: &str,
     container_port: u16,
+    env: &HashMap<String, String>,
 ) -> Result<RunResult> {
     validate_image_reference(image)?;
     validate_container_name(name)?;
@@ -94,7 +95,7 @@ pub async fn run_image(
 
     let mut last_collision: Option<String> = None;
     for host_port in candidates {
-        let config = container_config(image, container_port, host_port);
+        let config = container_config(image, container_port, host_port, env);
         let options = CreateContainerOptionsBuilder::new().name(name).build();
         match docker.create_container(Some(options), config).await {
             Ok(created) => {
@@ -233,7 +234,12 @@ fn compose_up_args(project: &str) -> Vec<String> {
     .collect()
 }
 
-fn container_config(image: &str, container_port: u16, host_port: u16) -> ContainerCreateBody {
+fn container_config(
+    image: &str,
+    container_port: u16,
+    host_port: u16,
+    env: &HashMap<String, String>,
+) -> ContainerCreateBody {
     let key = format!("{container_port}/tcp");
     let binding = PortBinding {
         host_ip: Some("0.0.0.0".to_owned()),
@@ -241,8 +247,13 @@ fn container_config(image: &str, container_port: u16, host_port: u16) -> Contain
     };
     let mut port_bindings: HashMap<String, Option<Vec<PortBinding>>> = HashMap::new();
     port_bindings.insert(key.clone(), Some(vec![binding]));
+    let env_list: Vec<String> = env
+        .iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect();
     ContainerCreateBody {
         image: Some(image.to_owned()),
+        env: Some(env_list),
         exposed_ports: Some(vec![key]),
         host_config: Some(HostConfig {
             port_bindings: Some(port_bindings),
@@ -529,17 +540,29 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_inputs_fail_before_connecting() {
-        let error = run_image("tcp://127.0.0.1:1", "bad image", "web", 80)
-            .await
-            .expect_err("invalid image");
+        let error = run_image(
+            "tcp://127.0.0.1:1",
+            "bad image",
+            "web",
+            80,
+            &Default::default(),
+        )
+        .await
+        .expect_err("invalid image");
         assert!(error.to_string().contains("image reference"), "{error}");
 
-        let error = run_image("tcp://127.0.0.1:1", "nginx", "bad name", 80)
-            .await
-            .expect_err("invalid name");
+        let error = run_image(
+            "tcp://127.0.0.1:1",
+            "nginx",
+            "bad name",
+            80,
+            &Default::default(),
+        )
+        .await
+        .expect_err("invalid name");
         assert!(error.to_string().contains("container name"), "{error}");
 
-        let error = run_image("tcp://127.0.0.1:1", "nginx", "web", 0)
+        let error = run_image("tcp://127.0.0.1:1", "nginx", "web", 0, &Default::default())
             .await
             .expect_err("invalid port");
         assert!(error.to_string().contains("container port"), "{error}");
@@ -560,7 +583,7 @@ mod tests {
 
     #[test]
     fn container_config_binds_exposed_port() {
-        let config = container_config("nginx", 80, 18000);
+        let config = container_config("nginx", 80, 18000, &Default::default());
         assert_eq!(config.image.as_deref(), Some("nginx"));
         assert_eq!(
             config.exposed_ports.as_deref(),

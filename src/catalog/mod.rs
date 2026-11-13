@@ -37,7 +37,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use uuid::Uuid;
 
 /// Schema version written to `PRAGMA user_version`.
-const SCHEMA_VERSION: i64 = 11;
+const SCHEMA_VERSION: i64 = 12;
 
 /// Capabilities a provider connection may be granted.
 const CAPABILITIES: [&str; 3] = ["read", "operate", "admin"];
@@ -118,6 +118,7 @@ CREATE TABLE IF NOT EXISTS apps (
     -- runtime
     container_port     INTEGER,
     host_port          INTEGER,
+    env_json           TEXT NOT NULL DEFAULT '{}',
     webhook_secret     TEXT,
     webhook_enabled    INTEGER NOT NULL DEFAULT 0,
     status             TEXT NOT NULL DEFAULT 'idle'
@@ -235,6 +236,14 @@ impl Catalog {
         }
         // settings_kv arrived with v6 on some databases; guarantee it exists
         // for every database crossing the v10 boundary.
+        if (1..12).contains(&current) {
+            transaction
+                .execute(
+                    "ALTER TABLE apps ADD COLUMN env_json TEXT NOT NULL DEFAULT '{}'",
+                    [],
+                )
+                .context("add apps.env_json")?;
+        }
         if (1..11).contains(&current) {
             transaction
                 .execute(
