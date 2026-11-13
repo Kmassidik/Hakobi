@@ -15,13 +15,19 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
-use hyper_util::rt::TokioIo;
+use hyper::body::Incoming;
+use hyper_util::client::legacy::{connect::HttpConnector, Client};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 
 const DEFAULT_ADDR: &str = "127.0.0.1:9000";
 const CATALOG_MTIME_POLL: Duration = Duration::from_secs(5);
 const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const UPSTREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+const MAX_IDLE_UPSTREAMS_PER_HOST: usize = 32;
+
+type UpstreamClient = Client<HttpConnector, Incoming>;
 
 /// One routing entry: hostname → loopback backend port.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,10 +80,26 @@ fn main() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(addr, catalog_path))
+    runtime.block_on(async_main(addr, catalog_path, build_upstream_client()))
 }
 
-async fn async_main(addr: SocketAddr, catalog_path: std::path::PathBuf) -> Result<()> {
+fn build_upstream_client() -> UpstreamClient {
+    let mut connector = HttpConnector::new();
+    connector.set_connect_timeout(Some(UPSTREAM_CONNECT_TIMEOUT));
+    connector.set_nodelay(true);
+    Client::builder(TokioExecutor::new())
+        .pool_timer(TokioTimer::new())
+        .pool_idle_timeout(UPSTREAM_IDLE_TIMEOUT)
+        .pool_max_idle_per_host(MAX_IDLE_UPSTREAMS_PER_HOST)
+        .retry_canceled_requests(false)
+        .build(connector)
+}
+
+async fn async_main(
+    addr: SocketAddr,
+    catalog_path: std::path::PathBuf,
+    client: UpstreamClient,
+) -> Result<()> {
     let table: SharedTable = Arc::new(ArcSwap::from_pointee(load_table(&catalog_path)?));
     tracing::info!(
         "routing table loaded ({} routes)",
@@ -122,22 +144,27 @@ async fn async_main(addr: SocketAddr, catalog_path: std::path::PathBuf) -> Resul
     loop {
         let (stream, _peer) = listener.accept().await?;
         let table = Arc::clone(&table);
+        let client = client.clone();
         tokio::spawn(async move {
-            if let Err(error) = serve_connection(stream, table).await {
+            if let Err(error) = serve_connection(stream, table, client).await {
                 tracing::debug!(%error, "connection ended with error");
             }
         });
     }
 }
 
-async fn serve_connection(stream: TcpStream, table: SharedTable) -> Result<()> {
+async fn serve_connection(
+    stream: TcpStream,
+    table: SharedTable,
+    client: UpstreamClient,
+) -> Result<()> {
     stream.set_nodelay(true)?;
     let io = TokioIo::new(stream);
-    let hyper_service =
-        hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
-            let table = Arc::clone(&table);
-            async move { proxy_request(request, table).await }
-        });
+    let hyper_service = hyper::service::service_fn(move |request: hyper::Request<Incoming>| {
+        let table = Arc::clone(&table);
+        let client = client.clone();
+        async move { proxy_request(request, table, client).await }
+    });
     hyper::server::conn::http1::Builder::new()
         .keep_alive(true)
         .timer(hyper_util::rt::TokioTimer::new())
@@ -149,9 +176,10 @@ async fn serve_connection(stream: TcpStream, table: SharedTable) -> Result<()> {
 /// Resolves the Host header to an upstream and proxies the request,
 /// streaming the body in both directions without buffering.
 async fn proxy_request(
-    request: hyper::Request<hyper::body::Incoming>,
+    mut request: hyper::Request<Incoming>,
     table: SharedTable,
-) -> Result<hyper::Response<hyper::body::Incoming>, anyhow::Error> {
+    client: UpstreamClient,
+) -> Result<hyper::Response<Incoming>, anyhow::Error> {
     let host = request
         .headers()
         .get(hyper::header::HOST)
@@ -166,31 +194,19 @@ async fn proxy_request(
         .context(format!("no route for {host}"))?;
     drop(snapshot);
 
-    let upstream_addr: SocketAddr = ([127, 0, 0, 1], port).into();
-    let upstream =
-        tokio::time::timeout(UPSTREAM_CONNECT_TIMEOUT, TcpStream::connect(upstream_addr))
-            .await
-            .context("upstream connect timed out")?
-            .with_context(|| format!("upstream {host}:{port} unreachable"))?;
-    upstream.set_nodelay(true)?;
-    let io = TokioIo::new(upstream);
+    let mut uri = request.uri().clone().into_parts();
+    uri.scheme = Some(hyper::http::uri::Scheme::HTTP);
+    uri.authority = Some(
+        format!("127.0.0.1:{port}")
+            .parse()
+            .context("invalid upstream authority")?,
+    );
+    *request.uri_mut() = hyper::Uri::from_parts(uri).context("invalid upstream URI")?;
 
-    let (mut sender, connection) = hyper::client::conn::http1::handshake(io).await?;
-    // Drive the connection to completion in the background.
-    tokio::spawn(async move {
-        if let Err(error) = connection.await {
-            tracing::debug!(%error, "upstream connection ended");
-        }
-    });
-
-    let response = sender
-        .send_request(request.map(|body| {
-            // Preserve streaming semantics for the request body.
-            body
-        }))
+    client
+        .request(request)
         .await
-        .context("upstream request failed")?;
-    Ok(response)
+        .with_context(|| format!("upstream {host}:{port} request failed"))
 }
 
 /// Builds the routing table from the catalog: apps (by name → host_port)

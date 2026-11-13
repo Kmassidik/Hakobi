@@ -12,7 +12,7 @@ argon2 = "0.5"
 async-trait = "0.1"
 axum = "0.8"
 hyper = { version = "1", features = ["client", "http1", "server"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
 arc-swap = "1"
 base64 = "0.22"
 bollard = "0.21"

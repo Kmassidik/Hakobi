@@ -11,3 +11,4 @@ __pycache__/
 .DS_Store
 mockups/
 examples_gen.rs
+/docs/L7-PROXY-KNOWLEDGE.md
