@@ -62,28 +62,6 @@ impl RouteTable {
 
 type SharedTable = Arc<ArcSwap<RouteTable>>;
 
-/// Pool of idle upstream connections keyed by origin address.
-#[derive(Clone, Default)]
-pub struct UpstreamPool {
-    idle: Arc<std::sync::Mutex<HashMap<SocketAddr, Vec<TokioIo<TcpStream>>>>>,
-}
-
-impl UpstreamPool {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Takes an idle connection if the pool has one for this origin.
-    fn take(&self, addr: &SocketAddr) -> Option<TokioIo<TcpStream>> {
-        self.idle.lock().unwrap().get_mut(addr).and_then(Vec::pop)
-    }
-
-    /// Returns a healthy idle connection to the pool.
-    fn put(&self, addr: SocketAddr, io: TokioIo<TcpStream>) {
-        self.idle.lock().unwrap().entry(addr).or_default().push(io);
-    }
-}
-
 fn main() -> Result<()> {
     let addr: SocketAddr = std::env::var("HAKOBI_EDGE_ADDR")
         .unwrap_or_else(|_| DEFAULT_ADDR.to_owned())
@@ -93,18 +71,13 @@ fn main() -> Result<()> {
         .map(|dir| std::path::PathBuf::from(dir).join("catalog.sqlite3"))
         .unwrap_or_else(|_| std::path::PathBuf::from("catalog.sqlite3"));
 
-    let pool = UpstreamPool::new();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(async_main(addr, catalog_path, pool))
+    runtime.block_on(async_main(addr, catalog_path))
 }
 
-async fn async_main(
-    addr: SocketAddr,
-    catalog_path: std::path::PathBuf,
-    pool: UpstreamPool,
-) -> Result<()> {
+async fn async_main(addr: SocketAddr, catalog_path: std::path::PathBuf) -> Result<()> {
     let table: SharedTable = Arc::new(ArcSwap::from_pointee(load_table(&catalog_path)?));
     tracing::info!(
         "routing table loaded ({} routes)",
@@ -149,23 +122,21 @@ async fn async_main(
     loop {
         let (stream, _peer) = listener.accept().await?;
         let table = Arc::clone(&table);
-        let pool = pool.clone();
         tokio::spawn(async move {
-            if let Err(error) = serve_connection(stream, table, pool).await {
+            if let Err(error) = serve_connection(stream, table).await {
                 tracing::debug!(%error, "connection ended with error");
             }
         });
     }
 }
 
-async fn serve_connection(stream: TcpStream, table: SharedTable, pool: UpstreamPool) -> Result<()> {
+async fn serve_connection(stream: TcpStream, table: SharedTable) -> Result<()> {
     stream.set_nodelay(true)?;
     let io = TokioIo::new(stream);
     let hyper_service =
         hyper::service::service_fn(move |request: hyper::Request<hyper::body::Incoming>| {
             let table = Arc::clone(&table);
-            let pool = pool.clone();
-            async move { proxy_request(request, table, pool).await }
+            async move { proxy_request(request, table).await }
         });
     hyper::server::conn::http1::Builder::new()
         .keep_alive(true)
@@ -180,7 +151,6 @@ async fn serve_connection(stream: TcpStream, table: SharedTable, pool: UpstreamP
 async fn proxy_request(
     request: hyper::Request<hyper::body::Incoming>,
     table: SharedTable,
-    pool: UpstreamPool,
 ) -> Result<hyper::Response<hyper::body::Incoming>, anyhow::Error> {
     let host = request
         .headers()
@@ -203,16 +173,14 @@ async fn proxy_request(
             .context("upstream connect timed out")?
             .with_context(|| format!("upstream {host}:{port} unreachable"))?;
     upstream.set_nodelay(true)?;
-    let upstream_io = TokioIo::new(upstream);
+    let io = TokioIo::new(upstream);
 
-    // Hand the parsed request to hyper as a client, streaming the body.
-    let (mut sender, connection) = hyper::client::conn::http1::handshake(upstream_io).await?;
-    let pool_for_conn = pool.clone();
+    let (mut sender, connection) = hyper::client::conn::http1::handshake(io).await?;
+    // Drive the connection to completion in the background.
     tokio::spawn(async move {
         if let Err(error) = connection.await {
             tracing::debug!(%error, "upstream connection ended");
         }
-        drop(pool_for_conn);
     });
 
     let response = sender
