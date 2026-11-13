@@ -83,6 +83,12 @@ struct TunnelResponse {
 pub struct DnsRecord {
     pub id: String,
     pub content: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub r#type: String,
+    #[serde(default)]
+    pub proxied: bool,
 }
 
 impl CloudflareClient {
@@ -187,6 +193,15 @@ impl CloudflareClient {
             self.request(Method::GET, &format!("/zones/{zone_id}/dns_records"))
                 .query(&[("name", hostname)]),
         )
+        .await
+    }
+
+    /// Lists every DNS record in the zone (first 200, enough for a dashboard).
+    pub async fn list_dns_records(&self, zone_id: &str) -> Result<Vec<DnsRecord>> {
+        self.send(self.request(
+            Method::GET,
+            &format!("/zones/{zone_id}/dns_records?per_page=200"),
+        ))
         .await
     }
 

@@ -52,6 +52,9 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         .map(|v| v == "1")
         .unwrap_or(true);
 
+    // List CF domains (records + ingress) when configured; failures degrade to
+    // an empty list so the page still renders.
+    let cf_domains = fetch_cf_domains(&state).await.unwrap_or_default();
     let page = SettingsPage {
         base_url: &state.config.base_url,
         username: &state.config.username,
@@ -62,6 +65,7 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         default_branch: &default_branch,
         auto_deploy,
         csrf_token: &csrf_token,
+        cf_domains,
     };
     let markup = settings_page_markup(&page, &readiness);
     html_response(StatusCode::OK, markup, cookies)
@@ -90,6 +94,15 @@ struct SettingsPage<'a> {
     default_branch: &'a str,
     auto_deploy: bool,
     csrf_token: &'a str,
+    cf_domains: Vec<CfDomainRow>,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct CfDomainRow {
+    pub name: String,
+    pub record_type: String,
+    pub proxied: bool,
+    pub service: Option<String>,
 }
 
 fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Markup {
@@ -187,6 +200,36 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                     p class="m-0 mt-1 text-sm text-muted" {
                         "Each deployed app gets a public subdomain on your domain through your Cloudflare Tunnel."
                     }
+                    @if !page.cf_domains.is_empty() {
+                        div class="mt-4 overflow-x-auto rounded-lg border border-line" {
+                            table class="m-0 w-full text-sm" {
+                                thead {
+                                    tr class="border-b border-line text-left text-[0.7rem] font-bold uppercase tracking-[0.08em] text-muted" {
+                                        th class="px-3 py-2" { "Hostname" }
+                                        th class="px-3 py-2" { "Type" }
+                                        th class="px-3 py-2" { "Proxied" }
+                                        th class="px-3 py-2" { "Routes to" }
+                                    }
+                                }
+                                tbody {
+                                    @for row in &page.cf_domains {
+                                        tr class="border-b border-line/60 last:border-b-0" {
+                                            td class="px-3 py-2 font-mono text-[0.8rem] font-semibold" { (row.name) }
+                                            td class="px-3 py-2 text-muted" { (row.record_type) }
+                                            td class="px-3 py-2" {
+                                                @if row.proxied {
+                                                    span class="rounded-full bg-orange-100 px-2 py-0.5 text-[0.65rem] font-bold text-orange-700" { "proxied" }
+                                                } @else {
+                                                    span class="text-muted" { "dns only" }
+                                                }
+                                            }
+                                            td class="px-3 py-2 font-mono text-[0.8rem] text-muted" { (row.service.as_deref().unwrap_or("-")) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     form method="post" action="/settings/cloudflare" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2" {
                         input type="hidden" name="csrf_token" value=(page.csrf_token);
                         label class="grid gap-1 text-sm" { "Account ID"
@@ -245,6 +288,50 @@ fn tool_tile(icon: &str, name: &str, status: &ToolStatus, description: &str) -> 
             p class="m-0 mt-0.5 text-xs leading-snug text-muted" { (description) }
         }
     }
+}
+
+/// Gathers the zone's CNAME/A records merged with tunnel ingress targets.
+async fn fetch_cf_domains(state: &AppState) -> anyhow::Result<Vec<CfDomainRow>> {
+    use crate::cloudflare::apps_route::load_settings;
+    use hakobi::catalog::Catalog;
+
+    let catalog = Catalog::open((*state.catalog_path).clone())?;
+    let settings = load_settings(&catalog)?;
+    let client = crate::cloudflare::CloudflareClient::new(settings.api_token.clone())?;
+    let tunnel_id = settings.tunnel_id.parse()?;
+
+    let mut rows: Vec<CfDomainRow> = client
+        .list_dns_records(&settings.zone_id)
+        .await?
+        .into_iter()
+        .filter(|record| record.r#type == "CNAME" || record.r#type == "A")
+        .map(|record| CfDomainRow {
+            name: record.name,
+            record_type: record.r#type,
+            proxied: record.proxied,
+            service: None,
+        })
+        .collect();
+
+    let ingress = client
+        .get_tunnel_ingress(&settings.account_id, tunnel_id)
+        .await?;
+    for rule in ingress {
+        let Some(hostname) = rule.hostname else {
+            continue;
+        };
+        if let Some(row) = rows.iter_mut().find(|row| row.name == hostname) {
+            row.service = Some(rule.service);
+        } else {
+            rows.push(CfDomainRow {
+                name: hostname,
+                record_type: "tunnel".to_owned(),
+                proxied: true,
+                service: Some(rule.service),
+            });
+        }
+    }
+    Ok(rows)
 }
 
 /// POST /settings/cloudflare — saves tunnel + DNS credentials.
