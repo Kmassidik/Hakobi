@@ -12,7 +12,9 @@ mod github;
 mod github_settings;
 mod partials;
 mod settings;
-pub(crate) use settings::{cloudflare_save, settings_page};
+pub(crate) use settings::{
+    cloudflare_save, domain_create, domain_delete, domain_update, settings_page,
+};
 
 pub(crate) use app_deploy::{app_deploy, app_rollback};
 pub(crate) use apps::{

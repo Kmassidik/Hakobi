@@ -6,6 +6,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
+    Json,
 };
 use maud::{html, Markup};
 
@@ -209,6 +210,7 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                                         th class="px-3 py-2" { "Type" }
                                         th class="px-3 py-2" { "Proxied" }
                                         th class="px-3 py-2" { "Routes to" }
+                                        th class="px-3 py-2 text-right" { "" }
                                     }
                                 }
                                 tbody {
@@ -224,6 +226,17 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                                                 }
                                             }
                                             td class="px-3 py-2 font-mono text-[0.8rem] text-muted" { (row.service.as_deref().unwrap_or("-")) }
+                                            td class="px-3 py-2 text-right" {
+                                                @if let Some(port) = row.service.as_deref().and_then(|service| service.rsplit(':').next()).and_then(|port| port.parse::<u16>().ok()) {
+                                                    form method="post" action="/settings/cloudflare/domains/delete" class="m-0 inline" {
+                                                        input type="hidden" name="csrf_token" value=(page.csrf_token);
+                                                        input type="hidden" name="hostname" value=(row.name);
+                                                        input type="hidden" name="record_id" value="";
+                                                        input type="hidden" name="port" value=(port);
+                                                        button class="rounded-md border border-danger/40 px-2 py-1 text-[0.7rem] font-bold text-danger transition hover:bg-danger/5" type="submit" { "Delete route" }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -245,6 +258,15 @@ fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Marku
                         div class="sm:col-span-2" {
                             button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Save Cloudflare settings" }
                         }
+                    }
+                    // -- Subdomain quick-create --
+                    form method="post" action="/settings/cloudflare/domains" class="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4" {
+                        input type="hidden" name="csrf_token" value=(page.csrf_token);
+                        label class="grid gap-1 text-sm" { "New subdomain"
+                            input name="hostname" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" placeholder="myapp" required; }
+                        label class="grid gap-1 text-sm" { "Port"
+                            input name="port" type="number" min="1" max="65535" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+                        button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Create subdomain" }
                     }
                 }
 
@@ -378,4 +400,196 @@ pub(crate) struct CloudflareForm {
     pub(crate) tunnel_id: String,
     pub(crate) domain: String,
     pub(crate) api_token: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DomainForm {
+    pub(crate) csrf_token: String,
+    pub(crate) hostname: String,
+    pub(crate) port: u16,
+    #[serde(default)]
+    pub(crate) record_id: String,
+}
+
+async fn cf_client_settings(
+    state: &AppState,
+) -> anyhow::Result<(crate::cloudflare::apps_route::CfSettings, Catalog)> {
+    let catalog = Catalog::open((*state.catalog_path).clone())?;
+    let settings = crate::cloudflare::apps_route::load_settings(&catalog)?;
+    Ok((settings, catalog))
+}
+
+fn validate_hostname(hostname: &str, domain: &str) -> Result<String, String> {
+    let name = hostname.trim().to_lowercase();
+    if name.is_empty() {
+        return Err("Hostname is required.".into());
+    }
+    let full = format!("{name}.{domain}");
+    if !full
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+    {
+        return Err("Hostname must be ASCII letters, digits, dots, or dashes.".into());
+    }
+    Ok(full)
+}
+
+/// POST /settings/cloudflare/domains — create a subdomain route.
+pub(crate) async fn domain_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<DomainForm>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let (settings, _catalog) = match cf_client_settings(&state).await {
+        Ok(pair) => pair,
+        Err(error) => return internal_error(error),
+    };
+    let Ok(full) = validate_hostname(&form.hostname, &settings.domain) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let client = match crate::cloudflare::CloudflareClient::new(settings.api_token.clone()) {
+        Ok(client) => client,
+        Err(error) => return internal_error(error),
+    };
+    let tunnel_id = match settings.tunnel_id.parse() {
+        Ok(id) => id,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    match client
+        .create_subdomain(&settings.zone_id, &full, tunnel_id, form.port)
+        .await
+    {
+        Ok(_) => client
+            .upsert_ingress_route(&settings.account_id, tunnel_id, &full, form.port)
+            .await
+            .map(|_| redirect_with_notice("/settings", &format!("Subdomain {full} created.")))
+            .unwrap_or_else(internal_error),
+        Err(error) => {
+            let status = if error.to_string().contains("81053")
+                || error.to_string().contains("already exists")
+            {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            (
+                status,
+                Json(serde_json::json!({ "error": error.to_string() })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// POST /settings/cloudflare/domains/update — repoint an existing record.
+pub(crate) async fn domain_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<DomainForm>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let (settings, _catalog) = match cf_client_settings(&state).await {
+        Ok(pair) => pair,
+        Err(error) => return internal_error(error),
+    };
+    let Ok(full) = validate_hostname(&form.hostname, &settings.domain) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let client = match crate::cloudflare::CloudflareClient::new(settings.api_token.clone()) {
+        Ok(client) => client,
+        Err(error) => return internal_error(error),
+    };
+    let tunnel_id = match settings.tunnel_id.parse() {
+        Ok(id) => id,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    match client
+        .update_subdomain(
+            &settings.zone_id,
+            &form.record_id,
+            &full,
+            tunnel_id,
+            form.port,
+        )
+        .await
+    {
+        Ok(()) => client
+            .upsert_ingress_route(&settings.account_id, tunnel_id, &full, form.port)
+            .await
+            .map(|_| redirect_with_notice("/settings", &format!("Subdomain {full} updated.")))
+            .unwrap_or_else(internal_error),
+        Err(error) => internal_error(error),
+    }
+}
+
+/// POST /settings/cloudflare/domains/delete — remove record + ingress rule.
+pub(crate) async fn domain_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<DomainForm>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let (settings, _catalog) = match cf_client_settings(&state).await {
+        Ok(pair) => pair,
+        Err(error) => return internal_error(error),
+    };
+    let client = match crate::cloudflare::CloudflareClient::new(settings.api_token.clone()) {
+        Ok(client) => client,
+        Err(error) => return internal_error(error),
+    };
+    let tunnel_id = match settings.tunnel_id.parse() {
+        Ok(id) => id,
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+    };
+    // find the record by hostname
+    let records = match client
+        .find_dns_records(&settings.zone_id, &form.hostname.trim().to_lowercase())
+        .await
+    {
+        Ok(records) => records,
+        Err(error) => return internal_error(error),
+    };
+    let mut notice = String::new();
+    for record in records {
+        match client
+            .delete_hakobi_record(&settings.zone_id, &record)
+            .await
+        {
+            Ok(true) => notice = format!("Subdomain {} deleted.", record.name),
+            Ok(false) => {
+                notice = format!(
+                    "{} is not managed by Hakobi — delete it from the Cloudflare dashboard.",
+                    record.name
+                );
+            }
+            Err(error) => return internal_error(error),
+        }
+    }
+    if let Err(error) = client
+        .remove_ingress_route(
+            &settings.account_id,
+            tunnel_id,
+            &form.hostname.trim().to_lowercase(),
+        )
+        .await
+    {
+        return internal_error(error);
+    }
+    redirect_with_notice("/settings", &notice)
 }

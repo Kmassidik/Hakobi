@@ -89,6 +89,8 @@ pub struct DnsRecord {
     pub r#type: String,
     #[serde(default)]
     pub proxied: bool,
+    #[serde(default)]
+    pub comment: Option<String>,
 }
 
 impl CloudflareClient {
@@ -203,6 +205,114 @@ impl CloudflareClient {
             &format!("/zones/{zone_id}/dns_records?per_page=200"),
         ))
         .await
+    }
+
+    /// Creates a proxied CNAME to the tunnel with a custom target port.
+    pub async fn create_subdomain(
+        &self,
+        zone_id: &str,
+        hostname: &str,
+        tunnel_id: Uuid,
+        port: u16,
+    ) -> Result<DnsRecord> {
+        self.create_dns_record_raw(
+            zone_id,
+            hostname,
+            &format!("{tunnel_id}.cfargotunnel.com"),
+            port,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn create_dns_record_raw(
+        &self,
+        zone_id: &str,
+        hostname: &str,
+        content: &str,
+        port: u16,
+    ) -> Result<DnsRecord> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "UPPERCASE")]
+        enum RecordType {
+            Cname,
+        }
+
+        #[derive(Serialize)]
+        struct CreateRecord<'a> {
+            r#type: RecordType,
+            name: &'a str,
+            content: &'a str,
+            proxied: bool,
+            comment: &'a str,
+        }
+
+        self.send(
+            self.request(Method::POST, &format!("/zones/{zone_id}/dns_records"))
+                .json(&CreateRecord {
+                    r#type: RecordType::Cname,
+                    name: hostname,
+                    content,
+                    proxied: true,
+                    comment: &format!("Managed by Hakobi (port {port})"),
+                }),
+        )
+        .await
+    }
+
+    /// Repoints an existing record's target port (updates the CNAME content).
+    pub async fn update_subdomain(
+        &self,
+        zone_id: &str,
+        record_id: &str,
+        hostname: &str,
+        tunnel_id: Uuid,
+        port: u16,
+    ) -> Result<()> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "UPPERCASE")]
+        enum RecordType {
+            Cname,
+        }
+
+        #[derive(Serialize)]
+        struct UpdateRecord {
+            r#type: RecordType,
+            name: String,
+            content: String,
+            proxied: bool,
+            comment: String,
+        }
+
+        self.send::<Value>(
+            self.request(
+                Method::PUT,
+                &format!("/zones/{zone_id}/dns_records/{record_id}"),
+            )
+            .json(&UpdateRecord {
+                r#type: RecordType::Cname,
+                name: hostname.to_owned(),
+                content: format!("{tunnel_id}.cfargotunnel.com"),
+                proxied: true,
+                comment: format!("Managed by Hakobi (port {port})"),
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Deletes only records Hakobi created (comment-tagged). Returns false
+    /// when the record is not Hakobi-managed.
+    pub async fn delete_hakobi_record(&self, zone_id: &str, record: &DnsRecord) -> Result<bool> {
+        let managed = record
+            .comment
+            .as_deref()
+            .is_some_and(|comment| comment.starts_with("Managed by Hakobi"));
+        if !managed {
+            return Ok(false);
+        }
+        self.delete_dns_record(zone_id, &record.id).await?;
+        Ok(true)
     }
 
     pub async fn delete_dns_record(&self, zone_id: &str, record_id: &str) -> Result<()> {

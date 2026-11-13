@@ -222,6 +222,9 @@ pub(crate) fn router_with_pipeline(
         .route("/settings/github/callback", get(handlers::github_connect_callback))
         .route("/settings/github/delete", post(handlers::github_disconnect))
         .route("/settings/cloudflare", post(handlers::cloudflare_save))
+        .route("/settings/cloudflare/domains", post(handlers::domain_create))
+        .route("/settings/cloudflare/domains/update", post(handlers::domain_update))
+        .route("/settings/cloudflare/domains/delete", post(handlers::domain_delete))
         .route("/login",
             get(handlers::login_page).post(handlers::login),
         )
