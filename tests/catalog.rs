@@ -8,7 +8,7 @@ fn catalog_persists_apps_across_reopen() {
     let app_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 11);
+        assert_eq!(catalog.schema_version().expect("schema version"), 12);
         let host_id = catalog
             .create_host_agent("apps-host", "https://apps.example.com", "tok_apps_0123456")
             .expect("create host");
@@ -40,7 +40,7 @@ fn catalog_persists_apps_across_reopen() {
     }
 
     let catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 11);
+    assert_eq!(catalog.schema_version().expect("schema version"), 12);
     assert_eq!(catalog.list_apps().expect("list apps").len(), 1);
 }
 
@@ -52,7 +52,7 @@ fn apps_crud_round_trip() {
     let app_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 11);
+        assert_eq!(catalog.schema_version().expect("schema version"), 12);
         let host_id = catalog
             .create_host_agent("crud-host", "https://crud.example.com", "tok_crud_01234567")
             .expect("create host");

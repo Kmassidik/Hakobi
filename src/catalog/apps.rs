@@ -267,6 +267,7 @@ impl Catalog {
                     .filter(|value| !value.is_empty()),
                 i64::from(github_auto_deploy),
                 container_port,
+                env_json,
             ],
         )?;
         if updated == 0 {
