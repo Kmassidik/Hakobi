@@ -367,6 +367,13 @@ class TokenHandlingTests(ExecutorTestCase):
         self.assertNotIn("a-token", cleaned)
         self.assertIn("[REDACTED]@example.com", cleaned)
 
+    def test_redact_removes_git_extra_header_credentials(self) -> None:
+        encoded = base64.b64encode(f"x-access-token:{TOKEN}".encode()).decode()
+        cleaned = redact(f"http.extraHeader={encoded}", [TOKEN])
+        self.assertNotIn(encoded, cleaned)
+        self.assertNotIn(TOKEN, cleaned)
+        self.assertIn("[REDACTED]", cleaned)
+
 
 class NixpacksTests(ExecutorTestCase):
     def test_nixpacks_argv_and_cleanup(self) -> None:

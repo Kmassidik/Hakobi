@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import io
+import os
 import signal
 import subprocess
+import tempfile
+import time
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from build_runner.executor import CommandResult, run_command
@@ -43,9 +47,11 @@ class FakeProcess:
         self.returncode = -15
 
     def kill(self):
+        if self.terminated:
+            return
         self.killed = True
-        self.terminated = True
         self.returncode = -9
+        self.terminated = True
 
 
 class RunCommandTests(unittest.TestCase):
@@ -126,6 +132,36 @@ class RunCommandTests(unittest.TestCase):
         self.assertIn(signal.SIGTERM, signals)
         self.assertIn(signal.SIGKILL, signals)
         self.assertEqual(Process.instances[0].kwargs["start_new_session"], True)
+
+    def test_timeout_kills_descendant_that_ignores_sigterm(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "child.pid"
+            script = (
+                "trap '' TERM; sleep 300 >/dev/null 2>&1 & "
+                f"echo $! > {pid_file}; trap - TERM; wait"
+            )
+            result = run_command(
+                ["sh", "-c", script], timeout=0.1, max_output_bytes=1024
+            )
+            pid = int(pid_file.read_text().strip())
+            self.addCleanup(self._kill_if_alive, pid)
+            self.assertTrue(result.timed_out)
+            self._assert_process_exited(pid)
+
+    def _kill_if_alive(self, pid: int) -> None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    def _assert_process_exited(self, pid: int) -> None:
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.02)
+        self.fail(f"descendant {pid} survived process-group cleanup")
 
     def test_missing_binary_raises_oserror(self) -> None:
         with mock.patch(

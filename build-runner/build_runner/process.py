@@ -92,18 +92,17 @@ def _finish_reader(
     lock: threading.Lock,
 ) -> None:
     reader.join(timeout=15)
-    if not reader.is_alive():
-        return
-    # A descendant still owns the pipe.  Stop waiting; the process group
-    # was already signalled, so this is best-effort.
-    try:
-        if stream is not None:
+    if reader.is_alive():
+        # A descendant still owns the pipe. Stop waiting; the process group
+        # was already signalled, so this is best-effort.
+        reader.join(timeout=2)
+        with lock:
+            state["truncated"] = True
+    if stream is not None:
+        try:
             stream.close()
-    except OSError:
-        pass
-    reader.join(timeout=2)
-    with lock:
-        state["truncated"] = True
+        except OSError:
+            pass
 
 
 def run_command(
@@ -149,26 +148,39 @@ def run_command(
 
 
 def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
-    """SIGTERM the process group, escalating to SIGKILL after a grace period."""
+    """Terminate the leader, then kill any remaining process-group members."""
 
-    _signal(process, signal.SIGTERM)
+    pgid = _process_group(process)
+    _signal(process, signal.SIGTERM, pgid)
     try:
         process.wait(timeout=5)
-        return
     except subprocess.TimeoutExpired:
         pass
-    _signal(process, signal.SIGKILL)
+    # The leader may exit while a descendant ignores SIGTERM. Always SIGKILL
+    # the original group after the grace period; an empty group is harmless.
+    _signal(process, signal.SIGKILL, pgid)
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         logger.error("build process %s did not exit after SIGKILL", getattr(process, "pid", "?"))
 
 
-def _signal(process: subprocess.Popen[bytes], sig: signal.Signals) -> None:
+def _process_group(process: subprocess.Popen[bytes]) -> int | None:
     pid = getattr(process, "pid", None)
-    if pid:
+    if not pid:
+        return None
+    try:
+        return os.getpgid(pid)
+    except (ProcessLookupError, PermissionError):
+        return None
+
+
+def _signal(
+    process: subprocess.Popen[bytes], sig: signal.Signals, pgid: int | None = None
+) -> None:
+    if pgid is not None:
         try:
-            os.killpg(os.getpgid(pid), sig)
+            os.killpg(pgid, sig)
             return
         except (ProcessLookupError, PermissionError):
             pass
