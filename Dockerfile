@@ -1,5 +1,8 @@
 FROM rust:1-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS chef
-RUN cargo install cargo-chef --locked
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends cmake \
+    && rm -rf /var/lib/apt/lists/* \
+    && cargo install cargo-chef --locked
 WORKDIR /build
 
 FROM chef AS planner

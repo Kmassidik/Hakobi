@@ -1,12 +1,9 @@
 //! Hakobi Edge: L7 reverse proxy routing `*.glicc.id` hostnames to local
 //! backends based on the control plane's routing table.
 //!
-//! Traffic path: Cloudflare edge → cloudflared (TLS) → 127.0.0.1:9000 (this
-//! proxy, plain HTTP on loopback) → upstream per Host header.
-//!
-//! Routing table: rebuilt from the catalog (`apps.host_port` + CF zone
-//! records) on every SIGHUP or when the catalog mtime changes. The active
-//! table is an `ArcSwap<RouteTable>` — readers lock-free, reloads atomic.
+//! Built on Cloudflare Pingora 0.9 (Apache-2.0). The request lifecycle is
+//! adapted from Pingora's documented `ProxyHttp` quick start and modified
+//! for Hakobi's catalog-driven Host routing and atomic reloads.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -15,19 +12,17 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
-use hyper::body::Incoming;
-use hyper_util::client::legacy::{connect::HttpConnector, Client};
-use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
-use tokio::net::TcpListener;
-use tokio::net::TcpStream;
+use async_trait::async_trait;
+use pingora::prelude::*;
+use pingora::server::configuration::ServerConf;
+use pingora::server::ShutdownWatch;
+use pingora::services::background::BackgroundService;
 
 const DEFAULT_ADDR: &str = "127.0.0.1:9000";
 const CATALOG_MTIME_POLL: Duration = Duration::from_secs(5);
 const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPSTREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
-const MAX_IDLE_UPSTREAMS_PER_HOST: usize = 32;
-
-type UpstreamClient = Client<HttpConnector, Incoming>;
+const UPSTREAM_POOL_SIZE_PER_THREAD: usize = 128;
 
 /// One routing entry: hostname → loopback backend port.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,22 +31,20 @@ pub struct Route {
     pub port: u16,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct Upstream {
-    port: u16,
-    authority: hyper::http::uri::Authority,
+    addr: SocketAddr,
 }
 
 impl Upstream {
     fn new(port: u16) -> Self {
-        let authority = format!("127.0.0.1:{port}")
-            .parse()
-            .expect("a loopback socket authority is valid");
-        Self { port, authority }
+        Self {
+            addr: ([127, 0, 0, 1], port).into(),
+        }
     }
 }
 
-/// Immutable routing snapshot. Readers clone the Arc; reloads swap it.
+/// Immutable routing snapshot. Readers are lock-free; reloads are atomic.
 pub struct RouteTable {
     routes: HashMap<String, Upstream>,
     fallback: Option<Upstream>,
@@ -89,7 +82,112 @@ impl RouteTable {
 
 type SharedTable = Arc<ArcSwap<RouteTable>>;
 
+struct HakobiProxy {
+    table: SharedTable,
+}
+
+impl HakobiProxy {
+    fn upstream_addr(&self, session: &Session) -> Result<SocketAddr, Box<pingora::Error>> {
+        let request = session.req_header();
+        let host = request
+            .uri
+            .authority()
+            .map(|authority| authority.host())
+            .or_else(|| {
+                request
+                    .headers
+                    .get(http::header::HOST)
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| value.split(':').next().unwrap_or(value))
+            })
+            .ok_or_else(|| Error::explain(HTTPStatus(400), "missing Host header"))?;
+        self.table
+            .load()
+            .upstream_for(host)
+            .map(|upstream| upstream.addr)
+            .ok_or_else(|| Error::explain(HTTPStatus(404), "no route for Host"))
+    }
+}
+
+#[async_trait]
+impl ProxyHttp for HakobiProxy {
+    type CTX = ();
+
+    fn new_ctx(&self) -> Self::CTX {}
+
+    async fn upstream_peer(
+        &self,
+        session: &mut Session,
+        _ctx: &mut Self::CTX,
+    ) -> Result<Box<HttpPeer>, Box<pingora::Error>> {
+        let addr = self.upstream_addr(session)?;
+        let mut peer = Box::new(HttpPeer::new(addr, false, String::new())?);
+        peer.options.connection_timeout = Some(UPSTREAM_CONNECT_TIMEOUT);
+        peer.options.total_connection_timeout = Some(UPSTREAM_CONNECT_TIMEOUT);
+        peer.options.idle_timeout = Some(UPSTREAM_IDLE_TIMEOUT);
+        Ok(peer)
+    }
+}
+
+struct CatalogReload {
+    table: SharedTable,
+    catalog_path: std::path::PathBuf,
+}
+
+impl CatalogReload {
+    fn reload_if_changed(&self, last_build: &mut std::time::SystemTime) {
+        let mtime = std::fs::metadata(&self.catalog_path)
+            .and_then(|meta| meta.modified())
+            .unwrap_or(*last_build);
+        if mtime <= *last_build {
+            return;
+        }
+        *last_build = mtime;
+        match load_table(&self.catalog_path) {
+            Ok(new_table) => {
+                let count = new_table.routes_len();
+                self.table.store(Arc::new(new_table));
+                log::info!("routing table reloaded ({count} routes)");
+            }
+            Err(error) => {
+                log::warn!("routing table reload failed; keeping old table: {error:#}");
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl BackgroundService for CatalogReload {
+    async fn start(&self, mut shutdown: ShutdownWatch) {
+        let mut last_build = std::fs::metadata(&self.catalog_path)
+            .and_then(|meta| meta.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        loop {
+            tokio::select! {
+                _ = shutdown.changed() => break,
+                _ = tokio::time::sleep(CATALOG_MTIME_POLL) => {
+                    self.reload_if_changed(&mut last_build);
+                }
+            }
+        }
+    }
+}
+
+fn worker_threads() -> usize {
+    std::env::var("HAKOBI_EDGE_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|threads| *threads > 0)
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(usize::from)
+                .unwrap_or(1)
+                .min(14)
+        })
+}
+
 fn main() -> Result<()> {
+    env_logger::init();
     let addr: SocketAddr = std::env::var("HAKOBI_EDGE_ADDR")
         .unwrap_or_else(|_| DEFAULT_ADDR.to_owned())
         .parse()
@@ -97,138 +195,39 @@ fn main() -> Result<()> {
     let catalog_path = std::env::var("HAKOBI_DATA_DIR")
         .map(|dir| std::path::PathBuf::from(dir).join("catalog.sqlite3"))
         .unwrap_or_else(|_| std::path::PathBuf::from("catalog.sqlite3"));
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(async_main(addr, catalog_path, build_upstream_client()))
-}
-
-fn build_upstream_client() -> UpstreamClient {
-    let mut connector = HttpConnector::new();
-    connector.set_connect_timeout(Some(UPSTREAM_CONNECT_TIMEOUT));
-    connector.set_nodelay(true);
-    Client::builder(TokioExecutor::new())
-        .pool_timer(TokioTimer::new())
-        .pool_idle_timeout(UPSTREAM_IDLE_TIMEOUT)
-        .pool_max_idle_per_host(MAX_IDLE_UPSTREAMS_PER_HOST)
-        .retry_canceled_requests(false)
-        .build(connector)
-}
-
-async fn async_main(
-    addr: SocketAddr,
-    catalog_path: std::path::PathBuf,
-    client: UpstreamClient,
-) -> Result<()> {
     let table: SharedTable = Arc::new(ArcSwap::from_pointee(load_table(&catalog_path)?));
-    tracing::info!(
-        "routing table loaded ({} routes)",
-        table.load().routes_len()
+
+    let configuration = ServerConf {
+        threads: worker_threads(),
+        upstream_keepalive_pool_size: UPSTREAM_POOL_SIZE_PER_THREAD,
+        work_stealing: false,
+        max_retries: 1,
+        ..ServerConf::default()
+    };
+
+    let mut server = Server::new_with_opt_and_conf(None, configuration);
+    server.bootstrap();
+    let mut proxy = http_proxy_service(
+        &server.configuration,
+        HakobiProxy {
+            table: Arc::clone(&table),
+        },
     );
-
-    // Reload loop: poll catalog mtime; swap only when the file changed AND
-    // the new table parses. Bad config keeps the old table (validation by
-    // construction — we only swap after a successful build).
-    {
-        let table = Arc::clone(&table);
-        let mut last_build = std::time::SystemTime::UNIX_EPOCH;
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(CATALOG_MTIME_POLL).await;
-                let mtime = std::fs::metadata(&catalog_path)
-                    .and_then(|meta| meta.modified())
-                    .unwrap_or(last_build);
-                if mtime <= last_build {
-                    continue;
-                }
-                last_build = mtime;
-                match load_table(&catalog_path) {
-                    Ok(new_table) => {
-                        let count = new_table.routes_len();
-                        table.store(Arc::new(new_table));
-                        tracing::info!("routing table reloaded ({count} routes)");
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "routing table reload failed; keeping old table");
-                    }
-                }
-            }
-        });
-    }
-
-    let listener = TcpListener::bind(addr)
-        .await
-        .with_context(|| format!("binding hakobi-edge on {addr}"))?;
-    tracing::info!("hakobi-edge listening on {addr}");
-
-    loop {
-        let (stream, _peer) = listener.accept().await?;
-        let table = Arc::clone(&table);
-        let client = client.clone();
-        tokio::spawn(async move {
-            if let Err(error) = serve_connection(stream, table, client).await {
-                tracing::debug!(%error, "connection ended with error");
-            }
-        });
-    }
-}
-
-async fn serve_connection(
-    stream: TcpStream,
-    table: SharedTable,
-    client: UpstreamClient,
-) -> Result<()> {
-    stream.set_nodelay(true)?;
-    let io = TokioIo::new(stream);
-    let hyper_service = hyper::service::service_fn(move |request: hyper::Request<Incoming>| {
-        let table = Arc::clone(&table);
-        let client = client.clone();
-        async move { proxy_request(request, table, client).await }
-    });
-    hyper::server::conn::http1::Builder::new()
-        .keep_alive(true)
-        .timer(TokioTimer::new())
-        .serve_connection(io, hyper_service)
-        .await
-        .context("connection error")
-}
-
-/// Resolves the Host header to an upstream and proxies the request,
-/// streaming the body in both directions without buffering.
-async fn proxy_request(
-    mut request: hyper::Request<Incoming>,
-    table: SharedTable,
-    client: UpstreamClient,
-) -> Result<hyper::Response<Incoming>, anyhow::Error> {
-    let host = request
-        .headers()
-        .get(hyper::header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .map(|value| value.split(':').next().unwrap_or(value))
-        .context("missing Host header")?;
-
-    let snapshot = table.load();
-    let upstream = snapshot
-        .upstream_for(host)
-        .with_context(|| format!("no route for {host}"))?;
-    let port = upstream.port;
-    let authority = upstream.authority.clone();
-    drop(snapshot);
-
-    let mut uri = request.uri().clone().into_parts();
-    uri.scheme = Some(hyper::http::uri::Scheme::HTTP);
-    uri.authority = Some(authority);
-    *request.uri_mut() = hyper::Uri::from_parts(uri).context("invalid upstream URI")?;
-
-    client
-        .request(request)
-        .await
-        .with_context(|| format!("upstream port {port} request failed"))
+    proxy.add_tcp(&addr.to_string());
+    server.add_service(proxy);
+    server.add_service(background_service(
+        "catalog reload",
+        CatalogReload {
+            table,
+            catalog_path,
+        },
+    ));
+    log::info!("hakobi-edge listening on {addr}");
+    server.run_forever()
 }
 
 /// Builds the routing table from the catalog: apps (by name → host_port)
-/// plus well-known statics (console → 3000).
+/// plus the control-plane console.
 fn load_table(catalog_path: &std::path::Path) -> Result<RouteTable> {
     let catalog = hakobi::catalog::Catalog::open(catalog_path)?;
     let apps = catalog.list_apps()?;
@@ -242,7 +241,6 @@ fn load_table(catalog_path: &std::path::Path) -> Result<RouteTable> {
             })
         })
         .collect();
-    // Console (the control plane itself) is always reachable.
     let mut table = RouteTable::from_routes(routes, None);
     table
         .routes
