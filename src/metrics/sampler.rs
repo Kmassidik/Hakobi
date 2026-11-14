@@ -252,6 +252,24 @@ async fn sampling_tick(catalog_path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+fn resolve_host_token(
+    catalog: &crate::catalog::Catalog,
+    host: &crate::catalog::HostAgent,
+    environment: Option<&crate::host_agent::AgentEndpoint>,
+) -> Result<String> {
+    match catalog.host_agent_token(&host.id) {
+        Ok(token) => Ok(token),
+        Err(error) => {
+            if let Some(endpoint) = environment
+                .filter(|endpoint| host.agent_url.trim_end_matches('/') == endpoint.url())
+            {
+                return Ok(endpoint.token().to_owned());
+            }
+            Err(error)
+        }
+    }
+}
+
 /// Enabled host agents from the catalog as `(id, url, token)` triples.
 ///
 /// The app's own host agent (configured via `HAKOBI_AGENT_URL` /
@@ -264,13 +282,16 @@ pub(super) async fn list_enabled_hosts(
     tokio::task::spawn_blocking(move || {
         let catalog = crate::catalog::Catalog::open(&path)?;
         let hosts = catalog.list_host_agents()?;
+        let environment = crate::host_agent::AgentEndpoint::from_env();
         let mut resolved = Vec::new();
         for host in hosts.into_iter().filter(|host| host.enabled) {
-            let token = catalog.host_agent_token(&host.id)?;
+            let token = resolve_host_token(&catalog, &host, environment.as_ref())?;
             resolved.push((host.id, host.agent_url, token));
         }
-        if let Some(endpoint) = crate::host_agent::AgentEndpoint::from_env() {
-            let already = resolved.iter().any(|(_, url, _)| url == endpoint.url());
+        if let Some(endpoint) = environment {
+            let already = resolved
+                .iter()
+                .any(|(_, url, _)| url.trim_end_matches('/') == endpoint.url());
             if !already {
                 resolved.push((
                     "local".to_owned(),

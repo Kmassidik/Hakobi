@@ -3,6 +3,9 @@
 
 use anyhow::Result;
 
+static ENV_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 use crate::metrics::{
     combine_1m, combine_5m, metrics_database_path, now_ms, rollup_from_live, LiveSample, MetricsDb,
     Rollup1m, Rollup5m, ROLLUP_5M_EVERY,
@@ -287,6 +290,7 @@ async fn spawn_retention_job_is_created_and_cancelled_cleanly() {
 }
 #[tokio::test]
 async fn local_agent_is_included_in_sampling_targets() {
+    let _guard = ENV_LOCK.lock().await;
     // The app's own agent (env-configured) is sampled as host `local` even
     // with no registered agents, so the machine Hakobi runs on reports
     // dashboard metrics.
@@ -301,6 +305,35 @@ async fn local_agent_is_included_in_sampling_targets() {
     assert_eq!(targets[0].0, "local");
     std::env::remove_var("HAKOBI_AGENT_URL");
     std::env::remove_var("HAKOBI_AGENT_TOKEN");
+}
+
+#[tokio::test]
+async fn local_agent_environment_supplies_missing_catalog_token() {
+    let _guard = ENV_LOCK.lock().await;
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("catalog.sqlite3");
+    let mut catalog = crate::catalog::Catalog::open(&path).unwrap();
+    let id = catalog
+        .create_host_agent("local", "http://127.0.0.1:8787", "temporary")
+        .unwrap();
+    drop(catalog);
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE host_agents SET encrypted_token = NULL WHERE id = ?1",
+            rusqlite::params![id],
+        )
+        .unwrap();
+    std::env::set_var("HAKOBI_AGENT_URL", "http://127.0.0.1:8787");
+    std::env::set_var("HAKOBI_AGENT_TOKEN", "0123456789abcdef0123456789abcdef");
+    let targets = crate::metrics::sampler::list_enabled_hosts(&path)
+        .await
+        .unwrap();
+    std::env::remove_var("HAKOBI_AGENT_URL");
+    std::env::remove_var("HAKOBI_AGENT_TOKEN");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].0, id);
+    assert_eq!(targets[0].2, "0123456789abcdef0123456789abcdef");
 }
 
 #[test]
