@@ -78,8 +78,7 @@ def _require(data: dict[str, Any], key: str, expected: type) -> Any:
     return value
 
 
-def load_task(path: str | Path) -> TaskSpec:
-    task_file = Path(path).resolve()
+def _read_task(task_file: Path) -> dict[str, Any]:
     try:
         data = json.loads(task_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -88,18 +87,19 @@ def load_task(path: str | Path) -> TaskSpec:
         raise TaskError("task must be a JSON object")
     if data.get("version") != 1:
         raise TaskError("unsupported task version")
+    return data
 
-    task_dir = task_file.parent
+
+def _read_prompt(task_dir: Path, data: dict[str, Any]) -> tuple[Path, str]:
     prompt_file = (task_dir / _require(data, "prompt", str)).resolve()
     try:
         prompt = prompt_file.read_text(encoding="utf-8")
     except OSError as error:
         raise TaskError(f"cannot read prompt {prompt_file}: {error}") from error
+    return prompt_file, prompt
 
-    repo = (task_dir / _require(data, "repo", str)).resolve()
-    if not repo.is_dir():
-        raise TaskError(f"task repository does not exist: {repo}")
 
+def _parse_allowed_commands(data: dict[str, Any]) -> tuple[tuple[str, ...], ...]:
     raw_commands = data.get("allowed_commands", [])
     if not isinstance(raw_commands, list) or not raw_commands:
         raise TaskError("allowed_commands must be a non-empty list")
@@ -108,76 +108,111 @@ def load_task(path: str | Path) -> TaskSpec:
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             raise TaskError("each allowed command must be a non-empty string list")
         allowed_commands.append(tuple(command))
+    return tuple(allowed_commands)
 
+
+def _parse_check(raw: Any, data: dict[str, Any]) -> CheckSpec:
+    if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
+        raise TaskError("each check needs an id")
+    kind = raw.get("type")
+    if kind == "command":
+        argv = raw.get("argv")
+        if not isinstance(argv, list) or not argv or not all(isinstance(item, str) for item in argv):
+            raise TaskError(f"check {raw['id']} needs a command argv")
+        baseline = raw.get("baseline", "pass")
+        if baseline not in {"pass", "fail"}:
+            raise TaskError(f"check {raw['id']} baseline must be pass or fail")
+        expect_output = raw.get("expect_output")
+        if expect_output is not None and not isinstance(expect_output, str):
+            raise TaskError(f"check {raw['id']} expect_output must be a string")
+        return CheckSpec(
+            kind="command",
+            id=raw["id"],
+            argv=tuple(argv),
+            baseline=baseline,
+            timeout=int(raw.get("timeout", 60)),
+            expect_output=raw.get("expect_output"),
+        )
+    if kind == "diff_scope":
+        allowed = raw.get("allowed", data.get("allowed_files", []))
+        if not isinstance(allowed, list) or not allowed:
+            raise TaskError(f"check {raw['id']} needs allowed files")
+        return CheckSpec(kind="diff_scope", id=raw["id"], allowed=tuple(allowed))
+    if kind == "diff_check":
+        return CheckSpec(kind="diff_check", id=raw["id"])
+    raise TaskError(f"unknown check type {kind!r}")
+
+
+def _parse_checks(
+    data: dict[str, Any], allowed_commands: tuple[tuple[str, ...], ...]
+) -> tuple[CheckSpec, ...]:
     raw_checks = data.get("checks", [])
     if not isinstance(raw_checks, list) or not raw_checks:
         raise TaskError("checks must be a non-empty list")
-    checks: list[CheckSpec] = []
-    for raw in raw_checks:
-        if not isinstance(raw, dict) or not isinstance(raw.get("id"), str):
-            raise TaskError("each check needs an id")
-        kind = raw.get("type")
-        if kind == "command":
-            argv = raw.get("argv")
-            if not isinstance(argv, list) or not argv or not all(isinstance(item, str) for item in argv):
-                raise TaskError(f"check {raw['id']} needs a command argv")
-            baseline = raw.get("baseline", "pass")
-            if baseline not in {"pass", "fail"}:
-                raise TaskError(f"check {raw['id']} baseline must be pass or fail")
-            expect_output = raw.get("expect_output")
-            if expect_output is not None and not isinstance(expect_output, str):
-                raise TaskError(f"check {raw['id']} expect_output must be a string")
-            checks.append(
-                CheckSpec(
-                    kind="command",
-                    id=raw["id"],
-                    argv=tuple(argv),
-                    baseline=baseline,
-                    timeout=int(raw.get("timeout", 60)),
-                    expect_output=raw.get("expect_output"),
-                )
-            )
-        elif kind == "diff_scope":
-            allowed = raw.get("allowed", data.get("allowed_files", []))
-            if not isinstance(allowed, list) or not allowed:
-                raise TaskError(f"check {raw['id']} needs allowed files")
-            checks.append(CheckSpec(kind="diff_scope", id=raw["id"], allowed=tuple(allowed)))
-        elif kind == "diff_check":
-            checks.append(CheckSpec(kind="diff_check", id=raw["id"]))
-        else:
-            raise TaskError(f"unknown check type {kind!r}")
-
-    command_policy = CommandPolicy(tuple(allowed_commands))
+    checks = [_parse_check(raw, data) for raw in raw_checks]
+    command_policy = CommandPolicy(allowed_commands)
     for check in checks:
         if check.kind == "command":
             command_policy.validate(check.argv)
+    return tuple(checks)
 
+
+def _parse_allowed_files(data: dict[str, Any]) -> tuple[str, ...]:
     allowed_files = data.get("allowed_files", [])
     if not isinstance(allowed_files, list) or not allowed_files or not all(
         isinstance(item, str) for item in allowed_files
     ):
         raise TaskError("allowed_files must be a non-empty string list")
+    return tuple(allowed_files)
+
+
+def _parse_sensitive_patterns(data: dict[str, Any]) -> tuple[str, ...]:
     sensitive = data.get("sensitive_patterns", [])
     if not isinstance(sensitive, list) or not all(isinstance(item, str) for item in sensitive):
         raise TaskError("sensitive_patterns must be a string list")
+    return tuple(sensitive)
 
+
+def _parse_worker(data: dict[str, Any]) -> tuple[str, ...]:
     worker = data.get("worker", [])
     if not isinstance(worker, list) or not worker or not all(isinstance(item, str) for item in worker):
         raise TaskError("worker must be a non-empty string list")
+    return tuple(worker)
 
+
+def _parse_limits(data: dict[str, Any]) -> tuple[int, int, int]:
     max_attempts = int(data.get("max_attempts", 3))
     token_budget = int(data.get("token_budget", 20000))
     worker_timeout = int(data.get("worker_timeout", 180))
     if max_attempts < 1 or token_budget < 1 or worker_timeout < 1:
         raise TaskError("max_attempts, token_budget, and worker_timeout must be positive")
+    return max_attempts, token_budget, worker_timeout
 
+
+def _parse_workspace_mode(data: dict[str, Any]) -> str:
     workspace_mode = data.get("workspace_mode", "auto")
     if workspace_mode not in {"auto", "snapshot", "worktree"}:
         raise TaskError("workspace_mode must be auto, snapshot, or worktree")
+    return workspace_mode
 
+
+def load_task(path: str | Path) -> TaskSpec:
+    task_file = Path(path).resolve()
+    data = _read_task(task_file)
+    task_dir = task_file.parent
+    prompt_file, prompt = _read_prompt(task_dir, data)
+    repo = (task_dir / _require(data, "repo", str)).resolve()
+    if not repo.is_dir():
+        raise TaskError(f"task repository does not exist: {repo}")
+    allowed_commands = _parse_allowed_commands(data)
+    checks = _parse_checks(data, allowed_commands)
+    allowed_files = _parse_allowed_files(data)
+    sensitive = _parse_sensitive_patterns(data)
+    worker = _parse_worker(data)
+    max_attempts, token_budget, worker_timeout = _parse_limits(data)
+    workspace_mode = _parse_workspace_mode(data)
     if not any(check.kind == "command" and check.baseline == "fail" for check in checks):
         raise TaskError("at least one command check must fail before the fix")
-
     return TaskSpec(
         id=_require(data, "id", str),
         title=_require(data, "title", str),
@@ -186,11 +221,11 @@ def load_task(path: str | Path) -> TaskSpec:
         repo=repo,
         prompt_file=prompt_file,
         prompt=prompt,
-        worker=tuple(worker),
-        allowed_commands=tuple(allowed_commands),
-        allowed_files=tuple(allowed_files),
-        sensitive_patterns=tuple(sensitive),
-        checks=tuple(checks),
+        worker=worker,
+        allowed_commands=allowed_commands,
+        allowed_files=allowed_files,
+        sensitive_patterns=sensitive,
+        checks=checks,
         max_attempts=max_attempts,
         token_budget=token_budget,
         worker_timeout=worker_timeout,

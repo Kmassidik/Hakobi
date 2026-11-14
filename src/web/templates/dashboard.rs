@@ -234,47 +234,59 @@ pub fn chart_section(points: &[hakobi::metrics::HistoryPoint]) -> Markup {
         .collect();
     html! {
         section id="dashboard-charts" data-live-charts="/partials/charts" {
-            (section_title("Compute", "ALL HOSTS · AGGREGATED"))
-            div class="grid grid-cols-1 gap-3.5 lg:grid-cols-2" {
-                div class="card rounded-xl p-4" {
-                    div class="mb-1 flex items-center justify-between" {
-                        div {
-                            p class="m-0 text-[13px] font-bold" { "CPU usage" }
-                            p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.1}%", series.last().copied().unwrap_or(0.0))) }
-                        }
+            (compute_charts(&series, &memory))
+            (storage_network_charts(&disk, &rx, &tx))
+        }
+    }
+}
+
+fn compute_charts(series: &[f64], memory: &[f64]) -> Markup {
+    html! {
+        (section_title("Compute", "ALL HOSTS · AGGREGATED"))
+        div class="grid grid-cols-1 gap-3.5 lg:grid-cols-2" {
+            div class="card rounded-xl p-4" {
+                div class="mb-1 flex items-center justify-between" {
+                    div {
+                        p class="m-0 text-[13px] font-bold" { "CPU usage" }
+                        p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.1}%", series.last().copied().unwrap_or(0.0))) }
                     }
-                    canvas class="block h-[150px] w-full" data-chart="percent" data-series=(json_series(&[("Total", &series)])) aria-label="CPU history chart" role="img" {}
                 }
-                div class="card rounded-xl p-4" {
-                    div class="mb-1 flex items-center justify-between" {
-                        div {
-                            p class="m-0 text-[13px] font-bold" { "Memory usage" }
-                            p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.1}%", memory.last().copied().unwrap_or(0.0))) }
-                        }
-                    }
-                    canvas class="block h-[150px] w-full" data-chart="percent" data-series=(json_series(&[("Used", &memory)])) aria-label="Memory history chart" role="img" {}
-                }
+                canvas class="block h-[150px] w-full" data-chart="percent" data-series=(json_series(&[("Total", series)])) aria-label="CPU history chart" role="img" {}
             }
-            (section_title("Storage & network", "TIME SERIES · AUTO SCALE"))
-            div class="grid grid-cols-1 gap-3.5 lg:grid-cols-2" {
-                div class="card rounded-xl p-4" {
-                    div class="mb-1 flex items-center justify-between" {
-                        div {
-                            p class="m-0 text-[13px] font-bold" { "Disk usage" }
-                            p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.2} GiB", disk.last().copied().unwrap_or(0.0))) }
-                        }
+            div class="card rounded-xl p-4" {
+                div class="mb-1 flex items-center justify-between" {
+                    div {
+                        p class="m-0 text-[13px] font-bold" { "Memory usage" }
+                        p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.1}%", memory.last().copied().unwrap_or(0.0))) }
                     }
-                    canvas class="block h-[150px] w-full" data-chart="auto" data-series=(json_series(&[("Used", &disk)])) aria-label="Disk history chart" role="img" {}
                 }
-                div class="card rounded-xl p-4" {
-                    div class="mb-1 flex items-center justify-between" {
-                        div {
-                            p class="m-0 text-[13px] font-bold" { "Network traffic" }
-                            p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.1} Mbps", rx.last().copied().unwrap_or(0.0) + tx.last().copied().unwrap_or(0.0))) }
-                        }
+                canvas class="block h-[150px] w-full" data-chart="percent" data-series=(json_series(&[("Used", memory)])) aria-label="Memory history chart" role="img" {}
+            }
+        }
+    }
+}
+
+fn storage_network_charts(disk: &[f64], rx: &[f64], tx: &[f64]) -> Markup {
+    html! {
+        (section_title("Storage & network", "TIME SERIES · AUTO SCALE"))
+        div class="grid grid-cols-1 gap-3.5 lg:grid-cols-2" {
+            div class="card rounded-xl p-4" {
+                div class="mb-1 flex items-center justify-between" {
+                    div {
+                        p class="m-0 text-[13px] font-bold" { "Disk usage" }
+                        p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.2} GiB", disk.last().copied().unwrap_or(0.0))) }
                     }
-                    canvas class="block h-[150px] w-full" data-chart="auto" data-series=(json_series(&[("Receive", &rx), ("Transmit", &tx)])) aria-label="Network history chart" role="img" {}
                 }
+                canvas class="block h-[150px] w-full" data-chart="auto" data-series=(json_series(&[("Used", disk)])) aria-label="Disk history chart" role="img" {}
+            }
+            div class="card rounded-xl p-4" {
+                div class="mb-1 flex items-center justify-between" {
+                    div {
+                        p class="m-0 text-[13px] font-bold" { "Network traffic" }
+                        p class="m-0 mt-0.5 font-mono text-[0.7rem] font-semibold text-[#3c3c43]" { (format!("{:.1} Mbps", rx.last().copied().unwrap_or(0.0) + tx.last().copied().unwrap_or(0.0))) }
+                    }
+                }
+                canvas class="block h-[150px] w-full" data-chart="auto" data-series=(json_series(&[("Receive", rx), ("Transmit", tx)])) aria-label="Network history chart" role="img" {}
             }
         }
     }

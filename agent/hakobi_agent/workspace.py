@@ -107,32 +107,23 @@ def _worktree_is_clean(path: Path) -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
-def prepare_workspace(
-    task: TaskSpec,
-    destination: Path,
-    branch: str,
-) -> Workspace:
-    if destination.exists():
-        shutil.rmtree(destination)
-    mode = task.workspace_mode
-    if mode == "auto":
-        mode = "worktree" if _is_git_repo(task.repo) and _worktree_is_clean(task.repo) else "snapshot"
+def _prepare_worktree(task: TaskSpec, destination: Path, branch: str) -> Workspace:
+    if not _is_git_repo(task.repo):
+        raise WorkspaceError("worktree mode requires a git repository")
+    if not _worktree_is_clean(task.repo):
+        raise WorkspaceError("worktree mode requires a clean source repository")
+    result = subprocess.run(
+        ["git", "-C", str(task.repo), "worktree", "add", "-b", branch, str(destination), "HEAD"],
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise WorkspaceError(result.stderr.strip() or result.stdout.strip())
+    baseline = _run_git(destination, "rev-parse", "HEAD").stdout.strip()
+    return Workspace(destination, baseline, branch, "worktree")
 
-    if mode == "worktree":
-        if not _is_git_repo(task.repo):
-            raise WorkspaceError("worktree mode requires a git repository")
-        if not _worktree_is_clean(task.repo):
-            raise WorkspaceError("worktree mode requires a clean source repository")
-        result = subprocess.run(
-            ["git", "-C", str(task.repo), "worktree", "add", "-b", branch, str(destination), "HEAD"],
-            text=True,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            raise WorkspaceError(result.stderr.strip() or result.stdout.strip())
-        baseline = _run_git(destination, "rev-parse", "HEAD").stdout.strip()
-        return Workspace(destination, baseline, branch, mode)
 
+def _prepare_snapshot(task: TaskSpec, destination: Path, branch: str) -> Workspace:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(
         task.repo,
@@ -166,4 +157,19 @@ def prepare_workspace(
     _run_git(destination, "add", "-A")
     _run_git(destination, "commit", "-q", "-m", "baseline: task workspace")
     baseline = _run_git(destination, "rev-parse", "HEAD").stdout.strip()
-    return Workspace(destination, baseline, branch, mode)
+    return Workspace(destination, baseline, branch, "snapshot")
+
+
+def prepare_workspace(
+    task: TaskSpec,
+    destination: Path,
+    branch: str,
+) -> Workspace:
+    if destination.exists():
+        shutil.rmtree(destination)
+    mode = task.workspace_mode
+    if mode == "auto":
+        mode = "worktree" if _is_git_repo(task.repo) and _worktree_is_clean(task.repo) else "snapshot"
+    if mode == "worktree":
+        return _prepare_worktree(task, destination, branch)
+    return _prepare_snapshot(task, destination, branch)

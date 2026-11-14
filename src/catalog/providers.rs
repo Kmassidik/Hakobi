@@ -21,6 +21,51 @@ pub struct ProviderConnection {
     pub created_at: String,
 }
 
+struct ProviderConnectionRow {
+    id: String,
+    name: String,
+    kind: String,
+    endpoint: String,
+    capabilities: String,
+    enabled: bool,
+    last_checked_at: Option<String>,
+    last_error: Option<String>,
+    created_at: String,
+}
+
+fn read_provider_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProviderConnectionRow> {
+    Ok(ProviderConnectionRow {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        kind: row.get(2)?,
+        endpoint: row.get(3)?,
+        capabilities: row.get(4)?,
+        enabled: row.get::<_, i64>(5)? != 0,
+        last_checked_at: row.get(6)?,
+        last_error: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
+impl TryFrom<ProviderConnectionRow> for ProviderConnection {
+    type Error = anyhow::Error;
+
+    fn try_from(row: ProviderConnectionRow) -> Result<Self> {
+        Ok(Self {
+            id: row.id,
+            name: row.name,
+            kind: row.kind,
+            endpoint: row.endpoint,
+            capabilities: serde_json::from_str(&row.capabilities)
+                .context("decode provider capabilities")?,
+            enabled: row.enabled,
+            last_checked_at: row.last_checked_at,
+            last_error: row.last_error,
+            created_at: row.created_at,
+        })
+    }
+}
+
 impl Catalog {
     /// Creates an enabled provider connection with an encrypted credential.
     pub fn create_provider_connection(
@@ -52,49 +97,9 @@ impl Catalog {
              FROM provider_connections ORDER BY created_at, rowid",
         )?;
         let rows = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)? != 0,
-                    row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, String>(8)?,
-                ))
-            })?
+            .query_map([], read_provider_row)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-
-        rows.into_iter()
-            .map(
-                |(
-                    id,
-                    name,
-                    kind,
-                    endpoint,
-                    capabilities,
-                    enabled,
-                    last_checked_at,
-                    last_error,
-                    created_at,
-                )| {
-                    Ok(ProviderConnection {
-                        id,
-                        name,
-                        kind,
-                        endpoint,
-                        capabilities: serde_json::from_str(&capabilities)
-                            .context("decode provider capabilities")?,
-                        enabled,
-                        last_checked_at,
-                        last_error,
-                        created_at,
-                    })
-                },
-            )
-            .collect()
+        rows.into_iter().map(ProviderConnection::try_from).collect()
     }
 
     /// Decrypts the stored credential for a provider connection.

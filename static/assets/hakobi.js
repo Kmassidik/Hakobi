@@ -1,5 +1,48 @@
-(() => {
-  "use strict";
+"use strict";
+{
+
+  const prepareInstallDialog = (dialog, button) => {
+    const title = dialog.querySelector("[data-install-title]");
+    const command = dialog.querySelector("[data-install-command]");
+    const copy = dialog.querySelector("[data-copy-command]");
+    const label = button.getAttribute("data-install-title") || "this tool";
+    const text = button.getAttribute("data-install-command") || "";
+    if (title) {
+      title.textContent = "Install " + label;
+    }
+    if (command) {
+      command.textContent = text;
+    }
+    if (copy) {
+      copy.textContent = "Copy command";
+      copy.removeAttribute("data-copied");
+    }
+  };
+
+  const prepareDeleteDialog = (dialog, button) => {
+    const form = dialog.querySelector("form");
+    const name = dialog.querySelector("[data-confirm-name]");
+    const input = dialog.querySelector("[data-confirm-input]");
+    const submit = dialog.querySelector("[data-confirm-submit]");
+    const expected = button.getAttribute("data-delete-name") || "";
+    if (form) {
+      form.setAttribute(
+        "action",
+        button.getAttribute("data-delete-action") || "",
+      );
+    }
+    if (name) {
+      name.textContent = expected;
+    }
+    if (input) {
+      input.value = "";
+      input.setAttribute("aria-invalid", "false");
+    }
+    if (submit) {
+      submit.disabled = true;
+    }
+    dialog.setAttribute("data-expected-name", expected);
+  };
 
   const openDialogs = (button) => {
     const id = button.getAttribute("data-dialog-open");
@@ -10,50 +53,12 @@
     if (!dialog) {
       return;
     }
-
     if (id === "install-tool") {
-      const title = dialog.querySelector("[data-install-title]");
-      const command = dialog.querySelector("[data-install-command]");
-      const copy = dialog.querySelector("[data-copy-command]");
-      const label = button.getAttribute("data-install-title") || "this tool";
-      const text = button.getAttribute("data-install-command") || "";
-      if (title) {
-        title.textContent = "Install " + label;
-      }
-      if (command) {
-        command.textContent = text;
-      }
-      if (copy) {
-        copy.textContent = "Copy command";
-        copy.removeAttribute("data-copied");
-      }
+      prepareInstallDialog(dialog, button);
     }
-
     if (id === "delete-stack" || id === "delete-container") {
-      const form = dialog.querySelector("form");
-      const name = dialog.querySelector("[data-confirm-name]");
-      const input = dialog.querySelector("[data-confirm-input]");
-      const submit = dialog.querySelector("[data-confirm-submit]");
-      const expected = button.getAttribute("data-delete-name") || "";
-      if (form) {
-        form.setAttribute(
-          "action",
-          button.getAttribute("data-delete-action") || "",
-        );
-      }
-      if (name) {
-        name.textContent = expected;
-      }
-      if (input) {
-        input.value = "";
-        input.setAttribute("aria-invalid", "false");
-      }
-      if (submit) {
-        submit.disabled = true;
-      }
-      dialog.setAttribute("data-expected-name", expected);
+      prepareDeleteDialog(dialog, button);
     }
-
     dialog.showModal();
   };
 
@@ -185,335 +190,4 @@
       }
     });
   }
-})();
-
-/* Dashboard time-series charts: draws canvas[data-chart] elements using the
-   series JSON in data-series. Percent charts are fixed 0-100; auto charts
-   scale to the data. */
-(function () {
-  "use strict";
-  var COLORS = ["#164f3b", "#d97706", "#3b82f6", "#8b5cf6", "#0891b2"];
-
-  function draw(canvas) {
-    var series;
-    try {
-      series = JSON.parse(canvas.dataset.series || "[]");
-    } catch (error) {
-      return;
-    }
-    if (!series.length) {
-      drawEmpty(canvas);
-      return;
-    }
-    var dpr = window.devicePixelRatio || 1;
-    var width = Math.max(250, canvas.clientWidth);
-    var height = canvas.clientHeight || 150;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    var ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
-    var pad = { left: 36, right: 10, top: 10, bottom: 20 };
-    var cw = width - pad.left - pad.right;
-    var ch = height - pad.top - pad.bottom;
-    var isPercent = canvas.dataset.chart === "percent";
-    var max = 100;
-    if (isPercent) {
-      var peak = 0;
-      series.forEach(function (s) {
-        s.values.forEach(function (v) {
-          if (v > peak) peak = v;
-        });
-      });
-      if (peak < 10) max = niceCeil(Math.max(peak * 1.3, 2));
-    } else {
-      max = 1;
-      series.forEach(function (s) {
-        s.values.forEach(function (v) {
-          if (v > max) max = v;
-        });
-      });
-      max = niceCeil(max * 1.15);
-    }
-    ctx.font = "10px ui-monospace, monospace";
-    ctx.fillStyle = "#a1a1a6";
-    ctx.strokeStyle = "#ececf0";
-    ctx.lineWidth = 1;
-    var i, y;
-    for (i = 0; i <= 4; i++) {
-      y = pad.top + (i * ch) / 4;
-      ctx.beginPath();
-      ctx.moveTo(pad.left, y);
-      ctx.lineTo(width - pad.right, y);
-      ctx.stroke();
-      ctx.fillText(formatAxis(max * (1 - i / 4), isPercent), 4, y + 3);
-    }
-    var count = series[0].values.length;
-    if (count >= 2) {
-      ["-60m", "-45m", "-30m", "-15m", "now"].forEach(function (label, idx) {
-        ctx.fillText(label, pad.left + (idx * cw) / 4 - 10, height - 5);
-      });
-    }
-    series.forEach(function (s, si) {
-      ctx.beginPath();
-      s.values.forEach(function (v, vi) {
-        var x = pad.left + (vi * cw) / Math.max(1, count - 1);
-        var yy = pad.top + ch * (1 - Math.max(0, Math.min(max, v)) / max);
-        if (vi) ctx.lineTo(x, yy);
-        else ctx.moveTo(x, yy);
-      });
-      ctx.strokeStyle = s.color || COLORS[si % COLORS.length];
-      ctx.lineWidth = 1.8;
-      ctx.lineJoin = "round";
-      ctx.stroke();
-    });
-  }
-
-  function drawEmpty(canvas) {
-    var ctx = canvas.getContext("2d");
-    var dpr = window.devicePixelRatio || 1;
-    var width = Math.max(250, canvas.clientWidth);
-    var height = canvas.clientHeight || 150;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
-    ctx.font = "12px -apple-system, sans-serif";
-    ctx.fillStyle = "#86868b";
-    ctx.textAlign = "center";
-    ctx.fillText("No data yet", width / 2, height / 2);
-    ctx.textAlign = "left";
-  }
-
-  function niceCeil(value) {
-    if (value <= 0) return 1;
-    var pow = Math.pow(10, Math.floor(Math.log10(value)));
-    var unit = value / pow;
-    var nice = unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10;
-    return nice * pow;
-  }
-
-  function formatAxis(value, isPercent) {
-    if (isPercent) return Math.round(value) + "%";
-    if (value >= 1024) return (value / 1024).toFixed(1) + "k";
-    if (value >= 10) return Math.round(value).toString();
-    return value.toFixed(1);
-  }
-
-  function drawAll() {
-    document.querySelectorAll("canvas[data-chart]").forEach(draw);
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", drawAll);
-  } else {
-    drawAll();
-  }
-  window.addEventListener("resize", drawAll);
-  window.__drawCharts = drawAll;
-  document.body.addEventListener("htmx:afterSwap", drawAll);
-})();
-
-/* Live metrics scheduler: 2s poll, 5s backoff after failures, paused while
-   the tab is hidden. Replaces fixed-interval HTMX polling on the dashboard. */
-(function () {
-  "use strict";
-  var POLL_MS = 2000;
-  var BACKOFF_MS = 5000;
-  var STALE_AFTER_MS = 30000;
-
-  function init() {
-    var grid = document.querySelector("[data-live-metrics]");
-    if (!grid) return;
-    var url = grid.dataset.liveMetrics;
-    var interval = POLL_MS;
-    var lastGoodAt = Date.now();
-    var busy = false;
-
-    var charts = document.querySelector("[data-live-charts]");
-    var chartsUrl = charts ? charts.dataset.liveCharts : null;
-    var chartsAt = 0;
-    var CHARTS_MS = 5000;
-
-    async function tick() {
-      if (busy || document.hidden) return;
-      busy = true;
-      var started = Date.now();
-      try {
-        var response = await fetch(url, { headers: { "HX-Request": "true" } });
-        if (response.ok) {
-          var html = await response.text();
-          grid.outerHTML = html;
-          grid = document.querySelector("[data-live-metrics]");
-          interval = POLL_MS;
-          lastGoodAt = Date.now();
-          markFresh();
-          // Refresh charts at a slower cadence than the stat cards.
-          if (chartsUrl && Date.now() - chartsAt >= CHARTS_MS) {
-            var chartsResponse = await fetch(chartsUrl, {
-              headers: { "HX-Request": "true" },
-            });
-            if (chartsResponse.ok) {
-              var chartsHtml = await chartsResponse.text();
-              charts.outerHTML = chartsHtml;
-              charts = document.querySelector("[data-live-charts]");
-              chartsAt = Date.now();
-            }
-          }
-          if (window.__drawCharts) window.__drawCharts();
-        } else {
-          interval = BACKOFF_MS;
-        }
-      } catch (error) {
-        interval = BACKOFF_MS;
-      }
-      busy = false;
-      var spent = Date.now() - started;
-      setTimeout(tick, Math.max(interval - spent, 250));
-    }
-
-    function markFresh() {
-      var stale = Date.now() - lastGoodAt > STALE_AFTER_MS;
-      grid.querySelectorAll("[data-freshness]").forEach(function (badge) {
-        badge.textContent = stale ? "stale" : "live";
-        badge.dataset.state = stale ? "stale" : "live";
-      });
-      if (stale) interval = BACKOFF_MS;
-    }
-
-    document.addEventListener("visibilitychange", function () {
-      if (!document.hidden) tick();
-    });
-    tick();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
-})();
-
-/* GitHub source picker: populates repo/branch dropdowns, runs the Dockerfile
-   detector, pre-fills path recommendations. Zeroes stay editable. */
-(function () {
-  "use strict";
-  function init() {
-    var grid = document.querySelector("[data-gh-picker]");
-    if (!grid) return;
-    var reposSel = grid.querySelector("[data-gh-repos]");
-    var branchSel = grid.querySelector("[data-gh-branches]");
-    var appsBox = grid.querySelector("[data-gh-apps]");
-    var status = document.querySelector("[data-gh-status]");
-    if (!reposSel) return;
-
-    async function loadBranches(repo) {
-      branchSel.innerHTML = "";
-      try {
-        var res = await fetch("/api/github/branches?repo=" + encodeURIComponent(repo));
-        var data = await res.json();
-        (data.branches || []).forEach(function (name) {
-          var opt = document.createElement("option");
-          opt.value = name;
-          opt.textContent = name;
-          if (name === "main") opt.selected = true;
-          branchSel.appendChild(opt);
-        });
-        if (!branchSel.value && branchSel.options.length) branchSel.selectedIndex = 0;
-        detect();
-      } catch (e) {
-        setStatus("Could not load branches.");
-      }
-    }
-
-    function setStatus(text) {
-      if (status) status.textContent = text;
-    }
-
-    async function detect() {
-      var repo = reposSel.value;
-      var branch = branchSel.value;
-      if (!repo || !branch) return;
-      appsBox.innerHTML = "<p class='m-0 text-xs text-muted'>Scanning for Dockerfiles…</p>";
-      try {
-        var res = await fetch(
-          "/api/github/detect?repo=" + encodeURIComponent(repo) + "&branch=" + encodeURIComponent(branch)
-        );
-        var data = await res.json();
-        appsBox.innerHTML = "";
-        var apps = data.apps || [];
-        if (!apps.length) {
-          appsBox.innerHTML =
-            "<p class='m-0 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900'>No Dockerfile found at branch head. Add one, or adjust the branch.</p>";
-          return;
-        }
-        apps.forEach(function (app, i) {
-          var label = document.createElement("label");
-          label.className = "flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm";
-          var input = document.createElement("input");
-          input.type = "radio";
-          input.name = "github_app_path";
-          input.value = app.path;
-          input.dataset.dockerfile = app.dockerfile;
-          if (i === 0) input.checked = true;
-          input.addEventListener("change", sync);
-          label.appendChild(input);
-          var text = document.createElement("span");
-          text.textContent = app.path === "" ? "/ (repo root)" : app.path + "/";
-          label.appendChild(text);
-          appsBox.appendChild(label);
-        });
-        setStatus(apps.length === 1 ? "Detected one buildable app." : "Detected " + apps.length + " buildable apps — pick one.");
-        sync();
-      } catch (e) {
-        appsBox.innerHTML = "<p class='m-0 text-xs text-danger'>Scan failed.</p>";
-      }
-    }
-
-    function sync() {
-      var checked = appsBox.querySelector("input:checked");
-      if (!checked) return;
-      var dockerfileInput = document.querySelector("[name=github_dockerfile]");
-      if (dockerfileInput) dockerfileInput.value = checked.dataset.dockerfile;
-    }
-
-    fetch("/api/github/status")
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (!data.app_installed || !data.user_connected) {
-          grid.style.display = "none";
-          setStatus(
-            data.app_installed
-              ? "Connect your GitHub identity under Settings → GitHub to pick repositories."
-              : "Connect GitHub under Settings → GitHub first."
-          );
-          return;
-        }
-        setStatus("Connected as " + (data.github_login || "") + ".");
-        return fetch("/api/github/repos")
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            reposSel.innerHTML = "";
-            var placeholder = document.createElement("option");
-            placeholder.value = "";
-            placeholder.textContent = "Pick a repository…";
-            reposSel.appendChild(placeholder);
-            (data.repos || []).forEach(function (repo) {
-              var opt = document.createElement("option");
-              opt.value = repo.full_name;
-              opt.textContent = repo.full_name + (repo.private ? " (private)" : "");
-              reposSel.appendChild(opt);
-            });
-            reposSel.addEventListener("change", function () {
-              if (reposSel.value) loadBranches(reposSel.value);
-            });
-          });
-      })
-      .catch(function () { setStatus("Could not reach GitHub."); });
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
-})();
+}

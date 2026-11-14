@@ -11,13 +11,7 @@ import sys
 from pathlib import Path
 
 
-def main() -> int:
-    executable = shutil.which("omp")
-    if executable is None:
-        print("omp is not installed", file=sys.stderr)
-        return 127
-    workspace = Path(os.environ["HAKOBI_WORKSPACE"])
-    prompt = Path(os.environ["HAKOBI_PROMPT_FILE"]).read_text(encoding="utf-8")
+def _worker_command(executable: str, workspace: Path, prompt: str) -> list[str]:
     command = [
         executable,
         "-p",
@@ -37,6 +31,17 @@ def main() -> int:
     if model:
         command.extend(["--model", model])
     command.append(prompt)
+    return command
+
+
+def main() -> int:
+    executable = shutil.which("omp")
+    if executable is None:
+        print("omp is not installed", file=sys.stderr)
+        return 127
+    workspace = Path(os.environ["HAKOBI_WORKSPACE"])
+    prompt = Path(os.environ["HAKOBI_PROMPT_FILE"]).read_text(encoding="utf-8")
+    command = _worker_command(executable, workspace, prompt)
     result = subprocess.run(command, cwd=workspace, text=True, capture_output=True)
 
     input_tokens = 0

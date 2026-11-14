@@ -8,13 +8,7 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|window| window == needle)
 }
 
-#[test]
-fn provider_credentials_are_encrypted_rotated_and_revoked() {
-    let directory = tempfile::tempdir().expect("tempdir");
-    let path = directory.path().join("catalog.sqlite3");
-    let mut catalog = Catalog::open(&path).expect("open catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 12);
-
+fn create_encrypted_connection(catalog: &mut Catalog, path: &std::path::Path) -> String {
     let connection_id = catalog
         .create_provider_connection(
             "docker-local",
@@ -45,38 +39,43 @@ fn provider_credentials_are_encrypted_rotated_and_revoked() {
         "super-secret-token"
     );
     assert!(!contains(
-        &fs::read(&path).expect("read database"),
+        &fs::read(path).expect("read database"),
         b"super-secret-token"
     ));
     assert!(path.with_extension("key").is_file());
+    connection_id
+}
 
+fn rotate_and_set_capabilities(catalog: &mut Catalog, connection_id: &str, path: &std::path::Path) {
     catalog
-        .rotate_provider_secret(&connection_id, "rotated-token")
+        .rotate_provider_secret(connection_id, "rotated-token")
         .expect("rotate secret");
     assert_eq!(
         catalog
-            .provider_secret(&connection_id)
+            .provider_secret(connection_id)
             .expect("read rotated secret"),
         "rotated-token"
     );
     assert!(!contains(
-        &fs::read(&path).expect("read database"),
+        &fs::read(path).expect("read database"),
         b"rotated-token"
     ));
 
     catalog
-        .set_provider_capabilities(&connection_id, &["read", "operate"])
+        .set_provider_capabilities(connection_id, &["read", "operate"])
         .expect("set capabilities");
     let connections = catalog
         .list_provider_connections()
         .expect("list provider connections");
     assert_eq!(connections[0].capabilities, vec!["read", "operate"]);
     assert!(catalog
-        .set_provider_capabilities(&connection_id, &["root"])
+        .set_provider_capabilities(connection_id, &["root"])
         .is_err());
+}
 
+fn record_health_and_revoke(catalog: &mut Catalog, connection_id: &str) {
     catalog
-        .record_provider_health(&connection_id, Some("connection refused"))
+        .record_provider_health(connection_id, Some("connection refused"))
         .expect("record failed health");
     let connections = catalog
         .list_provider_connections()
@@ -88,7 +87,7 @@ fn provider_credentials_are_encrypted_rotated_and_revoked() {
     );
 
     catalog
-        .record_provider_health(&connection_id, None)
+        .record_provider_health(connection_id, None)
         .expect("record healthy state");
     let connections = catalog
         .list_provider_connections()
@@ -96,11 +95,23 @@ fn provider_credentials_are_encrypted_rotated_and_revoked() {
     assert!(connections[0].last_error.is_none());
 
     catalog
-        .revoke_provider_connection(&connection_id)
+        .revoke_provider_connection(connection_id)
         .expect("revoke provider connection");
-    assert!(catalog.provider_secret(&connection_id).is_err());
+    assert!(catalog.provider_secret(connection_id).is_err());
     let connections = catalog
         .list_provider_connections()
         .expect("list provider connections");
     assert!(!connections[0].enabled);
+}
+
+#[test]
+fn provider_credentials_are_encrypted_rotated_and_revoked() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("catalog.sqlite3");
+    let mut catalog = Catalog::open(&path).expect("open catalog");
+    assert_eq!(catalog.schema_version().expect("schema version"), 12);
+
+    let connection_id = create_encrypted_connection(&mut catalog, &path);
+    rotate_and_set_capabilities(&mut catalog, &connection_id, &path);
+    record_health_and_revoke(&mut catalog, &connection_id);
 }

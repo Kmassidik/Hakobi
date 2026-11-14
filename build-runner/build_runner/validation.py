@@ -59,6 +59,18 @@ def validate_git_url(value: object, *, allowed_hosts: tuple[str, ...] = ()) -> s
     ``ext::``, ``http://``).
     """
 
+    value = _validate_git_url_string(value)
+    if "://" not in value:
+        host, path = _validate_scp_remote(value)
+        _check_host_allowed(host, allowed_hosts)
+        return value
+
+    host = _validate_url_remote(value)
+    _check_host_allowed(host, allowed_hosts)
+    return value
+
+
+def _validate_git_url_string(value: object) -> str:
     if not isinstance(value, str):
         raise ValidationError("git_url", "must be a string")
     if not value:
@@ -71,12 +83,10 @@ def validate_git_url(value: object, *, allowed_hosts: tuple[str, ...] = ()) -> s
         raise ValidationError("git_url", "must not contain whitespace or control characters")
     if value.startswith("-"):
         raise ValidationError("git_url", "must not start with '-'")
+    return value
 
-    if "://" not in value:
-        host, path = _validate_scp_remote(value)
-        _check_host_allowed(host, allowed_hosts)
-        return value
 
+def _validate_url_remote(value: str) -> str:
     try:
         parsed = urlsplit(value)
     except ValueError as exc:
@@ -111,9 +121,7 @@ def validate_git_url(value: object, *, allowed_hosts: tuple[str, ...] = ()) -> s
         raise ValidationError("git_url", "must include a repository path")
     if ".." in parsed.path.split("/"):
         raise ValidationError("git_url", "must not contain '..' path segments")
-
-    _check_host_allowed(host, allowed_hosts)
-    return value
+    return host
 
 
 def _validate_scp_remote(value: str) -> tuple[str, str]:

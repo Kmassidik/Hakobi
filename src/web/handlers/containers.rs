@@ -177,12 +177,7 @@ pub(crate) async fn container_create(
         Ok(providers) => providers,
         Err(error) => return internal_error(error),
     };
-    let values = templates::ContainerFormValues {
-        provider_id: form.provider_id.trim().to_owned(),
-        image: form.image.trim().to_owned(),
-        name: form.name.trim().to_owned(),
-        container_port: form.container_port.trim().to_owned(),
-    };
+    let values = container_form_values(&form);
     let Some(provider) = providers
         .iter()
         .find(|provider| provider.id == values.provider_id)
@@ -199,40 +194,77 @@ pub(crate) async fn container_create(
         }
         return StatusCode::NOT_FOUND.into_response();
     };
+    let container_port = match validate_container_values(&state, &headers, &providers, &values) {
+        Ok(port) => port,
+        Err(response) => return *response,
+    };
+    run_new_container(
+        &state,
+        &headers,
+        provider,
+        &providers,
+        &values,
+        container_port,
+    )
+    .await
+}
+
+fn container_form_values(form: &ContainerForm) -> templates::ContainerFormValues {
+    templates::ContainerFormValues {
+        provider_id: form.provider_id.trim().to_owned(),
+        image: form.image.trim().to_owned(),
+        name: form.name.trim().to_owned(),
+        container_port: form.container_port.trim().to_owned(),
+    }
+}
+
+fn validate_container_values(
+    state: &AppState,
+    headers: &HeaderMap,
+    providers: &[ProviderConnection],
+    values: &templates::ContainerFormValues,
+) -> Result<u16, Box<Response>> {
     if let Err(error) = validate_image_reference(&values.image) {
-        return render_container_form(
-            &state,
-            &headers,
-            &providers,
-            &values,
+        return Err(Box::new(render_container_form(
+            state,
+            headers,
+            providers,
+            values,
             Some(&error.to_string()),
             StatusCode::BAD_REQUEST,
-        );
+        )));
     }
     if let Err(error) = validate_container_name(&values.name) {
-        return render_container_form(
-            &state,
-            &headers,
-            &providers,
-            &values,
+        return Err(Box::new(render_container_form(
+            state,
+            headers,
+            providers,
+            values,
             Some(&error.to_string()),
             StatusCode::BAD_REQUEST,
-        );
+        )));
     }
-    let container_port = match values.container_port.parse::<u16>() {
-        Ok(port) if port > 0 => port,
-        _ => {
-            return render_container_form(
-                &state,
-                &headers,
-                &providers,
-                &values,
-                Some("Container port must be a whole number between 1 and 65535."),
-                StatusCode::BAD_REQUEST,
-            );
-        }
-    };
+    match values.container_port.parse::<u16>() {
+        Ok(port) if port > 0 => Ok(port),
+        _ => Err(Box::new(render_container_form(
+            state,
+            headers,
+            providers,
+            values,
+            Some("Container port must be a whole number between 1 and 65535."),
+            StatusCode::BAD_REQUEST,
+        ))),
+    }
+}
 
+async fn run_new_container(
+    state: &AppState,
+    headers: &HeaderMap,
+    provider: &ProviderConnection,
+    providers: &[ProviderConnection],
+    values: &templates::ContainerFormValues,
+    container_port: u16,
+) -> Response {
     let result = state
         .backend
         .run_container(
@@ -254,10 +286,10 @@ pub(crate) async fn container_create(
         Err(error) => {
             tracing::warn!(error = %error, "container run failed");
             render_container_form(
-                &state,
-                &headers,
-                &providers,
-                &values,
+                state,
+                headers,
+                providers,
+                values,
                 Some(&truncate(&error.to_string(), 500)),
                 StatusCode::BAD_GATEWAY,
             )

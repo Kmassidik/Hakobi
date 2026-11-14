@@ -125,20 +125,13 @@ fn validate_inputs(job: &BuildJob) -> Result<()> {
     Ok(())
 }
 
-/// Runs one build job end to end: clone → docker build.
-pub fn run_build(runs_root: &Path, job: &BuildJob) -> BuildOutcome {
-    let started = Instant::now();
-    if let Err(error) = validate_inputs(job) {
-        return error_outcome(started, error);
-    }
-    let workdir = workspace_dir(runs_root, &job.git_url, &job.branch);
-
+fn reset_workspace(workdir: &Path) -> std::io::Result<()> {
     // Reset any previous checkout so the clone is deterministic.
-    let _ = std::fs::remove_dir_all(&workdir);
-    if let Err(error) = std::fs::create_dir_all(&workdir) {
-        return error_outcome(started, anyhow::anyhow!(error));
-    }
+    let _ = std::fs::remove_dir_all(workdir);
+    std::fs::create_dir_all(workdir)
+}
 
+fn clone_repository(workdir: &Path, job: &BuildJob) -> (i32, String) {
     // Private repos: embed the token as a basic-auth user (git accepts
     // x-access-token:<token> for GitHub App installation tokens).
     let clone_url = job
@@ -151,8 +144,8 @@ pub fn run_build(runs_root: &Path, job: &BuildJob) -> BuildOutcome {
                 .replacen("https://", &format!("https://x-access-token:{token}@"), 1)
         })
         .unwrap_or_else(|| job.git_url.clone());
-    let (code, log) = run_capture(
-        &workdir,
+    run_capture(
+        workdir,
         "git",
         &[
             "clone",
@@ -163,8 +156,33 @@ pub fn run_build(runs_root: &Path, job: &BuildJob) -> BuildOutcome {
             &clone_url,
             "repo",
         ],
-    );
-    let mut log = log;
+    )
+}
+
+fn build_image(workdir: &Path, job: &BuildJob) -> (i32, String) {
+    let repo = workdir.join("repo");
+    let dockerfile = job.dockerfile_path.as_deref().unwrap_or("Dockerfile");
+    let context = job.context_dir.as_deref().unwrap_or(".");
+    let context_path = repo.join(context);
+    run_capture(
+        &context_path,
+        "docker",
+        &["build", "-f", dockerfile, "-t", &job.image_tag, "."],
+    )
+}
+
+/// Runs one build job end to end: clone → docker build.
+pub fn run_build(runs_root: &Path, job: &BuildJob) -> BuildOutcome {
+    let started = Instant::now();
+    if let Err(error) = validate_inputs(job) {
+        return error_outcome(started, error);
+    }
+    let workdir = workspace_dir(runs_root, &job.git_url, &job.branch);
+    if let Err(error) = reset_workspace(&workdir) {
+        return error_outcome(started, anyhow::anyhow!(error));
+    }
+
+    let (code, mut log) = clone_repository(&workdir, job);
     if code != 0 {
         return outcome(
             "failed",
@@ -175,15 +193,7 @@ pub fn run_build(runs_root: &Path, job: &BuildJob) -> BuildOutcome {
         );
     }
 
-    let repo = workdir.join("repo");
-    let dockerfile = job.dockerfile_path.as_deref().unwrap_or("Dockerfile");
-    let context = job.context_dir.as_deref().unwrap_or(".");
-    let context_path = repo.join(context);
-    let (code, build_log) = run_capture(
-        &context_path,
-        "docker",
-        &["build", "-f", dockerfile, "-t", &job.image_tag, "."],
-    );
+    let (code, build_log) = build_image(&workdir, job);
     log.push_str(&build_log);
     if code != 0 {
         return outcome(

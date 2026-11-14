@@ -47,10 +47,19 @@ pub(crate) async fn container_detail(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
     };
-    let (csrf_token, cookies) = page_csrf(&state, &headers);
+    render_container_detail(&state, &headers, &provider, &name).await
+}
+
+async fn render_container_detail(
+    state: &AppState,
+    headers: &HeaderMap,
+    provider: &ProviderConnection,
+    name: &str,
+) -> Response {
+    let (csrf_token, cookies) = page_csrf(state, headers);
     let inspect = state
         .backend
-        .inspect_container(&provider.endpoint, &name)
+        .inspect_container(&provider.endpoint, name)
         .await;
     let detail = match inspect {
         Ok(inspect) => Ok(inspect),
@@ -63,10 +72,10 @@ pub(crate) async fn container_detail(
     };
     let (stats, logs) = match &detail {
         Ok(_) => (
-            container_detail_stats(&state, &provider.endpoint, &name)
+            container_detail_stats(state, &provider.endpoint, name)
                 .await
                 .ok(),
-            container_detail_logs(&state, &provider.endpoint, &name, DETAIL_TAIL_LINES)
+            container_detail_logs(state, &provider.endpoint, name, DETAIL_TAIL_LINES)
                 .await
                 .ok(),
         ),
@@ -83,7 +92,7 @@ pub(crate) async fn container_detail(
             &state.config.base_url,
             &state.config.username,
             &csrf_token,
-            &name,
+            name,
             data.as_ref(),
             stats.as_ref(),
             logs.as_ref(),

@@ -51,6 +51,13 @@ class Settings:
     buildx_builder: str | None = None
 
     def __post_init__(self) -> None:
+        self._normalize_fields()
+        self._validate_host_and_port()
+        self._validate_api_token()
+        self._validate_limits()
+        self._validate_executables()
+
+    def _normalize_fields(self) -> None:
         if isinstance(self.work_dir, str) and not self.work_dir.strip():
             raise ConfigError("BUILD_RUNNER_WORK_DIR must not be empty")
         object.__setattr__(self, "work_dir", Path(self.work_dir))
@@ -65,25 +72,31 @@ class Settings:
             tuple(host.strip().lower() for host in raw_hosts if host.strip()),
         )
 
+    def _validate_host_and_port(self) -> None:
         if not self.host or not self.host.strip():
             raise ConfigError("BUILD_RUNNER_HOST must not be empty")
         if _CONTROL_RE.search(self.host) or any(ch.isspace() for ch in self.host):
             raise ConfigError("BUILD_RUNNER_HOST contains invalid characters")
         if not 0 <= self.port <= 65_535:
             raise ConfigError("BUILD_RUNNER_PORT must be between 0 and 65535")
-        if self.api_token is not None:
-            if not isinstance(self.api_token, str):
-                raise ConfigError("BUILD_RUNNER_TOKEN must be a string")
-            if len(self.api_token) < MIN_API_TOKEN_LENGTH:
-                raise ConfigError(
-                    f"BUILD_RUNNER_TOKEN must be at least {MIN_API_TOKEN_LENGTH} characters"
-                )
-            if len(self.api_token) > 8_192:
-                raise ConfigError("BUILD_RUNNER_TOKEN is too long")
-            if _CONTROL_RE.search(self.api_token):
-                raise ConfigError("BUILD_RUNNER_TOKEN must not contain control characters")
-            if any(ch.isspace() for ch in self.api_token) or not self.api_token.isascii():
-                raise ConfigError("BUILD_RUNNER_TOKEN must be printable ASCII without spaces")
+
+    def _validate_api_token(self) -> None:
+        if self.api_token is None:
+            return
+        if not isinstance(self.api_token, str):
+            raise ConfigError("BUILD_RUNNER_TOKEN must be a string")
+        if len(self.api_token) < MIN_API_TOKEN_LENGTH:
+            raise ConfigError(
+                f"BUILD_RUNNER_TOKEN must be at least {MIN_API_TOKEN_LENGTH} characters"
+            )
+        if len(self.api_token) > 8_192:
+            raise ConfigError("BUILD_RUNNER_TOKEN is too long")
+        if _CONTROL_RE.search(self.api_token):
+            raise ConfigError("BUILD_RUNNER_TOKEN must not contain control characters")
+        if any(ch.isspace() for ch in self.api_token) or not self.api_token.isascii():
+            raise ConfigError("BUILD_RUNNER_TOKEN must be printable ASCII without spaces")
+
+    def _validate_limits(self) -> None:
         if not 1 <= self.max_concurrent_builds <= 64:
             raise ConfigError("BUILD_RUNNER_MAX_CONCURRENT_BUILDS must be between 1 and 64")
         if not 1.0 <= self.clone_timeout <= 3_600.0:
@@ -99,6 +112,8 @@ class Settings:
             )
         if not 1_024 <= self.max_request_bytes <= 16_777_216:
             raise ConfigError("BUILD_RUNNER_MAX_REQUEST_BYTES must be between 1024 and 16777216")
+
+    def _validate_executables(self) -> None:
         for name, value in (
             ("BUILD_RUNNER_DOCKER_BIN", self.docker_bin),
             ("BUILD_RUNNER_GIT_BIN", self.git_bin),

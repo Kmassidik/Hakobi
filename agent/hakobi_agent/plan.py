@@ -60,15 +60,8 @@ def _apply_patch(repo: Path, patch: str, patch_path: Path) -> None:
         raise PlanError(f"patch apply failed for {repo}: {applied.stderr.strip()}")
 
 
-def run_plan(
-    plan_path: str | Path,
-    worker_override: str | None = None,
-    runs_root: str | Path = "agent/runs",
-    max_tasks: int | None = None,
-) -> tuple[dict, Path]:
-    plan = load_plan(plan_path)
-    store = RunStore.create(Path(runs_root), f"plan-{plan['name']}")
-    state = {
+def _new_plan_state(plan: dict) -> dict:
+    return {
         "version": 1,
         "plan": plan["name"],
         "plan_file": str(plan["file"]),
@@ -77,10 +70,84 @@ def run_plan(
         "created_at": utc_now(),
         "exit_reason": None,
     }
-    store.save(state)
+
+
+def _write_plan_overview(store: RunStore, plan: dict) -> None:
     store.write_text("plan.md", "# Plan: " + plan["name"] + "\n\n" + "\n".join(
         f"- `{task}`" for task in plan["tasks"]
     ) + "\n")
+
+
+def _extract_patch(task_state: dict) -> subprocess.CompletedProcess[str]:
+    workspace_path = Path(task_state["workspace"])
+    return subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace_path),
+            "diff",
+            str(task_state["baseline_commit"]),
+            str(task_state["commit"]),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+
+def _run_plan_step(
+    store: RunStore,
+    index: int,
+    task_path: Path,
+    worker_override: str | None,
+) -> tuple[dict, str | None]:
+    task_state, task_run_dir = run_task(
+        task_path,
+        worker_override=worker_override,
+        runs_root=store.run_dir / "tasks",
+    )
+    record = {
+        "number": index,
+        "task": str(task_path),
+        "run": str(task_run_dir),
+        "status": task_state["status"],
+        "reason": task_state.get("exit_reason"),
+    }
+    if task_state["status"] != "awaiting_approval":
+        return record, f"task {index} stopped with {task_state['status']}"
+
+    from .task import load_task
+
+    task = load_task(task_path)
+    patch = _extract_patch(task_state)
+    if patch.returncode != 0:
+        record["status"] = "patch_failed"
+        record["reason"] = patch.stderr.strip()
+        return record, f"could not extract patch for task {index}"
+
+    patch_path = store.run_dir / f"applied-{index:03d}.patch"
+    try:
+        _apply_patch(task.repo, patch.stdout, patch_path)
+    except PlanError as error:
+        record["status"] = "apply_failed"
+        record["reason"] = str(error)
+        return record, f"task {index} patch was not applied"
+
+    record["patch"] = patch_path.name
+    record["applied"] = True
+    return record, None
+
+
+def run_plan(
+    plan_path: str | Path,
+    worker_override: str | None = None,
+    runs_root: str | Path = "agent/runs",
+    max_tasks: int | None = None,
+) -> tuple[dict, Path]:
+    plan = load_plan(plan_path)
+    store = RunStore.create(Path(runs_root), f"plan-{plan['name']}")
+    state = _new_plan_state(plan)
+    store.save(state)
+    _write_plan_overview(store, plan)
     limit = max_tasks if max_tasks is not None else len(plan["tasks"])
     if limit < 1:
         raise PlanError("max_tasks must be positive")
@@ -88,65 +155,13 @@ def run_plan(
     state["planned_tasks"] = total
 
     for index, task_path in enumerate(plan["tasks"][:limit], start=1):
-        task_state, task_run_dir = run_task(
-            task_path,
-            worker_override=worker_override,
-            runs_root=store.run_dir / "tasks",
-        )
-        record = {
-            "number": index,
-            "task": str(task_path),
-            "run": str(task_run_dir),
-            "status": task_state["status"],
-            "reason": task_state.get("exit_reason"),
-        }
-        if task_state["status"] != "awaiting_approval":
-            state["tasks"].append(record)
-            state["status"] = "failed"
-            state["exit_reason"] = f"task {index} stopped with {task_state['status']}"
-            store.save(state)
-            return state, store.run_dir
-
-        from .task import load_task
-
-        task = load_task(task_path)
-        workspace_path = Path(task_state["workspace"])
-        patch = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(workspace_path),
-                "diff",
-                str(task_state["baseline_commit"]),
-                str(task_state["commit"]),
-            ],
-            text=True,
-            capture_output=True,
-        )
-        if patch.returncode != 0:
-            record["status"] = "patch_failed"
-            record["reason"] = patch.stderr.strip()
-            state["tasks"].append(record)
-            state["status"] = "failed"
-            state["exit_reason"] = f"could not extract patch for task {index}"
-            store.save(state)
-            return state, store.run_dir
-
-        patch_path = store.run_dir / f"applied-{index:03d}.patch"
-        try:
-            _apply_patch(task.repo, patch.stdout, patch_path)
-        except PlanError as error:
-            record["status"] = "apply_failed"
-            record["reason"] = str(error)
-            state["tasks"].append(record)
-            state["status"] = "failed"
-            state["exit_reason"] = f"task {index} patch was not applied"
-            store.save(state)
-            return state, store.run_dir
-
-        record["patch"] = patch_path.name
-        record["applied"] = True
+        record, exit_reason = _run_plan_step(store, index, task_path, worker_override)
         state["tasks"].append(record)
+        if exit_reason is not None:
+            state["status"] = "failed"
+            state["exit_reason"] = exit_reason
+            store.save(state)
+            return state, store.run_dir
         store.save(state)
 
     state["status"] = "completed" if limit >= total else "partial"

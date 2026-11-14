@@ -109,32 +109,7 @@ pub(crate) async fn app_create(
             StatusCode::BAD_REQUEST,
         );
     }
-
-    let name = values.name.clone();
-    let host_id = values.host_id.clone();
-    let build_type = values.build_type.clone();
-    let github_repo = non_empty(&values.github_repo);
-    let github_branch = non_empty(&values.github_branch);
-    let github_path = non_empty(&values.github_path);
-    let github_dockerfile = non_empty(&values.github_dockerfile);
-    let github_auto_deploy = values.github_auto_deploy;
-    let container_port = parse_port(&values.container_port);
-    let result = with_catalog(&state, move |catalog| {
-        catalog.create_app(
-            &name,
-            &host_id,
-            &build_type,
-            github_repo.as_deref(),
-            github_branch.as_deref(),
-            github_path.as_deref(),
-            github_dockerfile.as_deref(),
-            github_auto_deploy,
-            container_port,
-        )
-    })
-    .await;
-    // env_json saved via update below when editing; default {} on create.
-    match result {
+    match create_app_record(&state, &values).await {
         Ok(_) => redirect_with_notice("/apps", "App created."),
         Err(error) => render_app_form(
             &state,
@@ -148,6 +123,36 @@ pub(crate) async fn app_create(
             StatusCode::BAD_REQUEST,
         ),
     }
+}
+
+async fn create_app_record(
+    state: &AppState,
+    values: &templates::AppFormValues,
+) -> anyhow::Result<String> {
+    let name = values.name.clone();
+    let host_id = values.host_id.clone();
+    let build_type = values.build_type.clone();
+    let github_repo = non_empty(&values.github_repo);
+    let github_branch = non_empty(&values.github_branch);
+    let github_path = non_empty(&values.github_path);
+    let github_dockerfile = non_empty(&values.github_dockerfile);
+    let github_auto_deploy = values.github_auto_deploy;
+    let container_port = parse_port(&values.container_port);
+    // env_json saved via update below when editing; default {} on create.
+    with_catalog(state, move |catalog| {
+        catalog.create_app(
+            &name,
+            &host_id,
+            &build_type,
+            github_repo.as_deref(),
+            github_branch.as_deref(),
+            github_path.as_deref(),
+            github_dockerfile.as_deref(),
+            github_auto_deploy,
+            container_port,
+        )
+    })
+    .await
 }
 
 pub(crate) async fn app_detail(
@@ -375,7 +380,27 @@ pub(crate) async fn app_edit_submit(
             StatusCode::BAD_REQUEST,
         );
     }
+    match update_app_record(&state, &id, &values).await {
+        Ok(()) => redirect_with_notice(&format!("/apps/{id}"), "App updated."),
+        Err(error) => render_app_form(
+            &state,
+            &headers,
+            &hosts,
+            &values,
+            &format!("/apps/{id}/edit"),
+            "Edit app",
+            "Save changes",
+            Some(&display_error(&error)),
+            StatusCode::BAD_REQUEST,
+        ),
+    }
+}
 
+async fn update_app_record(
+    state: &AppState,
+    id: &str,
+    values: &templates::AppFormValues,
+) -> anyhow::Result<()> {
     let name = values.name.clone();
     let host_id = values.host_id.clone();
     let build_type = values.build_type.clone();
@@ -386,8 +411,8 @@ pub(crate) async fn app_edit_submit(
     let github_auto_deploy = values.github_auto_deploy;
     let container_port = parse_port(&values.container_port);
     let env_json = values.env_json.clone();
-    let app_id = id.clone();
-    let result = with_catalog(&state, move |catalog| {
+    let app_id = id.to_owned();
+    with_catalog(state, move |catalog| {
         catalog.update_app(
             &app_id,
             &name,
@@ -402,21 +427,7 @@ pub(crate) async fn app_edit_submit(
             &env_json,
         )
     })
-    .await;
-    match result {
-        Ok(()) => redirect_with_notice(&format!("/apps/{id}"), "App updated."),
-        Err(error) => render_app_form(
-            &state,
-            &headers,
-            &hosts,
-            &values,
-            &format!("/apps/{id}/edit"),
-            "Edit app",
-            "Save changes",
-            Some(&display_error(&error)),
-            StatusCode::BAD_REQUEST,
-        ),
-    }
+    .await
 }
 
 pub(crate) async fn app_delete(
@@ -433,36 +444,11 @@ pub(crate) async fn app_delete(
     }
     // Best-effort cleanup: container + Cloudflare route. The DB delete is
     // authoritative.
-    let container = crate::web::deployment::container_name_for(&id);
-    let mut app_snapshot = None;
-    if let Ok(Some(app)) = load_app(&state, &id).await {
-        let _ = state
-            .backend
-            .remove_container(&format!("agent://{}", app.host_id), &container)
-            .await;
-        app_snapshot = Some((app.name, app.host_port));
-    }
+    let app_name = remove_app_container(&state, &id).await;
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
     if result.is_ok() {
-        if let Some((app_name, _host_port)) = app_snapshot {
-            let cf_path = state.catalog_path.clone();
-            tokio::spawn(async move {
-                let settings = tokio::task::spawn_blocking(move || {
-                    let catalog = hakobi::catalog::Catalog::open(cf_path.as_ref())?;
-                    crate::cloudflare::apps_route::load_settings(&catalog)
-                })
-                .await
-                .unwrap_or_else(|error| Err(anyhow::anyhow!(error.to_string())));
-                let settings = match settings {
-                    Ok(settings) => settings,
-                    Err(_) => return,
-                };
-                if let Err(error) =
-                    crate::cloudflare::apps_route::remove_app_route_with(&settings, &app_name).await
-                {
-                    tracing::warn!(error = %error, app = %app_name, "cloudflare route removal skipped");
-                }
-            });
+        if let Some(app_name) = app_name {
+            spawn_cloudflare_route_cleanup(&state, app_name);
         }
     }
     match result {
@@ -472,4 +458,35 @@ pub(crate) async fn app_delete(
         }
         Err(error) => internal_error(error),
     }
+}
+
+async fn remove_app_container(state: &AppState, id: &str) -> Option<String> {
+    let container = crate::web::deployment::container_name_for(id);
+    let app = load_app(state, id).await.ok().flatten()?;
+    let _ = state
+        .backend
+        .remove_container(&format!("agent://{}", app.host_id), &container)
+        .await;
+    Some(app.name)
+}
+
+fn spawn_cloudflare_route_cleanup(state: &AppState, app_name: String) {
+    let cf_path = state.catalog_path.clone();
+    tokio::spawn(async move {
+        let settings = tokio::task::spawn_blocking(move || {
+            let catalog = hakobi::catalog::Catalog::open(cf_path.as_ref())?;
+            crate::cloudflare::apps_route::load_settings(&catalog)
+        })
+        .await
+        .unwrap_or_else(|error| Err(anyhow::anyhow!(error.to_string())));
+        let settings = match settings {
+            Ok(settings) => settings,
+            Err(_) => return,
+        };
+        if let Err(error) =
+            crate::cloudflare::apps_route::remove_app_route_with(&settings, &app_name).await
+        {
+            tracing::warn!(error = %error, app = %app_name, "cloudflare route removal skipped");
+        }
+    });
 }

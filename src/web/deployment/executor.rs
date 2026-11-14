@@ -64,6 +64,11 @@ pub(super) async fn run_pipeline(
     transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await?;
 
     // Publish the public subdomain when Cloudflare is configured.
+    spawn_cloudflare_route_sync(deps, app_id);
+    Ok(())
+}
+
+fn spawn_cloudflare_route_sync(deps: &ExecutorDeps, app_id: &str) {
     let path = deps.catalog_path.clone();
     let owned_app_id = app_id.to_owned();
     let app_name = run_catalog_op(path.clone(), move |catalog| {
@@ -95,7 +100,6 @@ pub(super) async fn run_pipeline(
             }
         });
     }
-    Ok(())
 }
 
 /// Runs the build through the configured build runner and returns the image
@@ -145,23 +149,13 @@ async fn build_image(deps: &ExecutorDeps, app_id: &str, deployment_id: &str) -> 
     Ok(context.image_tag)
 }
 
-/// Stops the old container, starts the built image, and verifies it runs.
-async fn deploy_image(
+async fn clear_previous_container(
     deps: &ExecutorDeps,
-    app_id: &str,
     deployment_id: &str,
-    image_tag: &str,
-    container_port: u16,
-    env_json: &str,
+    endpoint: &str,
+    container_name: &str,
 ) -> Result<()> {
-    validate_image_reference(image_tag)?;
-    let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
-    let container_name = container_name_for(app_id);
-    if let Err(error) = deps
-        .backend
-        .stop_container(&endpoint, &container_name)
-        .await
-    {
+    if let Err(error) = deps.backend.stop_container(endpoint, container_name).await {
         super::stages::log(
             deps,
             deployment_id,
@@ -175,7 +169,7 @@ async fn deploy_image(
     }
     if let Err(error) = deps
         .backend
-        .remove_container(&endpoint, &container_name)
+        .remove_container(endpoint, container_name)
         .await
     {
         super::stages::log(
@@ -189,6 +183,22 @@ async fn deploy_image(
         )
         .await?;
     }
+    Ok(())
+}
+
+/// Stops the old container, starts the built image, and verifies it runs.
+async fn deploy_image(
+    deps: &ExecutorDeps,
+    app_id: &str,
+    deployment_id: &str,
+    image_tag: &str,
+    container_port: u16,
+    env_json: &str,
+) -> Result<()> {
+    validate_image_reference(image_tag)?;
+    let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
+    let container_name = container_name_for(app_id);
+    clear_previous_container(deps, deployment_id, &endpoint, &container_name).await?;
     let env: std::collections::HashMap<String, String> =
         serde_json::from_str(env_json).unwrap_or_default();
     let run = deps

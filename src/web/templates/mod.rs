@@ -46,6 +46,9 @@ pub(crate) fn page(title: &str, content: Markup) -> Markup {
                 link rel="stylesheet" href=(super::handlers::asset_url("vendor/fontawesome/css/all.min.css"));
                 script src=(super::handlers::asset_url("htmx.min.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi.js")) defer {}
+                script src=(super::handlers::asset_url("hakobi-charts.js")) defer {}
+                script src=(super::handlers::asset_url("hakobi-metrics.js")) defer {}
+                script src=(super::handlers::asset_url("hakobi-github.js")) defer {}
             }
             body class=(PAGE_BODY) {
                 (content)
@@ -143,59 +146,74 @@ pub(crate) fn login(
         html! {
             main class="login-page" {
                 div class="login-shell" {
-                    section class="login-brand" aria-labelledby="brand-title" {
-                        div class="login-brand-top" {
-                            (brand("Hakobi home"))
-                            span class="login-badge" { "Self-hosted · Private by design" }
-                        }
-                        div class="login-copy" {
-                            p class="login-kicker" { "Self-hosted delivery" }
-                            h1 id="brand-title" class="login-title" { "Ship calmly." }
-                            p class="login-subtitle" {
-                                "Hakobi carries your code from commit to production, without the YAML maze."
-                            }
-                        }
-                        img src="/assets/art/mascot/hako-carry.webp" alt="" aria-hidden="true" class="login-illustration";
-                    }
-
-                    section class="login-form" aria-labelledby="login-title" {
-                        div class="login-form-inner" {
-                            div class="login-mobile-brand" { (brand("Hakobi home")) }
-                            p class="login-overline" { "Control plane access" }
-                            h2 id="login-title" class="login-heading" { "Welcome back." }
-                            p class="login-intro" { "Sign in to your Hakobi dashboard." }
-
-                            @if let Some(message) = error {
-                                p class="login-error" role="alert" { (message) }
-                            }
-
-                            form method="post" action="/login" class="login-fields" {
-                                input type="hidden" name="csrf_token" value=(csrf_token);
-                                label for="username" class="login-label" { "Username" }
-                                div class="login-field" {
-                                    i class="fa-solid fa-user login-field-icon" aria-hidden="true" {}
-                                    input id="username" name="username" type="text" value=(username) placeholder="Your username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required autofocus class="login-input";
-                                }
-                                label for="password" class="login-label" { "Password" }
-                                div class="login-field" {
-                                    i class="fa-solid fa-lock login-field-icon" aria-hidden="true" {}
-                                    input id="password" name="password" type="password" placeholder="Your password" autocomplete="current-password" maxlength="128" required class="login-input";
-                                    button type="button" class="login-toggle" data-password-toggle aria-label="Show password" aria-pressed="false" {
-                                        i class="fa-solid fa-eye" aria-hidden="true" {}
-                                    }
-                                }
-                                button type="submit" class="login-submit" {
-                                    span { "Sign in" }
-                                    i class="fa-solid fa-arrow-right" aria-hidden="true" {}
-                                }
-                            }
-                            p class="login-footer" { "Hakobi · Self-hosted control plane" }
-                        }
-                    }
+                    (login_brand_section())
+                    (login_form_section(csrf_token, error, username))
                 }
             }
         },
     )
+}
+
+fn login_brand_section() -> Markup {
+    html! {
+        section class="login-brand" aria-labelledby="brand-title" {
+            div class="login-brand-top" {
+                (brand("Hakobi home"))
+                span class="login-badge" { "Self-hosted · Private by design" }
+            }
+            div class="login-copy" {
+                p class="login-kicker" { "Self-hosted delivery" }
+                h1 id="brand-title" class="login-title" { "Ship calmly." }
+                p class="login-subtitle" {
+                    "Hakobi carries your code from commit to production, without the YAML maze."
+                }
+            }
+            img src="/assets/art/mascot/hako-carry.webp" alt="" aria-hidden="true" class="login-illustration";
+        }
+    }
+}
+
+fn login_form_section(csrf_token: &str, error: Option<&str>, username: &str) -> Markup {
+    html! {
+        section class="login-form" aria-labelledby="login-title" {
+            div class="login-form-inner" {
+                div class="login-mobile-brand" { (brand("Hakobi home")) }
+                p class="login-overline" { "Control plane access" }
+                h2 id="login-title" class="login-heading" { "Welcome back." }
+                p class="login-intro" { "Sign in to your Hakobi dashboard." }
+                @if let Some(message) = error {
+                    p class="login-error" role="alert" { (message) }
+                }
+                (login_fields(csrf_token, username))
+                p class="login-footer" { "Hakobi · Self-hosted control plane" }
+            }
+        }
+    }
+}
+
+fn login_fields(csrf_token: &str, username: &str) -> Markup {
+    html! {
+        form method="post" action="/login" class="login-fields" {
+            input type="hidden" name="csrf_token" value=(csrf_token);
+            label for="username" class="login-label" { "Username" }
+            div class="login-field" {
+                i class="fa-solid fa-user login-field-icon" aria-hidden="true" {}
+                input id="username" name="username" type="text" value=(username) placeholder="Your username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="32" required autofocus class="login-input";
+            }
+            label for="password" class="login-label" { "Password" }
+            div class="login-field" {
+                i class="fa-solid fa-lock login-field-icon" aria-hidden="true" {}
+                input id="password" name="password" type="password" placeholder="Your password" autocomplete="current-password" maxlength="128" required class="login-input";
+                button type="button" class="login-toggle" data-password-toggle aria-label="Show password" aria-pressed="false" {
+                    i class="fa-solid fa-eye" aria-hidden="true" {}
+                }
+            }
+            button type="submit" class="login-submit" {
+                span { "Sign in" }
+                i class="fa-solid fa-arrow-right" aria-hidden="true" {}
+            }
+        }
+    }
 }
 
 pub(crate) fn status_badge(label: &str, healthy: bool) -> Markup {

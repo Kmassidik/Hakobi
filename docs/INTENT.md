@@ -1,74 +1,74 @@
 # Intent Map
 
-What the user means vs what the code does. Update this file whenever a
-feature's meaning diverges from its implementation. Read this file before
-touching UI, navigation, or workflows.
+What the user means versus what the code does. Update this file whenever a
+feature's meaning diverges from its implementation. Read it before touching
+UI, navigation, deployment, routing, or project conventions.
 
 ## Format
 
-Each entry:
-
-```
-### <area>
-User intent: <what the user actually wants, in their words>
-Code reality: <what the code currently does>
-Gap: <difference, or "none">
-```
+Each entry records user intent, code reality, and any remaining gap. Do not
+keep historical implementation claims here after a clean cutover.
 
 ## Entries
 
-### Dashboard (sidebar: "Dashboard", route `/`)
-User intent: Metrics only. Live server metrics (24h CPU/memory charts
-aggregated across all hosts), total running services/containers (live count,
-provider-neutral via ContainerBackend trait — Docker now, K8s/Nix later),
-recent deployment activity. No hero banner, no greeting, no readiness
-section, no instance cards.
-Code reality: Metric cards (Active containers, Environments), 24h charts,
-recent activity feed.
-Gap: none (rebuilt 2026-11-10 per user direction).
-
-### Deployment (sidebar: "Deployment", route `/hosts`)
-User intent: The operator's main work surface. Where you register a remote
-agent, see your hosts, and kick off deployments. Clicking "Deployment" in the
-sidebar should land you where deployment happens.
-Code reality: `/hosts` lists registered remote agents with the "Register a
-remote agent" form. Deployment history lives at `/deployment` (no sidebar
-entry — reached via environment pages).
-Gap: none (nav retargeted 2026-11-10, commit 02926fa). Deployment history is
-still orphaned from the sidebar; revisit if the user wants it surfaced.
-
-### Host resources (route `/hosts/{id}/resources`)
-User intent: Deep-dive metrics for one remote host — CPU, memory, disk,
-network, plus history charts. Local host does NOT belong here; this page is
-for remote agents only.
-Code reality: Per-host metrics with 5m/1h/24h SVG charts (CP7). Local host
-excluded from the Deployment tab.
+### Dashboard
+User intent: Live host/container metrics, 24-hour charts, deployment activity,
+and honest empty/stale states. Polling must never append duplicate panels or
+empty-state messages.
+Code reality: Dashboard, Apps, Containers, Settings navigation. Metrics and
+charts poll partials with last-good behavior. The metrics empty state lives
+inside the single replaced root and is browser-verified across repeated polls.
 Gap: none.
+
+### Apps
+User intent: Railway-shaped applications, not overlapping environment/stack
+pages. An app binds a GitHub repository, branch, path, Dockerfile, port,
+environment variables, and auto-deploy policy. Create, edit, deploy, roll back,
+view logs/history, and delete with full cleanup.
+Code reality: `apps` and `deployments(app_id)` in SQLite. The host agent builds
+and runs containers; deployments publish `app.container_port` on loopback.
+Gap: commit statuses and PR check runs remain separate CP9 work.
 
 ### Containers
-User intent: See every container across all hosts. Click a container to see
-metadata, live stats, logs, and lifecycle actions (start/stop/restart/delete).
-Code reality: `/containers` grid + `/containers/{provider}/{name}` detail
-with HTMX-polled stats/logs (CP8).
+User intent: See every container, inspect metadata, live stats and logs, and
+perform guarded lifecycle actions.
+Code reality: `/containers` plus provider/name detail pages with HTMX polling.
+The control plane uses the `ContainerBackend` contract across Docker and the
+native host agent.
 Gap: none.
 
-### Environments
-User intent: The unit of deployment config — like Cloudflare Workers-style
-flat environments. Create one, get a webhook, deploy images to a host.
-Code reality: Flat `environments` table (schema v5), CRUD UI at
-`/environments`, webhook-driven pipeline (CP6).
+### GitHub integration
+User intent: GitHub App repository selection, push-to-build, auto-deploy,
+rollback, and deletion. Registration, installation, and user connection must
+be honest distinct states. Monorepos and single repositories both work.
+Code reality: Manifest registration, installation webhooks/callback/recheck,
+installation tokens, push matching, and a repository picker. Session cookies
+are SameSite=Lax for callbacks; cross-site POST CSRF protection remains.
+Gap: commit statuses and PR checks are not complete.
+
+### Cloudflare and subdomains
+User intent: Each app receives a public subdomain with DNS/ingress lifecycle
+cleanup. Settings can list and guard domain CRUD. Existing LLM frontend/API
+and Tailscale access must remain untouched by general edge changes.
+Code reality: Cloudflare API manages zone records and tunnel ingress. Explicit
+LLM routes remain on ports 8081/8082; wildcard apps route through the edge.
+Only records marked `Managed by Hakobi` can be deleted through Hakobi.
 Gap: none.
 
-### GitHub integration (CP9)
-User intent: Connect Hakobi fully to GitHub, Cloudflare-Workers-style.
-Sign in with GitHub inside the dashboard after Hakobi login (so other
-users can use it later). Environments bind to repo+branch+path and
-auto-deploy on push. Webhook setup should be automated (no manual
-payload copying). PR statuses reported back. Monorepos AND single repos
-must both work — the Environment points at a path inside the repo, and
-a path-scanner recommends the Dockerfile/directory instead of the user
-typing it.
-Code reality: CP9 PRD written (PRD.md 14.1-14.12, schema v6 planned:
-github columns on environments, github_app/github_connections/
-webhook_deliveries tables). Not yet implemented.
-Gap: pending implementation.
+### Edge proxy
+User intent: A human-readable Rust L7 proxy built from proven Pingora source
+patterns and tuned with real benchmarks, not unsupported performance claims.
+Code reality: Pingora at the pinned revision in `Cargo.toml`, 14 per-thread
+runtimes, work stealing disabled, shared hot-queue/LRU pooling, atomic catalog
+reloads, and one total upstream attempt. Wildcard traffic uses loopback 9000.
+Gap: nginx remains a useful benchmark reference; no universal performance
+claim is made.
+
+### Readability and build environment
+User intent: Every tracked source file is at most 500 lines and every function
+at most 50 lines. Code stays understandable by humans and future work retains
+these rules.
+Code reality: `AGENTS.md` is the persistent working agreement. CI runs source
+file and syntax-based function length guards, complete Rust/Python tests,
+frontend asset checks, security audit, and container builds.
+Gap: none once the current refactor and verification are complete.

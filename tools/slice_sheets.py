@@ -20,6 +20,37 @@ def load_presets() -> dict:
     return json.loads(MANIFEST.read_text())
 
 
+def _export_cell(
+    cell: Image.Image,
+    index: int,
+    name: str,
+    output_dir: Path,
+    *,
+    size: int,
+    inner: int,
+    tolerance: int,
+    remove_background: bool,
+) -> Path:
+    try:
+        subject = cutout_image(
+            cell,
+            remove_background=remove_background,
+            tolerance=tolerance,
+        )
+    except ValueError as error:
+        raise ValueError(f"cell {index + 1} ({name}) is empty: {error}") from error
+
+    subject.thumbnail((inner, inner), Image.Resampling.LANCZOS)
+    canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    canvas.alpha_composite(
+        subject,
+        ((size - subject.width) // 2, (size - subject.height) // 2),
+    )
+    destination = output_dir / f"{name}.webp"
+    canvas.save(destination, "WEBP", quality=90, method=6)
+    return destination
+
+
 def slice_sheet(
     sheet: Path,
     names: list[str],
@@ -61,29 +92,18 @@ def slice_sheet(
                 (row + 1) * cell_height,
             )
         )
-        try:
-            subject = cutout_image(
-                cell,
+        written.append(
+            _export_cell(
+                cell, index, name, output_dir,
+                size=size, inner=inner, tolerance=tolerance,
                 remove_background=remove_background,
-                tolerance=tolerance,
             )
-        except ValueError as error:
-            raise ValueError(f"cell {index + 1} ({name}) is empty: {error}") from error
-
-        subject.thumbnail((inner, inner), Image.Resampling.LANCZOS)
-        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        canvas.alpha_composite(
-            subject,
-            ((size - subject.width) // 2, (size - subject.height) // 2),
         )
-        destination = output_dir / f"{name}.webp"
-        canvas.save(destination, "WEBP", quality=90, method=6)
-        written.append(destination)
 
     return written
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Slice a 3x2 ChatGPT art sheet into transparent WebP assets."
     )
@@ -101,6 +121,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not remove a flat background; only trim alpha.",
     )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
     args = parser.parse_args(argv)
 
     presets = load_presets()

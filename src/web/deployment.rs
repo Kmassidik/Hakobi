@@ -73,6 +73,13 @@ impl DeploymentGuard {
     }
 }
 
+fn normalize_commit_field(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
 /// Queues a deployment and spawns the executor task.
 ///
 /// Creates the pending deployment record synchronously so the caller gets an
@@ -90,14 +97,8 @@ pub(crate) fn start_deployment(
         return Ok(None);
     }
     let app = app_id.to_owned();
-    let commit_sha = commit_sha
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
-    let commit_message = commit_message
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
+    let commit_sha = normalize_commit_field(commit_sha);
+    let commit_message = normalize_commit_field(commit_message);
     // `create_deployment` derives the next version inside one transaction;
     // the guard keeps this race-free per app.
     let deployment_id = run_catalog_op(deps.catalog_path.clone(), move |catalog| {

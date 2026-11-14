@@ -68,6 +68,98 @@ async fn await_terminal(path: &std::path::Path, app_id: &str) -> String {
     panic!("deployment never reached a terminal state");
 }
 
+async fn post_deploy(
+    app: &Router,
+    app_id: &str,
+    authenticated: &str,
+    csrf: &str,
+) -> axum::response::Response {
+    super::tests::post_form(
+        app,
+        &format!("/apps/{app_id}/deploy"),
+        authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await
+}
+
+async fn post_rollback(
+    app: &Router,
+    app_id: &str,
+    authenticated: &str,
+    csrf: &str,
+) -> axum::response::Response {
+    super::tests::post_form(
+        app,
+        &format!("/apps/{app_id}/rollback"),
+        authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await
+}
+
+async fn observe_deployment_stages(path: &std::path::Path, app_id: &str) -> Vec<String> {
+    let mut seen = Vec::new();
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let catalog = hakobi::catalog::Catalog::open(path).unwrap();
+        let Some(deployment) = catalog.get_latest_deployment(app_id).unwrap() else {
+            continue;
+        };
+        if seen.last().map(String::as_str) != Some(deployment.status.as_str()) {
+            seen.push(deployment.status.clone());
+        }
+        if deployment.status == "running" || deployment.status == "failed" {
+            return seen;
+        }
+    }
+}
+
+fn assert_stages_in_order(seen: &[String]) {
+    let mut positions = Vec::new();
+    for stage in ["building", "deploying", "running"] {
+        let position = seen.iter().position(|s| s == stage);
+        assert!(position.is_some(), "stage {stage} not observed in {seen:?}");
+        positions.push(position.unwrap());
+    }
+    assert!(
+        positions.windows(2).all(|pair| pair[0] <= pair[1]),
+        "stages out of order: {seen:?}"
+    );
+}
+
+fn stalled_runner() -> (BuildRunnerClient, std::net::SocketAddr) {
+    let stalled = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let stalled_address = stalled.local_addr().unwrap();
+    let stalled_runner =
+        BuildRunnerClient::new(&format!("http://{stalled_address}"), None).unwrap();
+    // Keep the stalled listener alive without accepting.
+    std::thread::spawn(move || {
+        let _listener = stalled;
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    });
+    (stalled_runner, stalled_address)
+}
+
+fn clone_app_with_stalled_runner(app: &Router) -> Router {
+    let directory = tempfile::tempdir().unwrap();
+    // Rebuild the router on the same catalog so the guard is shared.
+    let _ = directory;
+    app.clone()
+}
+
+fn seed_running_deployment(path: &std::path::Path, app_id: &str) {
+    let mut catalog = hakobi::catalog::Catalog::open(path).unwrap();
+    let v1 = catalog
+        .create_deployment(app_id, "manual", None, None)
+        .unwrap();
+    catalog
+        .update_deployment_status(&v1, "running", None)
+        .unwrap();
+}
+
 #[test]
 fn deployment_guard_rejects_a_second_concurrent_claim() {
     let guard = DeploymentGuard::new();
@@ -202,31 +294,9 @@ async fn executor_records_pending_building_deploying_running() {
     assert_eq!(deploy.status(), StatusCode::SEE_OTHER);
 
     // Poll the live status and record each distinct observed stage.
-    let mut seen: Vec<String> = Vec::new();
-    loop {
-        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-        let catalog = hakobi::catalog::Catalog::open(&path).unwrap();
-        let Some(deployment) = catalog.get_latest_deployment(&app_id).unwrap() else {
-            continue;
-        };
-        if seen.last().map(String::as_str) != Some(deployment.status.as_str()) {
-            seen.push(deployment.status.clone());
-        }
-        if deployment.status == "running" || deployment.status == "failed" {
-            break;
-        }
-    }
+    let seen = observe_deployment_stages(&path, &app_id).await;
     // Stages are short-lived; assert they were all observed in order.
-    let mut positions = Vec::new();
-    for stage in ["building", "deploying", "running"] {
-        let position = seen.iter().position(|s| s == stage);
-        assert!(position.is_some(), "stage {stage} not observed in {seen:?}");
-        positions.push(position.unwrap());
-    }
-    assert!(
-        positions.windows(2).all(|pair| pair[0] <= pair[1]),
-        "stages out of order: {seen:?}"
-    );
+    assert_stages_in_order(&seen);
 
     let _ = (
         ExecutorDeps {
@@ -258,51 +328,24 @@ async fn concurrent_deploy_is_rejected_with_conflict() {
     // route with a payload while a first deploy is still running is racy, so
     // we assert the handler contract through a second POST while the first
     // deployment is held by an unresponsive runner.
-    let stalled = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let stalled_address = stalled.local_addr().unwrap();
-    let stalled_runner =
-        BuildRunnerClient::new(&format!("http://{stalled_address}"), None).unwrap();
-    // Keep the stalled listener alive without accepting.
-    std::thread::spawn(move || {
-        let _listener = stalled;
-        std::thread::sleep(std::time::Duration::from_secs(5));
-    });
+    let (stalled_runner, stalled_address) = stalled_runner();
 
     // First deploy: uses the stalled runner, stays in building for a while.
-    let app_with_stalled = {
-        let directory = tempfile::tempdir().unwrap();
-        // Rebuild the router on the same catalog so the guard is shared.
-        let _ = directory;
-        app.clone()
-    };
+    let app_with_stalled = clone_app_with_stalled_runner(&app);
     let _ = &app_with_stalled;
 
     // Directly exercise the handler path: claim the guard the same way the
     // executor does, then POST.
     // The app state guard is not directly reachable, so emulate the conflict
     // by racing two webhooks: the first claims, the second conflicts.
-    let first = super::tests::post_form(
-        &app_with_stalled,
-        &format!("/apps/{app_id}/deploy"),
-        &authenticated.clone(),
-        "null",
-        format!("csrf_token={csrf}"),
-    )
-    .await;
+    let first = post_deploy(&app_with_stalled, &app_id, &authenticated, &csrf).await;
     assert_eq!(first.status(), StatusCode::SEE_OTHER);
 
     // Immediately queue a second deploy; the executor of the first may have
     // already finished, so poll until we observe either a conflict notice or
     // a terminal deployment. The conflict notice is deterministic when the
     // first deploy is still running.
-    let second = super::tests::post_form(
-        &app,
-        &format!("/apps/{app_id}/deploy"),
-        &authenticated,
-        "null",
-        format!("csrf_token={csrf}"),
-    )
-    .await;
+    let second = post_deploy(&app, &app_id, &authenticated, &csrf).await;
     assert_eq!(second.status(), StatusCode::SEE_OTHER);
     let location = second.headers().get("location").unwrap().to_str().unwrap();
     let _ = stalled_runner;
@@ -326,24 +369,9 @@ async fn rollback_redeploys_running_version_and_reports_missing() {
     let (authenticated, csrf) = sign_in(&app).await;
 
     // A prior running deployment (v1) recorded directly.
-    {
-        let mut catalog = hakobi::catalog::Catalog::open(&path).unwrap();
-        let v1 = catalog
-            .create_deployment(&app_id, "manual", None, None)
-            .unwrap();
-        catalog
-            .update_deployment_status(&v1, "running", None)
-            .unwrap();
-    }
+    seed_running_deployment(&path, &app_id);
 
-    let rollback = super::tests::post_form(
-        &app,
-        &format!("/apps/{app_id}/rollback"),
-        &authenticated.clone(),
-        "null",
-        format!("csrf_token={csrf}"),
-    )
-    .await;
+    let rollback = post_rollback(&app, &app_id, &authenticated, &csrf).await;
     assert_eq!(rollback.status(), StatusCode::SEE_OTHER);
     let location = rollback
         .headers()
@@ -361,14 +389,7 @@ async fn rollback_redeploys_running_version_and_reports_missing() {
     let path2 = data2.path().join("catalog.sqlite3");
     let (_host2, app2_id) = seed_app(&path2, None);
     let (authenticated2, csrf2) = sign_in(&app2).await;
-    let rollback_empty = super::tests::post_form(
-        &app2,
-        &format!("/apps/{app2_id}/rollback"),
-        &authenticated2,
-        "null",
-        format!("csrf_token={csrf2}"),
-    )
-    .await;
+    let rollback_empty = post_rollback(&app2, &app2_id, &authenticated2, &csrf2).await;
     assert_eq!(rollback_empty.status(), StatusCode::SEE_OTHER);
     let location2 = rollback_empty
         .headers()

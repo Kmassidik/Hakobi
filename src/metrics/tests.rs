@@ -113,6 +113,15 @@ fn rollups_round_trip_for_all_tables() -> Result<()> {
 
 #[test]
 fn rollup_calculation_is_correct() {
+    assert_live_rollup_calculation();
+    assert_five_minute_rollup_calculation();
+    assert_hourly_rollup_calculation();
+
+    // Empty windows stay zero-valued instead of dividing by zero.
+    assert_eq!(rollup_from_live(&[]), Rollup1m::default());
+}
+
+fn assert_live_rollup_calculation() {
     let samples = vec![
         sample(10.0, 1_000, 2_000),
         sample(30.0, 3_000, 4_000),
@@ -127,7 +136,9 @@ fn rollup_calculation_is_correct() {
     assert_eq!(rollup.disk_used, 40 * 1_048_576);
     assert!((rollup.network_rx_avg - 1_000.0).abs() < 1e-9);
     assert!((rollup.network_tx_avg - 500.0).abs() < 1e-9);
+}
 
+fn assert_five_minute_rollup_calculation() {
     let rollup_5m = combine_1m(&[
         Rollup1m {
             cpu_avg: 0.0,
@@ -152,7 +163,9 @@ fn rollup_calculation_is_correct() {
     assert!((rollup_5m.cpu_max - 30.0).abs() < 1e-9);
     assert!((rollup_5m.memory_avg - 10.0).abs() < 1e-9);
     assert_eq!(rollup_5m.disk_used, 300);
+}
 
+fn assert_hourly_rollup_calculation() {
     let rollup_1h = combine_5m(&[
         Rollup5m {
             cpu_avg: 0.0,
@@ -174,9 +187,6 @@ fn rollup_calculation_is_correct() {
     assert!((rollup_1h.cpu_avg - 5.0).abs() < 1e-9);
     assert!((rollup_1h.memory_avg - 50.0).abs() < 1e-9);
     assert_eq!(rollup_1h.disk_used, 900);
-
-    // Empty windows stay zero-valued instead of dividing by zero.
-    assert_eq!(rollup_from_live(&[]), Rollup1m::default());
 }
 
 #[test]

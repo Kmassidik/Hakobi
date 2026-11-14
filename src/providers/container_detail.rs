@@ -69,36 +69,14 @@ impl DockerInspect {
     pub(crate) fn from_bollard(inspect: &ContainerInspectResponse) -> Self {
         let config = inspect.config.as_ref();
         let state = inspect.state.as_ref();
-        let mut command = inspect.path.clone().unwrap_or_default();
-        if let Some(args) = inspect.args.as_ref() {
-            if !args.is_empty() {
-                command.push(' ');
-                command.push_str(&args.join(" "));
-            }
-        }
+        let command = container_command(inspect);
         let image = config
             .and_then(|config| config.image.clone())
             .filter(|image| !image.is_empty())
             .unwrap_or_else(|| "unknown".into());
         let ports = network_ports(inspect.network_settings.as_ref());
-        let mounts = inspect
-            .mounts
-            .as_deref()
-            .unwrap_or_default()
-            .iter()
-            .map(|mount| ContainerMount {
-                source: mount.source.clone().unwrap_or_default(),
-                destination: mount.destination.clone().unwrap_or_default(),
-                mode: mount.mode.clone().unwrap_or_default(),
-                read_only: !mount.rw.unwrap_or(true),
-            })
-            .collect();
-        let mut labels = config
-            .and_then(|config| config.labels.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .collect::<Vec<_>>();
-        labels.sort();
+        let mounts = container_mounts(inspect);
+        let labels = container_labels(inspect);
         Self {
             id: inspect.id.clone().unwrap_or_default(),
             name: inspect
@@ -132,6 +110,44 @@ impl DockerInspect {
             labels,
         }
     }
+}
+
+fn container_command(inspect: &ContainerInspectResponse) -> String {
+    let mut command = inspect.path.clone().unwrap_or_default();
+    if let Some(args) = inspect.args.as_ref() {
+        if !args.is_empty() {
+            command.push(' ');
+            command.push_str(&args.join(" "));
+        }
+    }
+    command
+}
+
+fn container_mounts(inspect: &ContainerInspectResponse) -> Vec<ContainerMount> {
+    inspect
+        .mounts
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|mount| ContainerMount {
+            source: mount.source.clone().unwrap_or_default(),
+            destination: mount.destination.clone().unwrap_or_default(),
+            mode: mount.mode.clone().unwrap_or_default(),
+            read_only: !mount.rw.unwrap_or(true),
+        })
+        .collect()
+}
+
+fn container_labels(inspect: &ContainerInspectResponse) -> Vec<(String, String)> {
+    let mut labels = inspect
+        .config
+        .as_ref()
+        .and_then(|config| config.labels.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels
 }
 
 impl DockerContainerUsage {

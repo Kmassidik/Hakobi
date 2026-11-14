@@ -61,58 +61,68 @@ fn github_settings_page_markup(
                     p class="mt-4 max-w-[40rem] leading-[1.7] text-muted" {
                         "Connect repositories for automated builds and deployments, and show your GitHub identity in the dashboard."
                     }
-
-                    section class="mt-8 grid grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
-                        div class="flex items-center justify-between gap-4" {
-                            div {
-                                h2 class="m-0 text-[1.05rem] font-bold" { "GitHub App" }
-                                @if app_installed {
-                                    p class="m-0 mt-1 text-sm text-emerald-600" { "Installed — repositories are scannable." }
-                                } @else {
-                                    p class="m-0 mt-1 text-sm text-muted" { "Not installed yet." }
-                                }
-                            }
-                            @if app_installed {
-                                span class="rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700" { "Connected" }
-                            } @else {
-                                span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Not connected" }
-                            }
-                        }
-                        @if !app_installed {
-                            form method="post" action="/settings/github/install" {
-                                button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Install GitHub App" }
-                                p class="m-0 mt-2 text-xs text-muted" {
-                                    "Opens github.com to approve access. Hakobi never receives your GitHub password."
-                                }
-                            }
-                        } @else {
-                            p class="m-0 text-xs text-muted" {
-                                "Manage repository access in your GitHub settings under Applications."
-                            }
-                        }
-                    }
-
-                    section class="mt-5 grid grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
-                        div class="flex items-center justify-between gap-4" {
-                            div {
-                                h2 class="m-0 text-[1.05rem] font-bold" { "Your GitHub identity" }
-                                @if let Some(login) = github_login {
-                                    p class="m-0 mt-1 text-sm text-muted" { "Signed in as " (login) }
-                                } @else {
-                                    p class="m-0 mt-1 text-sm text-muted" { "Connect to pick repositories in the app form." }
-                                }
-                            }
-                        }
-                        @if github_login.is_none() && app_installed {
-                            form method="post" action="/settings/github/connect" {
-                                button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Sign in with GitHub" }
-                            }
-                        }
-                    }
+                    (github_app_section(app_installed))
+                    (github_identity_section(github_login, app_installed))
                 }
             }
         },
     )
+}
+
+fn github_app_section(app_installed: bool) -> Markup {
+    html! {
+        section class="mt-8 grid grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+            div class="flex items-center justify-between gap-4" {
+                div {
+                    h2 class="m-0 text-[1.05rem] font-bold" { "GitHub App" }
+                    @if app_installed {
+                        p class="m-0 mt-1 text-sm text-emerald-600" { "Installed — repositories are scannable." }
+                    } @else {
+                        p class="m-0 mt-1 text-sm text-muted" { "Not installed yet." }
+                    }
+                }
+                @if app_installed {
+                    span class="rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700" { "Connected" }
+                } @else {
+                    span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Not connected" }
+                }
+            }
+            @if !app_installed {
+                form method="post" action="/settings/github/install" {
+                    button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Install GitHub App" }
+                    p class="m-0 mt-2 text-xs text-muted" {
+                        "Opens github.com to approve access. Hakobi never receives your GitHub password."
+                    }
+                }
+            } @else {
+                p class="m-0 text-xs text-muted" {
+                    "Manage repository access in your GitHub settings under Applications."
+                }
+            }
+        }
+    }
+}
+
+fn github_identity_section(github_login: Option<&str>, app_installed: bool) -> Markup {
+    html! {
+        section class="mt-5 grid grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+            div class="flex items-center justify-between gap-4" {
+                div {
+                    h2 class="m-0 text-[1.05rem] font-bold" { "Your GitHub identity" }
+                    @if let Some(login) = github_login {
+                        p class="m-0 mt-1 text-sm text-muted" { "Signed in as " (login) }
+                    } @else {
+                        p class="m-0 mt-1 text-sm text-muted" { "Connect to pick repositories in the app form." }
+                    }
+                }
+            }
+            @if github_login.is_none() && app_installed {
+                form method="post" action="/settings/github/connect" {
+                    button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Sign in with GitHub" }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -178,17 +188,7 @@ pub(crate) async fn github_connect_callback(
         .user_agent("hakobi-control-plane")
         .build()
         .unwrap_or_default();
-    let client_id = app.client_id;
-    let client_secret = app.client_secret;
-    let code = query.code;
-    let (token, login, uid) = match hakobi::github::GithubClient::exchange_user_code(
-        &http,
-        &client_id,
-        &client_secret,
-        &code,
-    )
-    .await
-    {
+    let (token, login, uid) = match exchange_github_identity(&http, &app, &query.code).await {
         Ok(result) => result,
         Err(_) => return (StatusCode::BAD_GATEWAY, "GitHub exchange failed").into_response(),
     };
@@ -208,6 +208,15 @@ pub(crate) async fn github_connect_callback(
         }
     }
     axum::response::Redirect::to("/settings").into_response()
+}
+
+async fn exchange_github_identity(
+    http: &reqwest::Client,
+    app: &hakobi::catalog::GithubApp,
+    code: &str,
+) -> anyhow::Result<(String, String, i64)> {
+    hakobi::github::GithubClient::exchange_user_code(http, &app.client_id, &app.client_secret, code)
+        .await
 }
 
 /// DELETE /settings/github — disconnect the user's GitHub identity.
@@ -240,7 +249,25 @@ pub(crate) async fn github_install_start(
     let name = format!("hakobi-{}", hex::encode(suffix));
     let base = state.config.base_url.trim_end_matches('/');
     let flow_state = hex::encode(suffix);
-    let manifest = serde_json::json!({
+    let manifest = github_app_manifest(base, &name);
+    let cookie_value = format!(
+        "{flow_state}:{}",
+        serde_json::to_string(&manifest).unwrap_or_default()
+    );
+    let cookie =
+        crate::web::auth::create_cookie(&state.config, "hakobi_gh_manifest", &cookie_value, 3600);
+    // GitHub's manifest flow: form POST of `manifest` (raw JSON string) to
+    // github.com/settings/apps/new with `state` in the query string.
+    let page = github_manifest_page(&manifest, &flow_state);
+    let mut response = super::html_response(StatusCode::OK, page, Vec::new());
+    response
+        .headers_mut()
+        .insert(axum::http::header::SET_COOKIE, cookie.parse().unwrap());
+    response
+}
+
+fn github_app_manifest(base: &str, name: &str) -> serde_json::Value {
+    serde_json::json!({
         "name": name,
         "url": base,
         "hook_attributes": { "url": format!("{base}/webhooks/github"), "active": true },
@@ -255,16 +282,11 @@ pub(crate) async fn github_install_start(
             "pull_requests": "read"
         },
         "default_events": ["push", "pull_request"],
-    });
-    let cookie_value = format!(
-        "{flow_state}:{}",
-        serde_json::to_string(&manifest).unwrap_or_default()
-    );
-    let cookie =
-        crate::web::auth::create_cookie(&state.config, "hakobi_gh_manifest", &cookie_value, 3600);
-    // GitHub's manifest flow: form POST of `manifest` (raw JSON string) to
-    // github.com/settings/apps/new with `state` in the query string.
-    let page = html! {
+    })
+}
+
+fn github_manifest_page(manifest: &serde_json::Value, flow_state: &str) -> Markup {
+    html! {
         head {
             title { "Redirecting to GitHub…" }
         }
@@ -278,12 +300,7 @@ pub(crate) async fn github_install_start(
             }
             script { "document.getElementById('gh-manifest').submit();" }
         }
-    };
-    let mut response = super::html_response(StatusCode::OK, page, Vec::new());
-    response
-        .headers_mut()
-        .insert(axum::http::header::SET_COOKIE, cookie.parse().unwrap());
-    response
+    }
 }
 
 /// GET /settings/github/manifest-callback — GitHub redirects here after the

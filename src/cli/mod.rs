@@ -84,6 +84,14 @@ pub async fn setup(store: &ConfigStore, local: bool) -> Result<()> {
 
     let listen_port = listen_port()?;
     println!("Hakobi first-run setup\n");
+    let (username, password_hash) = prompt_credentials().await?;
+    if local {
+        return setup_local(store, username, password_hash, listen_port);
+    }
+    setup_cloudflare(store, username, password_hash, listen_port).await
+}
+
+async fn prompt_credentials() -> Result<(String, String)> {
     let username: String = Input::new()
         .with_prompt("Username")
         .default("admin".into())
@@ -100,15 +108,30 @@ pub async fn setup(store: &ConfigStore, local: bool) -> Result<()> {
     let password_hash = task::spawn_blocking(move || auth::hash_password(&password_for_hash))
         .await
         .context("password hashing task failed")??;
+    Ok((username, password_hash))
+}
 
-    if local {
-        let local_url = local_base_url(listen_port);
-        let config = Config::new(username, password_hash, local_url.clone(), None)?;
-        store.save_new(&config)?;
-        println!("\nLocal setup complete. Open {local_url} after running `hakobi run`.");
-        return Ok(());
-    }
+fn setup_local(
+    store: &ConfigStore,
+    username: String,
+    password_hash: String,
+    listen_port: u16,
+) -> Result<()> {
+    let local_url = local_base_url(listen_port);
+    let config = Config::new(username, password_hash, local_url.clone(), None)?;
+    store.save_new(&config)?;
+    println!("\nLocal setup complete. Open {local_url} after running `hakobi run`.");
+    Ok(())
+}
 
+struct CloudflareSetupInput {
+    base_url: String,
+    account_id: String,
+    zone_id: String,
+    api_token: Zeroizing<String>,
+}
+
+fn prompt_cloudflare_input() -> Result<CloudflareSetupInput> {
     let base_url: String = Input::new()
         .with_prompt("Public base URL (for example, https://hakobi.example.com)")
         .validate_with(|value: &String| validate_public_base_url(value))
@@ -133,9 +156,52 @@ pub async fn setup(store: &ConfigStore, local: bool) -> Result<()> {
             })
             .interact()?,
     );
+    Ok(CloudflareSetupInput {
+        base_url,
+        account_id,
+        zone_id,
+        api_token,
+    })
+}
 
-    let config = Config::new(username, password_hash, base_url.clone(), None)?;
-    let hostname = config.hostname()?.to_owned();
+async fn provision_cloudflare(
+    input: &CloudflareSetupInput,
+    hostname: &str,
+    listen_port: u16,
+) -> Result<(CloudflareClient, CreatedTunnel, Option<String>)> {
+    let client = CloudflareClient::new(input.api_token.to_string())?;
+    let tunnel_name = format!("hakobi-{hostname}");
+    let tunnel = client
+        .create_tunnel(&input.account_id, &tunnel_name)
+        .await?;
+    let mut dns_record_id = None;
+    let provisioning = async {
+        client
+            .configure_tunnel(&input.account_id, tunnel.id, hostname, listen_port)
+            .await?;
+        let record = client
+            .create_dns_record(&input.zone_id, hostname, tunnel.id)
+            .await?;
+        dns_record_id = Some(record.id);
+        Ok(())
+    }
+    .await;
+    if let Err(error) = provisioning {
+        rollback(
+            &client,
+            &input.account_id,
+            &input.zone_id,
+            &tunnel,
+            hostname,
+            dns_record_id.as_deref(),
+        )
+        .await;
+        return Err(error);
+    }
+    Ok((client, tunnel, dns_record_id))
+}
+
+fn confirm_cloudflare_setup(hostname: &str) -> Result<()> {
     println!("\nHakobi will create a tunnel and a proxied DNS record for {hostname}.");
     println!("An existing DNS record with the same name will not be overwritten.");
     if !Confirm::new()
@@ -145,53 +211,46 @@ pub async fn setup(store: &ConfigStore, local: bool) -> Result<()> {
     {
         bail!("setup cancelled");
     }
+    Ok(())
+}
 
-    let client = CloudflareClient::new(api_token.to_string())?;
-    let tunnel_name = format!("hakobi-{hostname}");
-    let tunnel = client.create_tunnel(&account_id, &tunnel_name).await?;
-    let mut dns_record_id = None;
-
-    let provisioning = async {
-        client
-            .configure_tunnel(&account_id, tunnel.id, &hostname, listen_port)
-            .await?;
-        let record = client
-            .create_dns_record(&zone_id, &hostname, tunnel.id)
-            .await?;
-        dns_record_id = Some(record.id);
-        Ok(())
-    }
-    .await;
-
-    if let Err(error) = provisioning {
-        rollback(
-            &client,
-            &account_id,
-            &zone_id,
-            &tunnel,
-            &hostname,
-            dns_record_id.as_deref(),
-        )
-        .await;
-        return Err(error);
-    }
-
-    let config = Config::new(
+fn cloudflare_config(
+    config: &Config,
+    input: &CloudflareSetupInput,
+    tunnel: &CreatedTunnel,
+) -> Result<Config> {
+    Config::new(
         config.auth.username.clone(),
         config.auth.password_hash.clone(),
-        base_url.clone(),
+        input.base_url.clone(),
         Some(CloudflareConfig {
-            account_id: account_id.clone(),
-            zone_id: zone_id.clone(),
+            account_id: input.account_id.clone(),
+            zone_id: input.zone_id.clone(),
             tunnel_id: tunnel.id.to_string(),
             tunnel_token: tunnel.token.clone(),
         }),
-    )?;
+    )
+}
+
+async fn setup_cloudflare(
+    store: &ConfigStore,
+    username: String,
+    password_hash: String,
+    listen_port: u16,
+) -> Result<()> {
+    let input = prompt_cloudflare_input()?;
+    let config = Config::new(username, password_hash, input.base_url.clone(), None)?;
+    let hostname = config.hostname()?.to_owned();
+    confirm_cloudflare_setup(&hostname)?;
+
+    let (client, tunnel, dns_record_id) =
+        provision_cloudflare(&input, &hostname, listen_port).await?;
+    let config = cloudflare_config(&config, &input, &tunnel)?;
     if let Err(error) = store.save_new(&config) {
         rollback(
             &client,
-            &account_id,
-            &zone_id,
+            &input.account_id,
+            &input.zone_id,
             &tunnel,
             &hostname,
             dns_record_id.as_deref(),
@@ -292,14 +351,18 @@ pub async fn serve(store: &ConfigStore) -> Result<()> {
         }
     };
 
-    if let Some(tunnel) = &mut tunnel {
+    stop_tunnel(&mut tunnel).await;
+    sampler.abort();
+    retention.abort();
+    outcome
+}
+
+async fn stop_tunnel(tunnel: &mut Option<TunnelProcess>) {
+    if let Some(tunnel) = tunnel {
         if let Err(error) = tunnel.terminate().await {
             eprintln!("warning: could not stop cloudflared cleanly: {error:#}");
         }
     }
-    sampler.abort();
-    retention.abort();
-    outcome
 }
 
 /// Registers the automatically managed local Docker provider before serving.

@@ -161,30 +161,18 @@ impl Catalog {
         if app_name_taken(&transaction, name, None)? {
             bail!("app {name} already exists");
         }
-        transaction.execute(
-            "INSERT INTO apps \
-                 (id, name, host_id, build_type, github_repo, github_branch, \
-                  github_path, github_dockerfile, github_auto_deploy, container_port, \
-                  status, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'idle', \
-                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            params![
-                id,
-                name,
-                host_id,
-                build_type,
-                github_repo.map(str::trim).filter(|value| !value.is_empty()),
-                github_branch
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty()),
-                github_path.map(str::trim).filter(|value| !value.is_empty()),
-                github_dockerfile
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty()),
-                i64::from(github_auto_deploy),
-                container_port,
-            ],
+        insert_app(
+            &transaction,
+            &id,
+            name,
+            host_id,
+            build_type,
+            github_repo,
+            github_branch,
+            github_path,
+            github_dockerfile,
+            github_auto_deploy,
+            container_port,
         )?;
         super::record_created(&transaction, "app", &id)?;
         transaction.commit()?;
@@ -245,30 +233,19 @@ impl Catalog {
         if app_name_taken(&transaction, name, Some(id))? {
             bail!("app {name} already exists");
         }
-        let updated = transaction.execute(
-            "UPDATE apps \
-             SET name = ?2, host_id = ?3, build_type = ?4, github_repo = ?5, \
-                 github_branch = ?6, github_path = ?7, github_dockerfile = ?8, \
-                 github_auto_deploy = ?9, container_port = ?10, env_json = ?11, \
-                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-             WHERE id = ?1",
-            params![
-                id,
-                name,
-                host_id,
-                build_type,
-                github_repo.map(str::trim).filter(|value| !value.is_empty()),
-                github_branch
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty()),
-                github_path.map(str::trim).filter(|value| !value.is_empty()),
-                github_dockerfile
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty()),
-                i64::from(github_auto_deploy),
-                container_port,
-                env_json,
-            ],
+        let updated = update_app_record(
+            &transaction,
+            id,
+            name,
+            host_id,
+            build_type,
+            github_repo,
+            github_branch,
+            github_path,
+            github_dockerfile,
+            github_auto_deploy,
+            container_port,
+            env_json,
         )?;
         if updated == 0 {
             bail!("app {id} not found");
@@ -310,6 +287,90 @@ impl Catalog {
         transaction.commit()?;
         Ok(())
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_app(
+    transaction: &rusqlite::Transaction<'_>,
+    id: &str,
+    name: &str,
+    host_id: &str,
+    build_type: &str,
+    github_repo: Option<&str>,
+    github_branch: Option<&str>,
+    github_path: Option<&str>,
+    github_dockerfile: Option<&str>,
+    github_auto_deploy: bool,
+    container_port: Option<u16>,
+) -> Result<()> {
+    transaction.execute(
+        "INSERT INTO apps \
+             (id, name, host_id, build_type, github_repo, github_branch, \
+              github_path, github_dockerfile, github_auto_deploy, container_port, \
+              status, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'idle', \
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
+                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        params![
+            id,
+            name,
+            host_id,
+            build_type,
+            github_repo.map(str::trim).filter(|value| !value.is_empty()),
+            github_branch
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+            github_path.map(str::trim).filter(|value| !value.is_empty()),
+            github_dockerfile
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+            i64::from(github_auto_deploy),
+            container_port,
+        ],
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_app_record(
+    transaction: &rusqlite::Transaction<'_>,
+    id: &str,
+    name: &str,
+    host_id: &str,
+    build_type: &str,
+    github_repo: Option<&str>,
+    github_branch: Option<&str>,
+    github_path: Option<&str>,
+    github_dockerfile: Option<&str>,
+    github_auto_deploy: bool,
+    container_port: Option<u16>,
+    env_json: &str,
+) -> Result<usize> {
+    Ok(transaction.execute(
+        "UPDATE apps \
+         SET name = ?2, host_id = ?3, build_type = ?4, github_repo = ?5, \
+             github_branch = ?6, github_path = ?7, github_dockerfile = ?8, \
+             github_auto_deploy = ?9, container_port = ?10, env_json = ?11, \
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+         WHERE id = ?1",
+        params![
+            id,
+            name,
+            host_id,
+            build_type,
+            github_repo.map(str::trim).filter(|value| !value.is_empty()),
+            github_branch
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+            github_path.map(str::trim).filter(|value| !value.is_empty()),
+            github_dockerfile
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+            i64::from(github_auto_deploy),
+            container_port,
+            env_json,
+        ],
+    )?)
 }
 
 fn ensure_enabled_host(transaction: &rusqlite::Transaction<'_>, host_id: &str) -> Result<()> {

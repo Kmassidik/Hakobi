@@ -1,0 +1,343 @@
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+};
+use hakobi::{
+    catalog::Catalog,
+    install::{Readiness, ToolStatus},
+};
+use maud::{html, Markup};
+
+use super::super::{authenticated, html_response, page_csrf};
+use super::{cloudflare::fetch_cf_domains, readiness::load_readiness, CfDomainRow};
+use crate::web::AppState;
+
+/// GET /settings — the unified settings page.
+pub(crate) async fn settings_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    let (csrf_token, cookies) = page_csrf(&state, &headers);
+    let readiness = match load_readiness().await {
+        Ok(readiness) => readiness,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+    let Ok(catalog) = Catalog::open((*state.catalog_path).clone()) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let app_installed = catalog.github_app_installed().unwrap_or(false);
+    let app_registered = catalog.github_app_registered().unwrap_or(false);
+    let app_slug = catalog.github_app_slug().unwrap_or(None);
+    let connection = catalog
+        .load_github_connection(&state.config.username)
+        .ok()
+        .flatten();
+    let (default_branch, auto_deploy) = deployment_defaults(&catalog);
+
+    // Cloudflare failures degrade to an empty list so the page still renders.
+    let cf_domains = fetch_cf_domains(&state).await.unwrap_or_default();
+    let page = SettingsPage {
+        base_url: &state.config.base_url,
+        username: &state.config.username,
+        app_installed,
+        app_registered,
+        app_slug: app_slug.as_deref(),
+        github_login: connection.as_ref().map(|c| c.github_login.as_str()),
+        default_branch: &default_branch,
+        auto_deploy,
+        csrf_token: &csrf_token,
+        cf_domains,
+    };
+    let markup = settings_page_markup(&page, &readiness);
+    html_response(StatusCode::OK, markup, cookies)
+}
+
+fn deployment_defaults(catalog: &Catalog) -> (String, bool) {
+    let default_branch = catalog
+        .settings_get("default_branch")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "main".to_owned());
+    let auto_deploy = catalog
+        .settings_get("auto_deploy_default")
+        .ok()
+        .flatten()
+        .map(|v| v == "1")
+        .unwrap_or(true);
+    (default_branch, auto_deploy)
+}
+
+struct SettingsPage<'a> {
+    base_url: &'a str,
+    username: &'a str,
+    app_installed: bool,
+    app_registered: bool,
+    app_slug: Option<&'a str>,
+    github_login: Option<&'a str>,
+    default_branch: &'a str,
+    auto_deploy: bool,
+    csrf_token: &'a str,
+    cf_domains: Vec<CfDomainRow>,
+}
+
+fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Markup {
+    crate::web::templates::page(
+        "Settings · Hakobi",
+        html! {
+            div class="min-h-screen bg-[#f5f5f7] lg:pl-60" {
+                (crate::web::templates::sidebar("settings", page.base_url, page.username, page.csrf_token))
+                (crate::web::templates::mobile_header(page.csrf_token, page.username))
+                main class="mx-auto w-[92%] max-w-[60rem] pb-24 pt-10 lg:pt-16" {
+                    p class="mb-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-brand-bright" { "Settings" }
+                    h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Settings" }
+                    (github_section(page))
+                    (tools_section(readiness))
+                    (defaults_section(page))
+                    (cloudflare_section(page))
+                    (instance_section(page))
+                }
+            }
+        },
+    )
+}
+
+fn github_section(page: &SettingsPage<'_>) -> Markup {
+    html! {
+        section class="mt-8 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="gh-heading" {
+            div class="flex items-center justify-between gap-4" {
+                div class="flex items-center gap-3" {
+                    i class="fa-brands fa-github text-[1.5rem] text-ink" aria-hidden="true" {}
+                    h2 id="gh-heading" class="m-0 text-[1.05rem] font-bold" { "GitHub" }
+                }
+                (github_status(page))
+            }
+            p class="m-0 mt-2 max-w-[36rem] text-sm leading-relaxed text-muted" {
+                "Install the Hakobi GitHub App to scan repositories, build on push, and report commit statuses. Sign in with GitHub to pick your repos in the app form."
+            }
+            div class="mt-4 flex flex-wrap items-center gap-3" {
+                (github_actions(page))
+            }
+        }
+    }
+}
+
+fn github_status(page: &SettingsPage<'_>) -> Markup {
+    html! {
+        @if page.app_installed {
+            span class="rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700" { "Connected" }
+        } @else if page.app_registered {
+            span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Registered — install pending" }
+        } @else {
+            span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Not connected" }
+        }
+    }
+}
+
+fn github_actions(page: &SettingsPage<'_>) -> Markup {
+    html! {
+        @if page.app_installed {
+            @if let Some(login) = page.github_login {
+                span class="text-sm text-muted" { "Signed in as " (login) }
+            } @else {
+                form method="post" action="/settings/github/connect" class="m-0" {
+                    button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Sign in with GitHub" }
+                }
+            }
+        } @else if page.app_registered {
+            @if let Some(slug) = page.app_slug {
+                a href=(format!("https://github.com/apps/{slug}/installations/new"))
+                    class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white no-underline" {
+                    "Install on GitHub"
+                }
+            }
+            form method="post" action="/settings/github/recheck" class="m-0" {
+                button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Check installation" }
+            }
+        } @else {
+            form method="post" action="/settings/github/install" class="m-0" {
+                button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Install GitHub App" }
+            }
+            span class="text-xs text-muted" { "Approve on github.com — no passwords shared." }
+        }
+    }
+}
+
+fn tools_section(readiness: &Readiness) -> Markup {
+    html! {
+        section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="tools-heading" {
+            h2 id="tools-heading" class="m-0 text-[1.05rem] font-bold" { "Build tools" }
+            p class="m-0 mt-1 text-sm text-muted" {
+                "Detected on the control-plane host. An app can use a tool once its badge is green."
+            }
+            div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" {
+                (tool_tile("fab fa-docker", "Docker", &readiness.docker, "Container builds, compose, deploys"))
+                (tool_tile("fas fa-cube", "Nixpacks", &readiness.nixpacks, "Zero-config builds — pick as build type"))
+                (tool_tile("fas fa-dharmachakra", "Kubernetes", &readiness.kubectl, "Planned — deploy target not wired yet"))
+            }
+        }
+    }
+}
+
+fn tool_tile(icon: &str, name: &str, status: &ToolStatus, description: &str) -> Markup {
+    let ready = matches!(status, ToolStatus::Ready { .. });
+    let (badge_class, badge_text, tile_class) = if ready {
+        ("bg-emerald-50 text-emerald-700", "Ready", "")
+    } else {
+        ("bg-amber-50 text-amber-700", "Not installed", "opacity-70")
+    };
+    let version = match status {
+        ToolStatus::Ready { version } => version.as_str(),
+        _ => "—",
+    };
+    html! {
+        div class=(format!("rounded-xl border border-line bg-white p-4 {tile_class}")) {
+            div class="flex items-center justify-between gap-2" {
+                i class=(format!("{icon} text-[1.4rem] text-ink")) aria-hidden="true" {}
+                span class=(format!("rounded-full px-2.5 py-1 text-[0.62rem] font-bold {badge_class}")) { (badge_text) }
+            }
+            p class="m-0 mt-3 font-mono text-[0.95rem] font-semibold" { (version) }
+            p class="m-0 mt-1 text-[0.8rem] font-bold" { (name) }
+            p class="m-0 mt-0.5 text-xs leading-snug text-muted" { (description) }
+        }
+    }
+}
+
+fn defaults_section(page: &SettingsPage<'_>) -> Markup {
+    html! {
+        section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="defaults-heading" {
+            h2 id="defaults-heading" class="m-0 text-[1.05rem] font-bold" { "Deployment defaults" }
+            p class="m-0 mt-1 text-sm text-muted" { "Applied to newly created apps." }
+            form method="post" action="/settings/defaults" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end" {
+                label class="grid gap-1.5" {
+                    span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Default branch" }
+                    input name="page.default_branch" value=(page.default_branch) class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" required;
+                }
+                div class="flex items-end gap-3" {
+                    label class="flex items-center gap-2 pb-2.5 text-sm" {
+                        input name="page.auto_deploy_default" type="checkbox" value="1" checked[page.auto_deploy] class="size-4";
+                        "Auto-deploy on push"
+                    }
+                    button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Save" }
+                }
+            }
+        }
+    }
+}
+
+fn cloudflare_section(page: &SettingsPage<'_>) -> Markup {
+    html! {
+        section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="cf-heading" {
+            h2 id="cf-heading" class="m-0 text-[1.05rem] font-bold" { "Cloudflare (app domains)" }
+            p class="m-0 mt-1 text-sm text-muted" {
+                "Each deployed app gets a public subdomain on your domain through your Cloudflare Tunnel."
+            }
+            @if !page.cf_domains.is_empty() {
+                (cf_domains_table(page))
+            }
+            (cloudflare_settings_form(page.csrf_token))
+            (subdomain_form(page.csrf_token))
+        }
+    }
+}
+
+fn cf_domains_table(page: &SettingsPage<'_>) -> Markup {
+    html! {
+        div class="mt-4 overflow-x-auto rounded-lg border border-line" {
+            table class="m-0 w-full text-sm" {
+                thead {
+                    tr class="border-b border-line text-left text-[0.7rem] font-bold uppercase tracking-[0.08em] text-muted" {
+                        th class="px-3 py-2" { "Hostname" }
+                        th class="px-3 py-2" { "Type" }
+                        th class="px-3 py-2" { "Proxied" }
+                        th class="px-3 py-2" { "Routes to" }
+                        th class="px-3 py-2 text-right" { "" }
+                    }
+                }
+                tbody {
+                    @for row in &page.cf_domains {
+                        (cf_domain_row(row, page.csrf_token))
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn cf_domain_row(row: &CfDomainRow, csrf_token: &str) -> Markup {
+    html! {
+        tr class="border-b border-line/60 last:border-b-0" {
+            td class="px-3 py-2 font-mono text-[0.8rem] font-semibold" { (row.name) }
+            td class="px-3 py-2 text-muted" { (row.record_type) }
+            td class="px-3 py-2" {
+                @if row.proxied {
+                    span class="rounded-full bg-orange-100 px-2 py-0.5 text-[0.65rem] font-bold text-orange-700" { "proxied" }
+                } @else {
+                    span class="text-muted" { "dns only" }
+                }
+            }
+            td class="px-3 py-2 font-mono text-[0.8rem] text-muted" { (row.service.as_deref().unwrap_or("-")) }
+            td class="px-3 py-2 text-right" {
+                @if let Some(port) = row.service.as_deref().and_then(|service| service.rsplit(':').next()).and_then(|port| port.parse::<u16>().ok()) {
+                    form method="post" action="/settings/cloudflare/domains/delete" class="m-0 inline" {
+                        input type="hidden" name="csrf_token" value=(csrf_token);
+                        input type="hidden" name="hostname" value=(row.name);
+                        input type="hidden" name="record_id" value="";
+                        input type="hidden" name="port" value=(port);
+                        button class="rounded-md border border-danger/40 px-2 py-1 text-[0.7rem] font-bold text-danger transition hover:bg-danger/5" type="submit" { "Delete route" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn cloudflare_settings_form(csrf_token: &str) -> Markup {
+    html! {
+        form method="post" action="/settings/cloudflare" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2" {
+            input type="hidden" name="csrf_token" value=(csrf_token);
+            label class="grid gap-1 text-sm" { "Account ID"
+                input name="account_id" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+            label class="grid gap-1 text-sm" { "Zone ID"
+                input name="zone_id" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+            label class="grid gap-1 text-sm" { "Tunnel ID"
+                input name="tunnel_id" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+            label class="grid gap-1 text-sm" { "Root domain (e.g. glicc.id)"
+                input name="domain" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+            label class="grid gap-1 text-sm sm:col-span-2" { "API token (Tunnel:Edit + DNS:Edit) — stored encrypted"
+                input name="api_token" type="password" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+            div class="sm:col-span-2" {
+                button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Save Cloudflare settings" }
+            }
+        }
+    }
+}
+
+fn subdomain_form(csrf_token: &str) -> Markup {
+    html! {
+        form method="post" action="/settings/cloudflare/domains" class="mt-4 flex flex-wrap items-end gap-3 border-t border-line pt-4" {
+            input type="hidden" name="csrf_token" value=(csrf_token);
+            label class="grid gap-1 text-sm" { "New subdomain"
+                input name="hostname" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" placeholder="myapp" required; }
+            label class="grid gap-1 text-sm" { "Port"
+                input name="port" type="number" min="1" max="65535" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+            button class="rounded-lg border border-line bg-surface px-4 py-2.5 text-sm font-semibold text-ink" type="submit" { "Create subdomain" }
+        }
+    }
+}
+
+fn instance_section(page: &SettingsPage<'_>) -> Markup {
+    html! {
+        section class="mt-6 rounded-[0.85rem] border border-line bg-surface p-6" aria-labelledby="instance-heading" {
+            h2 id="instance-heading" class="m-0 text-[1.05rem] font-bold" { "Instance" }
+            div class="mt-4 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-[10rem_1fr]" {
+                span class="font-semibold" { "Base URL" }
+                span class="break-all text-muted" { (page.base_url) }
+                span class="font-semibold" { "Session lifetime" }
+                span class="text-muted" { "12 hours (JWT)" }
+                span class="font-semibold" { "Signed in as" }
+                span class="text-muted" { (page.username) }
+            }
+        }
+    }
+}

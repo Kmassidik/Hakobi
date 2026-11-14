@@ -153,30 +153,7 @@ pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Res
         .user_agent("hakobi-control-plane")
         .build()
         .unwrap_or_default();
-    let response = http
-        .post(format!(
-            "https://api.github.com/app-manifests/{code}/conversions"
-        ))
-        .header("Accept", "application/vnd.github+json")
-        .header("User-Agent", "hakobi-control-plane")
-        .send()
-        .await;
-    let Ok(response) = response else {
-        return StatusCode::BAD_GATEWAY.into_response();
-    };
-    if !response.status().is_success() {
-        return StatusCode::BAD_GATEWAY.into_response();
-    }
-    #[derive(serde::Deserialize)]
-    struct ManifestConversion {
-        id: i64,
-        slug: Option<String>,
-        client_id: String,
-        client_secret: String,
-        webhook_secret: String,
-        pem: String,
-    }
-    let Ok(conversion) = response.json::<ManifestConversion>().await else {
+    let Some(conversion) = exchange_manifest(&http, code).await else {
         return StatusCode::BAD_GATEWAY.into_response();
     };
     // Registration and installation are separate steps (GitHub manifest flow):
@@ -203,6 +180,32 @@ pub(crate) async fn manifest_exchange_inner(state: &AppState, code: &str) -> Res
         Ok(()) => github_connected_page().into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct ManifestConversion {
+    id: i64,
+    slug: Option<String>,
+    client_id: String,
+    client_secret: String,
+    webhook_secret: String,
+    pem: String,
+}
+
+async fn exchange_manifest(http: &reqwest::Client, code: &str) -> Option<ManifestConversion> {
+    let response = http
+        .post(format!(
+            "https://api.github.com/app-manifests/{code}/conversions"
+        ))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "hakobi-control-plane")
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json::<ManifestConversion>().await.ok()
 }
 
 /// App-JWT lookup of the first installation, if one exists.
@@ -289,6 +292,13 @@ pub(crate) fn github_connected_page() -> axum::response::Response {
     axum::response::Html(page.into_string()).into_response()
 }
 
+fn github_header<'a>(headers: &'a HeaderMap, name: &str) -> &'a str {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+}
+
 /// POST /webhooks/github — the webhook receiver (HMAC-authenticated).
 pub(crate) async fn webhook(
     State(state): State<AppState>,
@@ -299,21 +309,14 @@ pub(crate) async fn webhook(
     if body.len() > MAX_BODY {
         return (StatusCode::PAYLOAD_TOO_LARGE, "webhook payload too large").into_response();
     }
-    let delivery_id = headers
-        .get("x-github-delivery")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-        .to_owned();
+    let delivery_id = github_header(&headers, "x-github-delivery").to_owned();
     let Ok(mut catalog) = Catalog::open((*state.catalog_path).clone()) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Some(app) = catalog.load_github_app().ok().flatten() else {
         return StatusCode::NOT_IMPLEMENTED.into_response();
     };
-    let signature = headers
-        .get("x-hub-signature-256")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
+    let signature = github_header(&headers, "x-hub-signature-256");
     if !verify_webhook_signature(&app.webhook_secret, &body, signature) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
@@ -327,10 +330,7 @@ pub(crate) async fn webhook(
     let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let event = headers
-        .get("x-github-event")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default();
+    let event = github_header(&headers, "x-github-event");
     match event {
         "ping" => StatusCode::OK.into_response(),
         "installation" => handle_installation(&mut catalog, &payload),
@@ -341,19 +341,18 @@ pub(crate) async fn webhook(
     }
 }
 
-/// Push pipeline: match apps, cancel in-flight, trigger deploys.
-async fn handle_push(
-    state: &AppState,
-    catalog: &mut Catalog,
-    payload: &serde_json::Value,
-) -> Response {
-    let Some(repo) = payload
+struct PushMetadata {
+    repo: String,
+    branch: String,
+    sha: String,
+    message: Option<String>,
+}
+
+fn push_metadata(payload: &serde_json::Value) -> Option<PushMetadata> {
+    let repo = payload
         .get("repository")
         .and_then(|r| r["full_name"].as_str())
-        .map(str::to_owned)
-    else {
-        return StatusCode::OK.into_response();
-    };
+        .map(str::to_owned)?;
     let branch = payload
         .get("ref")
         .and_then(|r| r.as_str())
@@ -369,10 +368,35 @@ async fn handle_push(
         .get("head_commit")
         .and_then(|h| h["message"].as_str())
         .map(str::to_owned);
+    Some(PushMetadata {
+        repo,
+        branch,
+        sha,
+        message,
+    })
+}
+
+/// Push pipeline: match apps, cancel in-flight, trigger deploys.
+async fn handle_push(
+    state: &AppState,
+    catalog: &mut Catalog,
+    payload: &serde_json::Value,
+) -> Response {
+    let Some(push) = push_metadata(payload) else {
+        return StatusCode::OK.into_response();
+    };
     let Some(changed) = changed_files_from_push(payload) else {
         // Forced push or huge push: treat as "all files" so every env for
         // this repo+branch rebuilds (path filter passes trivially).
-        return handle_push_all(state, catalog, &repo, &branch, &sha, message.as_deref()).await;
+        return handle_push_all(
+            state,
+            catalog,
+            &push.repo,
+            &push.branch,
+            &push.sha,
+            push.message.as_deref(),
+        )
+        .await;
     };
 
     let apps = catalog.list_apps().unwrap_or_default();
@@ -381,7 +405,7 @@ async fn handle_push(
         let Some(app_repo) = app.github_repo.as_deref() else {
             continue;
         };
-        if app_repo != repo || app.github_branch.as_deref() != Some(branch.as_str()) {
+        if app_repo != push.repo || app.github_branch.as_deref() != Some(push.branch.as_str()) {
             continue;
         }
         if !app.github_auto_deploy {
@@ -391,7 +415,13 @@ async fn handle_push(
         if !path_matches(pattern, &changed) {
             continue;
         }
-        deploy_app(state, catalog, app.id.as_str(), &sha, message.as_deref());
+        deploy_app(
+            state,
+            catalog,
+            app.id.as_str(),
+            &push.sha,
+            push.message.as_deref(),
+        );
         deployed += 1;
     }
     Json(serde_json::json!({ "deployments_triggered": deployed })).into_response()

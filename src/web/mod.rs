@@ -4,17 +4,27 @@ mod deployment;
 mod handlers;
 mod templates;
 #[cfg(test)]
-mod tests {
-    // Contents of tests.rs are included verbatim; the file itself opens and
-    // closes the module braces.
-    include!("tests.rs");
-}
+mod tests;
+#[cfg(test)]
+mod tests_apps;
+#[cfg(test)]
+mod tests_assets;
+#[cfg(test)]
+mod tests_container_detail;
+#[cfg(test)]
+mod tests_containers;
+#[cfg(test)]
+mod tests_dashboard;
 #[cfg(test)]
 mod tests_deployment;
 #[cfg(test)]
 mod tests_metrics;
 #[cfg(test)]
 mod tests_pipeline_support;
+#[cfg(test)]
+mod tests_settings;
+#[cfg(test)]
+mod tests_support;
 #[cfg(test)]
 mod tests_webhook;
 mod webhook;
@@ -140,7 +150,19 @@ pub(crate) fn router_with_pipeline(
     build_runner: Option<BuildRunnerClient>,
 ) -> anyhow::Result<Router> {
     let secure = config.secure_cookies;
-    let state = AppState {
+    let state = build_app_state(config, catalog_path, backend, build_runner)?;
+    let router = application_routes().with_state(state);
+    let router = with_request_limits(router);
+    Ok(with_observability(with_security_headers(router, secure)))
+}
+
+fn build_app_state(
+    config: PublicConfig,
+    catalog_path: PathBuf,
+    backend: Arc<dyn ContainerBackend>,
+    build_runner: Option<BuildRunnerClient>,
+) -> anyhow::Result<AppState> {
+    Ok(AppState {
         config: Arc::new(config),
         sessions: Arc::new(Sessions::load(
             catalog_path.parent().unwrap_or(Path::new(".")),
@@ -152,11 +174,36 @@ pub(crate) fn router_with_pipeline(
         build_runner,
         deployments: deployment::DeploymentGuard::new(),
         live_cache: Arc::new(std::sync::Mutex::new(LiveSampleCache::default())),
-    };
+    })
+}
 
-    Ok(Router::new()
+fn application_routes() -> Router<AppState> {
+    Router::new()
+        .merge(core_routes())
+        .merge(container_routes())
+        .merge(app_routes())
+        .merge(github_routes())
+        .merge(settings_routes())
+}
+
+fn core_routes() -> Router<AppState> {
+    Router::new()
         .route("/", get(handlers::dashboard_redirect))
         .route("/dashboard", get(handlers::dashboard))
+        .route("/partials/metrics", get(handlers::metrics_partial))
+        .route("/partials/charts", get(handlers::charts_partial))
+        .route("/partials/readiness", get(handlers::readiness_partial))
+        .route("/login", get(handlers::login_page).post(handlers::login))
+        .route("/logout", post(handlers::logout))
+        .route("/healthz", get(|| async { "OK" }))
+        .route("/partials/status", get(handlers::status))
+        .route("/assets/{*path}", get(handlers::asset))
+        .route("/favicon.ico", get(handlers::asset_favicon))
+        .fallback(|| async { StatusCode::NOT_FOUND })
+}
+
+fn container_routes() -> Router<AppState> {
+    Router::new()
         .route("/containers", get(handlers::containers))
         .route(
             "/containers/{provider}/{name}",
@@ -170,9 +217,6 @@ pub(crate) fn router_with_pipeline(
             "/containers/{provider}/{name}/logs",
             get(handlers::container_detail_logs_partial),
         )
-        .route("/partials/metrics", get(handlers::metrics_partial))
-        .route("/partials/charts", get(handlers::charts_partial))
-        .route("/partials/readiness", get(handlers::readiness_partial))
         .route(
             "/containers/new",
             get(handlers::container_new).post(handlers::container_create),
@@ -193,6 +237,10 @@ pub(crate) fn router_with_pipeline(
             "/containers/{provider}/{name}/delete",
             post(handlers::container_delete),
         )
+}
+
+fn app_routes() -> Router<AppState> {
+    Router::new()
         .route("/apps", get(handlers::app_list).post(handlers::app_create))
         .route("/apps/new", get(handlers::app_new))
         .route("/apps/{id}", get(handlers::app_detail))
@@ -207,39 +255,72 @@ pub(crate) fn router_with_pipeline(
         .route("/apps/{id}/logs", get(handlers::app_logs))
         .route("/apps/{id}/status", get(handlers::app_status_partial))
         .route("/webhook/{app_id}/{secret}", post(webhook::webhook_receive))
+}
+
+fn github_routes() -> Router<AppState> {
+    Router::new()
         .route("/webhooks/github", post(handlers::github_webhook))
-        .route("/webhooks/github/callback", get(handlers::github_manifest_callback))
+        .route(
+            "/webhooks/github/callback",
+            get(handlers::github_manifest_callback),
+        )
         .route("/api/github/status", get(handlers::github_status))
         .route("/api/github/repos", get(handlers::github_repos))
         .route("/api/github/branches", get(handlers::github_branches_api))
         .route("/api/github/detect", get(handlers::github_detect))
+}
+
+fn settings_routes() -> Router<AppState> {
+    Router::new()
         .route("/settings", get(handlers::settings_page))
         .route("/settings/github", get(handlers::github_settings_page))
-        .route("/settings/github/connect", post(handlers::github_connect_start))
-        .route("/settings/github/recheck", post(handlers::github_recheck_installation))
-        .route("/settings/github/install", post(handlers::github_install_start))
-        .route("/settings/github/manifest-callback", get(handlers::github_manifest_post_install))
-        .route("/settings/github/callback", get(handlers::github_connect_callback))
+        .route(
+            "/settings/github/connect",
+            post(handlers::github_connect_start),
+        )
+        .route(
+            "/settings/github/recheck",
+            post(handlers::github_recheck_installation),
+        )
+        .route(
+            "/settings/github/install",
+            post(handlers::github_install_start),
+        )
+        .route(
+            "/settings/github/manifest-callback",
+            get(handlers::github_manifest_post_install),
+        )
+        .route(
+            "/settings/github/callback",
+            get(handlers::github_connect_callback),
+        )
         .route("/settings/github/delete", post(handlers::github_disconnect))
         .route("/settings/cloudflare", post(handlers::cloudflare_save))
-        .route("/settings/cloudflare/domains", post(handlers::domain_create))
-        .route("/settings/cloudflare/domains/update", post(handlers::domain_update))
-        .route("/settings/cloudflare/domains/delete", post(handlers::domain_delete))
-        .route("/login",
-            get(handlers::login_page).post(handlers::login),
+        .route(
+            "/settings/cloudflare/domains",
+            post(handlers::domain_create),
         )
-        .route("/logout", post(handlers::logout))
-        .route("/healthz", get(|| async { "OK" }))
-        .route("/partials/status", get(handlers::status))
-        .route("/assets/{*path}", get(handlers::asset))
-        .route("/favicon.ico", get(handlers::asset_favicon))
-        .fallback(|| async { StatusCode::NOT_FOUND })
-        .with_state(state)
+        .route(
+            "/settings/cloudflare/domains/update",
+            post(handlers::domain_update),
+        )
+        .route(
+            "/settings/cloudflare/domains/delete",
+            post(handlers::domain_delete),
+        )
+}
+
+fn with_request_limits(router: Router) -> Router {
+    router
         .layer(RequestBodyLimitLayer::new(16 * 1024))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(20),
         ))
+}
+
+fn with_security_headers(router: Router, secure: bool) -> Router {
+    router
         .layer(SetResponseHeaderLayer::overriding(
             CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(
@@ -274,6 +355,10 @@ pub(crate) fn router_with_pipeline(
                 HeaderValue::from_static("max-age=0")
             },
         ))
+}
+
+fn with_observability(router: Router) -> Router {
+    router
         .layer(CatchPanicLayer::new())
-        .layer(TraceLayer::new_for_http()))
+        .layer(TraceLayer::new_for_http())
 }

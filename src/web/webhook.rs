@@ -98,20 +98,7 @@ pub(crate) async fn webhook_receive(
     if body.len() > MAX_WEBHOOK_BODY {
         return (StatusCode::PAYLOAD_TOO_LARGE, "webhook payload too large").into_response();
     }
-    let app_key = app_id.clone();
-    let submitted_secret = secret.clone();
-    let decision = match with_catalog(&state, move |catalog| {
-        let Some(app) = catalog.get_app(&app_key)? else {
-            return Ok(WebhookDecision::UnknownApp);
-        };
-        Ok(decide_webhook(
-            &app.webhook_secret,
-            app.webhook_enabled,
-            &submitted_secret,
-        ))
-    })
-    .await
-    {
+    let decision = match lookup_webhook_decision(&state, &app_id, &secret).await {
         Ok(decision) => decision,
         Err(error) => return internal_error(error),
     };
@@ -134,22 +121,42 @@ pub(crate) async fn webhook_receive(
         )
             .into_response();
     };
+    queue_webhook_deployment(&state, &app_id, &sha, commit.message.as_deref())
+}
 
+async fn lookup_webhook_decision(
+    state: &AppState,
+    app_id: &str,
+    secret: &str,
+) -> anyhow::Result<WebhookDecision> {
+    let app_key = app_id.to_owned();
+    let submitted_secret = secret.to_owned();
+    with_catalog(state, move |catalog| {
+        let Some(app) = catalog.get_app(&app_key)? else {
+            return Ok(WebhookDecision::UnknownApp);
+        };
+        Ok(decide_webhook(
+            &app.webhook_secret,
+            app.webhook_enabled,
+            &submitted_secret,
+        ))
+    })
+    .await
+}
+
+fn queue_webhook_deployment(
+    state: &AppState,
+    app_id: &str,
+    sha: &str,
+    message: Option<&str>,
+) -> Response {
     let deps = ExecutorDeps {
         catalog_path: (*state.catalog_path).clone(),
         build_runner: state.build_runner.clone(),
         backend: state.backend.clone(),
     };
     let guard = state.deployments.clone();
-    let message = commit.message.as_deref();
-    match start_deployment(
-        &deps,
-        &guard,
-        &app_id,
-        Trigger::Webhook,
-        Some(&sha),
-        message,
-    ) {
+    match start_deployment(&deps, &guard, app_id, Trigger::Webhook, Some(sha), message) {
         Ok(Some(deployment_id)) => (
             StatusCode::ACCEPTED,
             Json(serde_json::json!({"status": "queued", "deployment_id": deployment_id})),

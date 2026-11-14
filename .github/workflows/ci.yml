@@ -45,6 +45,29 @@ jobs:
       - run: python -m unittest discover -s agent/tests -v
       - run: python agent/agentctl run --task agent/tasks/fix-bug/task.json --runs-root /tmp/hakobi-agent-runs
 
+  build-runner:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: build-runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m compileall -q build-runner/build_runner
+      - run: python -m unittest discover -s build-runner/tests -v
+
+  source-limits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install tree-sitter==0.26.1 tree-sitter-rust==0.24.2 tree-sitter-python==0.25.0 tree-sitter-javascript==0.25.0
+      - run: python scripts/check-source-limits.py
+      - run: python scripts/check-function-lengths.py
+
   audit:
     runs-on: ubuntu-latest
     steps:

@@ -12,7 +12,7 @@ from .pr import PRGateError, approve_pr
 from .task import TaskError, load_task
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hakobi-agent", description="Hakobi Level 1-4 agent harness")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -34,7 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     pr_parser = subparsers.add_parser("approve-pr", help="human gate: push branch and open a PR")
     pr_parser.add_argument("--run", required=True)
     pr_parser.add_argument("--yes", action="store_true", help="non-interactive approval")
+    return parser
 
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
     args = parser.parse_args(argv)
     try:
         if args.command == "run":

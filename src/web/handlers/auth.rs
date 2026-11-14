@@ -46,66 +46,73 @@ pub(crate) async fn login(
         "login request validation"
     );
     if !origin_valid || !csrf_valid {
-        return render_login(
+        return login_error(
             &state,
-            Some("Your login session expired. Please try again.".into()),
+            "Your login session expired. Please try again.",
             form.username,
             StatusCode::BAD_REQUEST,
-            Vec::new(),
         );
     }
     if form.username.len() > 64 || form.password.len() > 128 {
-        return render_login(
+        return login_error(
             &state,
-            Some("Invalid username or password.".into()),
+            "Invalid username or password.",
             form.username,
             StatusCode::UNAUTHORIZED,
-            Vec::new(),
         );
     }
+    login_validated(&state, &headers, form).await
+}
 
-    let limiter_key = login_key(&headers);
+async fn login_validated(state: &AppState, headers: &HeaderMap, form: LoginForm) -> Response {
+    let limiter_key = login_key(headers);
     if !state.limiter.allows(&limiter_key).await {
-        return render_login(
-            &state,
-            Some("Too many attempts. Wait five minutes and try again.".into()),
+        return login_error(
+            state,
+            "Too many attempts. Wait five minutes and try again.",
             form.username,
             StatusCode::TOO_MANY_REQUESTS,
-            Vec::new(),
         );
     }
-
-    let Ok(_password_permit) = state.password_work.clone().try_acquire_owned() else {
-        return render_login(
-            &state,
-            Some("Sign-in is busy. Try again shortly.".into()),
+    let Some(password_matches) = check_login_password(state, form.password).await else {
+        return login_error(
+            state,
+            "Sign-in is busy. Try again shortly.",
             form.username,
             StatusCode::TOO_MANY_REQUESTS,
-            Vec::new(),
         );
     };
-
-    let password = Zeroizing::new(form.password);
-    let password_hash = state.config.password_hash.clone();
-    let password_matches =
-        tokio::task::spawn_blocking(move || auth::verify_password(&password_hash, &password))
-            .await
-            .unwrap_or(false);
     let username_matches = form.username == state.config.username;
-
     if !password_matches || !username_matches {
         state.limiter.record_failure(&limiter_key).await;
-        return render_login(
-            &state,
-            Some("Invalid username or password.".into()),
+        return login_error(
+            state,
+            "Invalid username or password.",
             form.username,
             StatusCode::UNAUTHORIZED,
-            Vec::new(),
         );
     }
-
     state.limiter.clear(&limiter_key).await;
-    let old_session = cookie_value(&headers, state.config.session_cookie_name());
+    complete_login(state, headers).await
+}
+
+fn login_error(state: &AppState, message: &str, username: String, status: StatusCode) -> Response {
+    render_login(state, Some(message.into()), username, status, Vec::new())
+}
+
+async fn check_login_password(state: &AppState, password: String) -> Option<bool> {
+    let _password_permit = state.password_work.clone().try_acquire_owned().ok()?;
+    let password = Zeroizing::new(password);
+    let password_hash = state.config.password_hash.clone();
+    Some(
+        tokio::task::spawn_blocking(move || auth::verify_password(&password_hash, &password))
+            .await
+            .unwrap_or(false),
+    )
+}
+
+async fn complete_login(state: &AppState, headers: &HeaderMap) -> Response {
+    let old_session = cookie_value(headers, state.config.session_cookie_name());
     state.sessions.revoke(old_session).await;
     let session = state.sessions.create().await;
     let csrf = random_token();
