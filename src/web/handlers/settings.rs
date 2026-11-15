@@ -18,6 +18,7 @@ pub(crate) struct CfDomainRow {
     pub record_type: String,
     pub proxied: bool,
     pub service: Option<String>,
+    pub managed: bool,
 }
 
 #[derive(Deserialize)]

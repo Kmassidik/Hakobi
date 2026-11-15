@@ -30,6 +30,10 @@ pub(super) async fn fetch_cf_domains(state: &AppState) -> anyhow::Result<Vec<CfD
             record_type: record.r#type,
             proxied: record.proxied,
             service: None,
+            managed: record
+                .comment
+                .as_deref()
+                .is_some_and(|comment| comment.starts_with("Managed by Hakobi")),
         })
         .collect();
 
@@ -48,6 +52,7 @@ pub(super) async fn fetch_cf_domains(state: &AppState) -> anyhow::Result<Vec<CfD
                 record_type: "tunnel".to_owned(),
                 proxied: true,
                 service: Some(rule.service),
+                managed: false,
             });
         }
     }

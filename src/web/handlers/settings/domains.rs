@@ -132,6 +132,27 @@ pub(crate) async fn domain_update(
     }
 }
 
+async fn delete_dns_records(
+    client: &CloudflareClient,
+    zone_id: &str,
+    records: Vec<crate::cloudflare::DnsRecord>,
+) -> anyhow::Result<(bool, String)> {
+    let mut managed_any = false;
+    let mut notice = "No Hakobi-managed DNS record found.".to_owned();
+    for record in records {
+        if client.delete_hakobi_record(zone_id, &record).await? {
+            managed_any = true;
+            notice = format!("Subdomain {} deleted.", record.name);
+        } else {
+            notice = format!(
+                "{} is not managed by Hakobi — delete it from the Cloudflare dashboard.",
+                record.name
+            );
+        }
+    }
+    Ok((managed_any, notice))
+}
+
 /// POST /settings/cloudflare/domains/delete — remove record + ingress rule.
 pub(crate) async fn domain_delete(
     State(state): State<AppState>,
@@ -153,21 +174,13 @@ pub(crate) async fn domain_delete(
         Ok(records) => records,
         Err(error) => return internal_error(error),
     };
-    let mut notice = String::new();
-    for record in records {
-        match client
-            .delete_hakobi_record(&settings.zone_id, &record)
-            .await
-        {
-            Ok(true) => notice = format!("Subdomain {} deleted.", record.name),
-            Ok(false) => {
-                notice = format!(
-                    "{} is not managed by Hakobi — delete it from the Cloudflare dashboard.",
-                    record.name
-                );
-            }
-            Err(error) => return internal_error(error),
-        }
+    let (managed_any, notice) = match delete_dns_records(&client, &settings.zone_id, records).await
+    {
+        Ok(result) => result,
+        Err(error) => return internal_error(error),
+    };
+    if !managed_any {
+        return redirect_with_notice("/settings", &notice);
     }
     if let Err(error) = client
         .remove_ingress_route(
