@@ -53,20 +53,20 @@ pub fn validate_endpoint(endpoint: &str) -> Result<()> {
 /// Connects to the Docker daemon behind `endpoint`, which must be a
 /// `unix:///absolute/path` socket or a `tcp://host:port` address.
 pub(crate) fn connect(endpoint: &str) -> Result<Docker> {
+    connect_with_timeout(endpoint, CONNECT_TIMEOUT_SECS)
+}
+
+pub(crate) fn connect_with_timeout(endpoint: &str, timeout_secs: u64) -> Result<Docker> {
     validate_endpoint(endpoint)?;
     if let Some(path) = endpoint.strip_prefix("unix://") {
-        return Docker::connect_with_unix(path, CONNECT_TIMEOUT_SECS, API_DEFAULT_VERSION)
+        return Docker::connect_with_unix(path, timeout_secs, API_DEFAULT_VERSION)
             .context("connect to Docker Unix socket");
     }
     let host = endpoint
         .strip_prefix("tcp://")
         .context("invalid Docker endpoint")?;
-    Docker::connect_with_http(
-        &format!("http://{host}"),
-        CONNECT_TIMEOUT_SECS,
-        API_DEFAULT_VERSION,
-    )
-    .context("connect to Docker TCP endpoint")
+    Docker::connect_with_http(&format!("http://{host}"), timeout_secs, API_DEFAULT_VERSION)
+        .context("connect to Docker TCP endpoint")
 }
 
 /// Validates a Docker container name before it reaches the Docker API.

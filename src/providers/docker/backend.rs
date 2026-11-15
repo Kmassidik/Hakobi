@@ -7,7 +7,7 @@ use bollard::query_parameters::{
 use futures_util::StreamExt;
 
 use super::super::container_detail::{DockerContainerUsage, DockerInspect, DockerLogs};
-use super::super::validate::connect;
+use super::super::validate::{connect, connect_with_timeout};
 use super::validate_container_name;
 use super::{
     ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow, NetworkRow, ResourceLimits,
@@ -201,7 +201,7 @@ impl ContainerBackend for DockerBackend {
 
     async fn stop_container(&self, endpoint: &str, name: &str) -> Result<()> {
         validate_container_name(name)?;
-        connect(endpoint)?
+        connect_with_timeout(endpoint, 15)?
             .stop_container(name, None)
             .await
             .with_context(|| format!("stop container `{name}`"))

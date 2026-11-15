@@ -11,7 +11,7 @@ pub(crate) fn app_runtime_card(app: &App, csrf_token: &str) -> Markup {
             h2 class="m-0 mb-3 text-[0.95rem] font-bold" { "Runtime" }
             p class="m-0 mb-3 text-sm text-muted" { "Container state: " span class="font-semibold text-ink" { (status) } }
             div class="flex flex-wrap gap-2" {
-                @if status != "running" {
+                @if status != "running" && status != "paused" {
                     (runtime_button(app, csrf_token, "start", "Start", "fa-play"))
                 }
                 @if status == "running" {
