@@ -350,12 +350,21 @@ async fn reject_missing_and_forbidden_app(app: &Router, authenticated: &str, hos
 }
 
 async fn delete_app(app: &Router, path: &Path, authenticated: &str, csrf: &str, app_id: &str) {
+    let wrong = post_form(
+        app,
+        &format!("/apps/{app_id}/delete"),
+        authenticated,
+        "null",
+        format!("confirm_name=wrong&csrf_token={csrf}"),
+    )
+    .await;
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
     let delete = post_form(
         app,
         &format!("/apps/{app_id}/delete"),
         authenticated,
         "null",
-        format!("csrf_token={csrf}"),
+        format!("confirm_name=web-2&csrf_token={csrf}"),
     )
     .await;
     assert_eq!(delete.status(), StatusCode::SEE_OTHER);

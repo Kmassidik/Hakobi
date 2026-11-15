@@ -56,7 +56,7 @@
     if (id === "install-tool") {
       prepareInstallDialog(dialog, button);
     }
-    if (id === "delete-stack" || id === "delete-container") {
+    if (id === "delete-stack" || id === "delete-container" || id === "delete-app") {
       prepareDeleteDialog(dialog, button);
     }
     dialog.showModal();
@@ -147,7 +147,7 @@
     }
   };
 
-  for (const id of ["delete-stack", "delete-container"]) {
+  for (const id of ["delete-stack", "delete-container", "delete-app"]) {
     const dialog = document.getElementById(id);
     if (dialog) {
       bindConfirmDialog(dialog);

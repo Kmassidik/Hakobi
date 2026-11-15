@@ -14,7 +14,7 @@ use super::app_form::{
 };
 use super::{
     html_response, internal_error, page_csrf, post_is_allowed, redirect_with_notice, with_catalog,
-    CsrfForm, ProviderNotice,
+    ProviderNotice,
 };
 use crate::web::{templates, AppState};
 
@@ -354,11 +354,17 @@ pub(crate) async fn app_edit_submit(
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct DeleteAppForm {
+    confirm_name: String,
+    csrf_token: String,
+}
+
 pub(crate) async fn app_delete(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Form(form): Form<CsrfForm>,
+    Form(form): Form<DeleteAppForm>,
 ) -> Response {
     if !super::authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
@@ -366,14 +372,20 @@ pub(crate) async fn app_delete(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    let app = match load_app(&state, &id).await {
+        Ok(Some(app)) => app,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error(error),
+    };
+    if form.confirm_name != app.name {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
     // Best-effort cleanup: container + Cloudflare route. The DB delete is
     // authoritative.
-    let app_name = remove_app_container(&state, &id).await;
+    let app_name = remove_app_container(&state, &app).await;
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
     if result.is_ok() {
-        if let Some(app_name) = app_name {
-            spawn_cloudflare_route_cleanup(&state, app_name);
-        }
+        spawn_cloudflare_route_cleanup(&state, app_name);
     }
     match result {
         Ok(()) => redirect_with_notice("/apps", "App deleted."),
@@ -384,14 +396,13 @@ pub(crate) async fn app_delete(
     }
 }
 
-async fn remove_app_container(state: &AppState, id: &str) -> Option<String> {
-    let container = crate::web::deployment::container_name_for(id);
-    let app = load_app(state, id).await.ok().flatten()?;
+async fn remove_app_container(state: &AppState, app: &hakobi::catalog::App) -> String {
+    let container = crate::web::deployment::container_name_for(&app.id);
     let _ = state
         .backend
         .remove_container(&format!("agent://{}", app.host_id), &container)
         .await;
-    Some(app.name)
+    app.name.clone()
 }
 
 fn spawn_cloudflare_route_cleanup(state: &AppState, app_name: String) {
