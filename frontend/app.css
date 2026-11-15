@@ -3,3 +3,7 @@
 @import "./css/components.css";
 @import "./css/dashboard.css";
 @source "../../src";
+
+[hidden] {
+  display: none !important;
+}

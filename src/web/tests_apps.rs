@@ -48,6 +48,9 @@ async fn check_new_app_form(app: &Router, authenticated: &str) {
     assert!(body.contains("name=\"host_id\""));
     assert!(body.contains("name=\"csrf_token\""));
     assert!(body.contains("name=\"github_repo\""));
+    assert!(body.contains("data-app-stepper"));
+    assert!(body.contains("data-app-step=\"4\""));
+    assert!(body.contains("data-app-review"));
     assert!(body.contains("env-http-host"));
 }
 

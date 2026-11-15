@@ -218,6 +218,7 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
         "assets/hakobi-charts.js",
         "assets/hakobi-metrics.js",
         "assets/hakobi-github.js",
+        "assets/hakobi-app-stepper.js",
         "assets/htmx.min.js",
         "assets/vendor/fontawesome/css/all.min.css",
         "assets/vendor/fontawesome/webfonts/fa-solid-900.woff2",

@@ -96,12 +96,60 @@ fn app_form_fields(
     submit_label: &str,
     csrf_token: &str,
 ) -> Markup {
+    let guided = action == "/apps";
     html! {
-        form method="post" action=(action) class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" {
+        form method="post" action=(action) data-app-stepper[guided] class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-4 sm:p-6" {
             input type="hidden" name="csrf_token" value=(csrf_token);
-            (github_source_fields(values))
-            (app_identity_fields(hosts, values))
-            (build_settings_fields(values, submit_label))
+            @if guided { (stepper_navigation()) }
+            section data-app-step="1" class="grid grid-cols-1 gap-5" {
+                (github_source_fields(values))
+            }
+            section data-app-step="2" class="grid grid-cols-1 gap-5" {
+                (step_heading("Name your app", "Choose a recognizable name and where it should run."))
+                (app_identity_fields(hosts, values))
+            }
+            section data-app-step="3" class="grid grid-cols-1 gap-5" {
+                (step_heading("Configure the build", "Set the runtime, port, build paths, and environment."))
+                (build_settings_fields(values))
+            }
+            section data-app-step="4" class="grid grid-cols-1 gap-5" {
+                (step_heading("Resources and review", "Optional limits, deployment policy, and a final check."))
+                (resource_limit_fields(values))
+                (deployment_policy_field(values))
+                (review_summary())
+                (step_actions(submit_label))
+            }
+            @if guided {
+                p data-step-error role="alert" class="m-0 text-sm text-danger" {}
+                div hidden class="flex items-center justify-between gap-3 border-t border-line pt-4" data-step-navigation {
+                    button type="button" data-step-back class="rounded-lg border border-line bg-transparent px-4 py-2.5 text-sm font-semibold text-ink" { "Back" }
+                    button type="button" data-step-next class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Continue" }
+                }
+            }
+        }
+    }
+}
+
+fn stepper_navigation() -> Markup {
+    html! {
+        ol hidden data-step-progress class="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4" aria-label="App creation progress" {
+            @for (number, label) in [(1, "Source"), (2, "Identity"), (3, "Build"), (4, "Review")] {
+                li {
+                    button type="button" data-step-target=(number) class="w-full rounded-lg border border-line bg-transparent px-2 py-2.5 text-xs font-semibold text-muted" {
+                        span class="mr-1.5 text-brand-bright" { (number) }
+                        (label)
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn step_heading(title: &str, description: &str) -> Markup {
+    html! {
+        div {
+            h2 class="m-0 font-display text-2xl font-normal" { (title) }
+            p class="mb-0 mt-2 text-sm leading-relaxed text-muted" { (description) }
         }
     }
 }
@@ -133,10 +181,6 @@ fn github_source_fields(values: &AppFormValues) -> Markup {
                 }
             }
             div data-gh-apps class="grid grid-cols-1 gap-3" {}
-            label class="grid gap-1.5" {
-                span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Auto-deploy on push" }
-                input name="github_auto_deploy" type="checkbox" value="1" checked[values.github_auto_deploy] class="size-4 justify-self-start";
-            }
         }
         p data-gh-status class="m-0 text-xs text-muted" { "Checking GitHub connection…" }
     }
@@ -168,7 +212,7 @@ fn app_identity_fields(hosts: &[HostAgent], values: &AppFormValues) -> Markup {
     }
 }
 
-fn build_settings_fields(values: &AppFormValues, submit_label: &str) -> Markup {
+fn build_settings_fields(values: &AppFormValues) -> Markup {
     html! {
         div class="grid grid-cols-1 gap-5 md:grid-cols-2" {
             label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
@@ -191,7 +235,6 @@ fn build_settings_fields(values: &AppFormValues, submit_label: &str) -> Markup {
                 }
             }
         }
-        (resource_limit_fields(values))
         label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
             "Context path"
             p class="m-0 text-xs font-normal leading-relaxed text-muted" {
@@ -203,7 +246,36 @@ fn build_settings_fields(values: &AppFormValues, submit_label: &str) -> Markup {
             "Dockerfile path"
             input class=(FIELD) name="github_dockerfile" type="text" value=(values.github_dockerfile) maxlength="512" placeholder="Dockerfile" autocomplete="off";
         }
-        div class="flex flex-wrap items-center gap-3" {
+    }
+}
+
+fn deployment_policy_field(values: &AppFormValues) -> Markup {
+    html! {
+        label class="flex items-center gap-3 rounded-lg border border-line px-4 py-3 text-sm font-semibold" {
+            input name="github_auto_deploy" type="checkbox" value="1" checked[values.github_auto_deploy] class="size-4";
+            span { "Automatically deploy when the tracked branch changes" }
+        }
+    }
+}
+
+fn review_summary() -> Markup {
+    html! {
+        div class="rounded-lg border border-line bg-paper/60 p-4" {
+            h3 class="m-0 text-sm font-bold" { "Review" }
+            dl class="mb-0 mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs" data-app-review {
+                dt class="text-muted" { "Repository" } dd class="m-0 break-all font-mono" data-review="repo" {}
+                dt class="text-muted" { "App" } dd class="m-0 break-all font-mono" data-review="name" {}
+                dt class="text-muted" { "Build" } dd class="m-0 break-all font-mono" data-review="build" {}
+                dt class="text-muted" { "Port" } dd class="m-0 font-mono" data-review="port" {}
+                dt class="text-muted" { "Environment" } dd class="m-0 font-mono" data-review="environment" {}
+            }
+        }
+    }
+}
+
+fn step_actions(submit_label: &str) -> Markup {
+    html! {
+        div class="flex flex-wrap items-center gap-3" data-step-submit {
             button class="rounded-[0.6rem] bg-brand px-4 py-3 font-bold text-white transition hover:bg-[#0f4130]" type="submit" { (submit_label) }
             a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/apps" { "Cancel" }
         }

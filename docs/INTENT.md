@@ -64,6 +64,9 @@ Gap: none.
 User intent: GitHub App repository selection, push-to-build, auto-deploy,
 rollback, and deletion. Registration, installation, and user connection must
 be honest distinct states. Monorepos and single repositories both work.
+New-app creation uses a four-step Source, Identity, Build, and Review flow with
+per-step client validation; the same server validation and POST contract remain
+authoritative, and editing retains the complete form.
 Code reality: Manifest registration, installation webhooks/callback/recheck,
 installation tokens, push matching, and a repository picker. Repository lists
 use a shared five-minute cache and durable last-good snapshots; stale snapshots
