@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{RawQuery, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -14,7 +14,11 @@ use super::{cloudflare::fetch_cf_domains, readiness::load_readiness, CfDomainRow
 use crate::web::AppState;
 
 /// GET /settings — the unified settings page.
-pub(crate) async fn settings_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(crate) async fn settings_page(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    RawQuery(raw_query): RawQuery,
+) -> Response {
     if !authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
     }
@@ -35,17 +39,8 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         .flatten();
     let (default_branch, auto_deploy) = deployment_defaults(&catalog);
 
-    let cf_settings = crate::cloudflare::apps_route::load_settings(&catalog).ok();
-    let cf_configured = cf_settings.is_some();
-    let cf_domain = cf_settings
-        .map(|settings| settings.domain)
-        .unwrap_or_default();
-    // Cloudflare failures degrade to an empty list so the page still renders.
-    let cf_domains = if cf_configured {
-        fetch_cf_domains(&state).await.unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let (cf_configured, cf_domain) = cloudflare_page_state(&catalog);
+    let cf_domains = cloudflare_domains(&state, cf_configured).await;
     let page = SettingsPage {
         base_url: &state.config.base_url,
         username: &state.config.username,
@@ -59,9 +54,25 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         cf_configured,
         cf_domain,
         cf_domains,
+        query: crate::web::pagination::parse_query(raw_query.as_deref()),
     };
     let markup = settings_page_markup(&page, &readiness);
     html_response(StatusCode::OK, markup, cookies)
+}
+
+fn cloudflare_page_state(catalog: &Catalog) -> (bool, String) {
+    let settings = crate::cloudflare::apps_route::load_settings(catalog).ok();
+    let configured = settings.is_some();
+    let domain = settings.map(|value| value.domain).unwrap_or_default();
+    (configured, domain)
+}
+
+async fn cloudflare_domains(state: &AppState, configured: bool) -> Vec<CfDomainRow> {
+    if configured {
+        fetch_cf_domains(state).await.unwrap_or_default()
+    } else {
+        Vec::new()
+    }
 }
 
 fn deployment_defaults(catalog: &Catalog) -> (String, bool) {
@@ -92,6 +103,7 @@ struct SettingsPage<'a> {
     cf_configured: bool,
     cf_domain: String,
     cf_domains: Vec<CfDomainRow>,
+    query: std::collections::HashMap<String, String>,
 }
 
 fn settings_page_markup(page: &SettingsPage<'_>, readiness: &Readiness) -> Markup {
@@ -266,6 +278,11 @@ fn cloudflare_section(page: &SettingsPage<'_>) -> Markup {
 }
 
 fn cf_domains_table(page: &SettingsPage<'_>) -> Markup {
+    let domain_page = crate::web::pagination::paginate(
+        &page.cf_domains,
+        crate::web::pagination::page_number(&page.query, "domains_page"),
+        25,
+    );
     html! {
         div class="mt-4 overflow-x-auto rounded-lg border border-line" {
             table class="m-0 w-full text-sm" {
@@ -279,12 +296,13 @@ fn cf_domains_table(page: &SettingsPage<'_>) -> Markup {
                     }
                 }
                 tbody {
-                    @for row in &page.cf_domains {
+                    @for row in domain_page.items {
                         (cf_domain_row(row, page.csrf_token))
                     }
                 }
             }
         }
+        (crate::web::templates::pagination_controls("/settings", &page.query, "domains_page", &domain_page, None))
     }
 }
 

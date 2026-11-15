@@ -53,6 +53,9 @@ guarded image/network/volume creation and deletion, exact-name confirmation,
 and built-in network protection. `/containers/{provider}/{name}` retains live
 stats/log polling. Hakobi-managed containers display the app name, with the
 real `hakobi-<app-id>` Docker name retained as secondary metadata and in routes.
+Server-side pagination caps Docker resources at 25 rows per page, Apps at 20,
+deployment history at 10, and Settings domains at 25; direct page URLs preserve
+resource tabs and unrelated query state.
 Kubernetes remains visible in Settings as a planned future deployment target,
 not as a currently supported runtime.
 Gap: none.

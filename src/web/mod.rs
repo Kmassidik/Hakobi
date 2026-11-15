@@ -2,6 +2,7 @@ mod agent_client;
 pub mod auth;
 mod deployment;
 mod handlers;
+mod pagination;
 mod templates;
 #[cfg(test)]
 mod tests;

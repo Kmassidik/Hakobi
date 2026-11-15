@@ -7,8 +7,10 @@ use maud::{html, Markup};
 use hakobi::catalog::ProviderConnection;
 use hakobi::providers::{ContainerInventory, ContainerRow};
 
-use super::{brand, page, sidebar, CONTENT_WIDTH, EYEBROW, FIELD};
+use super::{brand, page, pagination_controls, sidebar, CONTENT_WIDTH, EYEBROW, FIELD};
+use crate::web::pagination::{page_number, paginate};
 
+#[allow(clippy::too_many_arguments)]
 pub fn containers(
     base_url: &str,
     username: &str,
@@ -16,6 +18,7 @@ pub fn containers(
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
     snapshots: &super::SnapshotResults,
     app_names: &HashMap<String, String>,
+    query: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
     page(
@@ -24,7 +27,7 @@ pub fn containers(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("containers", base_url, username, csrf_token))
                 (containers_mobile_header(username, csrf_token))
-                (containers_main(base_url, csrf_token, groups, snapshots, app_names, notice))
+                (containers_main(base_url, csrf_token, groups, snapshots, app_names, query, notice))
             }
         },
     )
@@ -55,6 +58,7 @@ fn containers_main(
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
     snapshots: &super::SnapshotResults,
     app_names: &HashMap<String, String>,
+    query: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
     html! {
@@ -77,8 +81,8 @@ fn containers_main(
                 p class="mb-6 mt-6 rounded-[0.6rem] border border-line bg-surface/60 px-4 py-3 text-sm" role="status" { (message) }
             }
             (super::docker_tabs())
-            (container_provider_groups(groups, app_names, csrf_token))
-            (super::docker_resource_panels(groups, snapshots, csrf_token))
+            (container_provider_groups(groups, app_names, csrf_token, query))
+            (super::docker_resource_panels(groups, snapshots, csrf_token, query))
             p class="mt-8 text-xs text-muted" { "Dashboard endpoint: " (base_url) }
         }
     }
@@ -88,6 +92,7 @@ fn container_provider_groups(
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
     app_names: &HashMap<String, String>,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
     html! {
         div data-docker-panel="containers" {
@@ -101,7 +106,7 @@ fn container_provider_groups(
                 }
             }
             @for (provider, result) in groups {
-                (provider_section(provider, result, app_names, csrf_token))
+                (provider_section(provider, result, app_names, csrf_token, query))
             }
         }
     }
@@ -112,6 +117,7 @@ fn provider_section(
     result: &Result<ContainerInventory, String>,
     app_names: &HashMap<String, String>,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
     html! {
         section class="mt-8" {
@@ -120,7 +126,7 @@ fn provider_section(
                 span class="break-all font-mono text-xs text-muted" { (provider.endpoint) }
             }
             @match result {
-                Ok(inventory) => (provider_inventory(provider, inventory, app_names, csrf_token)),
+                Ok(inventory) => (provider_inventory(provider, inventory, app_names, csrf_token, query)),
                 Err(error) => {
                     div class="rounded-[0.85rem] border border-danger/30 bg-danger/5 p-5 text-sm text-danger" {
                         strong class="block" { "Provider read failed" }
@@ -137,6 +143,7 @@ fn provider_inventory(
     inventory: &ContainerInventory,
     app_names: &HashMap<String, String>,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
     html! {
         @if !inventory.suggested_ports.is_empty() {
@@ -151,7 +158,7 @@ fn provider_inventory(
             p class="rounded-[0.85rem] border border-dashed border-line p-6 text-sm text-muted" { "No containers found." }
         } @else {
             @for group in &inventory.groups {
-                (container_group(provider, group, app_names, csrf_token))
+                (container_group(provider, group, app_names, csrf_token, query))
             }
         }
     }
@@ -162,7 +169,10 @@ fn container_group(
     group: &hakobi::providers::ContainerGroup,
     app_names: &HashMap<String, String>,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
+    let key = format!("containers_{}", group.name);
+    let page = paginate(&group.containers, page_number(query, &key), 25);
     html! {
         section class="mt-5 first:mt-0" {
             div class="mb-2 flex items-center justify-between gap-3" {
@@ -176,12 +186,13 @@ fn container_group(
                 table class="w-full border-collapse text-left text-sm" {
                     (container_table_header())
                     tbody {
-                        @for container in &group.containers {
+                        @for container in page.items {
                             (container_row(provider, container, app_names, csrf_token))
                         }
                     }
                 }
             }
+            (pagination_controls("/containers", query, &key, &page, Some("containers")))
         }
     }
 }

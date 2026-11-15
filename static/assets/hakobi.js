@@ -171,6 +171,13 @@
     });
   });
 
+  const requestedDockerTab = new URLSearchParams(window.location.search).get("tab");
+  if (requestedDockerTab) {
+    const requestedButton = Array.from(document.querySelectorAll("[data-docker-tab]"))
+      .find((button) => button.getAttribute("data-docker-tab") === requestedDockerTab);
+    if (requestedButton) requestedButton.click();
+  }
+
   const updateStamp = () => {
     document.querySelectorAll("[data-updated]").forEach((element) => {
       const now = new Date();

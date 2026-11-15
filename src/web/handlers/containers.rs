@@ -1,7 +1,7 @@
 //! Container inventory, run form, and lifecycle action handlers.
 
 use axum::{
-    extract::{Form, Path, Query, State},
+    extract::{Form, Path, RawQuery, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use super::{
     app_container_names, html_response, internal_error, load_providers, page_csrf, post_is_allowed,
-    redirect_response, truncate, CsrfForm, ProviderNotice,
+    redirect_response, truncate, CsrfForm,
 };
 use crate::web::{handlers::redirect_with_notice, templates, AppState};
 use hakobi::{
@@ -23,11 +23,12 @@ use hakobi::{
 pub(crate) async fn containers(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(notice): Query<ProviderNotice>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if !super::authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
     }
+    let query = crate::web::pagination::parse_query(raw_query.as_deref());
     let providers = match load_providers(&state).await {
         Ok(providers) => providers,
         Err(error) => return internal_error(error),
@@ -63,7 +64,8 @@ pub(crate) async fn containers(
             &groups,
             &snapshots,
             &app_names,
-            notice.notice.as_deref(),
+            &query,
+            query.get("notice").map(String::as_str),
         ),
         cookies,
     )

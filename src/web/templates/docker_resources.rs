@@ -9,7 +9,8 @@ use hakobi::{
     providers::{ContainerInventory, DockerSnapshot, ImageRow, NetworkRow, VolumeRow},
 };
 
-use super::FIELD;
+use super::{pagination_controls, FIELD};
+use crate::web::pagination::{page_number, paginate};
 
 pub type SnapshotResults = HashMap<String, Result<DockerSnapshot, String>>;
 
@@ -27,11 +28,12 @@ pub(crate) fn docker_resource_panels(
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
     snapshots: &SnapshotResults,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
     html! {
         @for (provider, _) in groups {
             @if let Some(snapshot) = snapshots.get(&provider.id) {
-                (provider_resources(provider, snapshot, csrf_token))
+                (provider_resources(provider, snapshot, csrf_token, query))
             }
         }
         (delete_resource_dialog(csrf_token))
@@ -42,13 +44,14 @@ fn provider_resources(
     provider: &ProviderConnection,
     snapshot: &Result<DockerSnapshot, String>,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
     html! {
         @match snapshot {
             Ok(snapshot) => {
-                (images_panel(provider, snapshot, csrf_token))
-                (networks_panel(provider, snapshot, csrf_token))
-                (volumes_panel(provider, snapshot, csrf_token))
+                (images_panel(provider, snapshot, csrf_token, query))
+                (networks_panel(provider, snapshot, csrf_token, query))
+                (volumes_panel(provider, snapshot, csrf_token, query))
             }
             Err(error) => p class="mt-6 text-sm text-danger" { "Docker resources unavailable: " (error) }
         }
@@ -68,18 +71,21 @@ fn images_panel(
     provider: &ProviderConnection,
     snapshot: &DockerSnapshot,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
+    let page = paginate(&snapshot.images, page_number(query, "images"), 25);
     html! {
         section data-docker-panel="images" hidden class="mt-6" {
-            (panel_header(provider, "Images", snapshot.images.len()))
+            (panel_header(provider, "Images", page.total))
             div class="overflow-x-auto rounded-[0.85rem] border border-line" {
                 table class="w-full border-collapse text-left text-sm" {
                     (resource_header(&["Repository:Tag", "Image ID", "Size", "Actions"]))
                     tbody {
-                        @for image in &snapshot.images { (image_row(provider, image, csrf_token)) }
+                        @for image in page.items { (image_row(provider, image, csrf_token)) }
                     }
                 }
             }
+            (pagination_controls("/containers", query, "images", &page, Some("images")))
         }
     }
 }
@@ -100,19 +106,22 @@ fn networks_panel(
     provider: &ProviderConnection,
     snapshot: &DockerSnapshot,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
+    let page = paginate(&snapshot.networks, page_number(query, "networks"), 25);
     html! {
         section data-docker-panel="networks" hidden class="mt-6" {
-            (panel_header(provider, "Networks", snapshot.networks.len()))
+            (panel_header(provider, "Networks", page.total))
             (create_form(provider, "/docker/networks/create", "network-name", csrf_token))
             div class="mt-4 overflow-x-auto rounded-[0.85rem] border border-line" {
                 table class="w-full border-collapse text-left text-sm" {
                     (resource_header(&["Name", "Driver", "Scope", "Actions"]))
                     tbody {
-                        @for network in &snapshot.networks { (network_row(provider, network, csrf_token)) }
+                        @for network in page.items { (network_row(provider, network, csrf_token)) }
                     }
                 }
             }
+            (pagination_controls("/containers", query, "networks", &page, Some("networks")))
         }
     }
 }
@@ -137,19 +146,22 @@ fn volumes_panel(
     provider: &ProviderConnection,
     snapshot: &DockerSnapshot,
     csrf_token: &str,
+    query: &HashMap<String, String>,
 ) -> Markup {
+    let page = paginate(&snapshot.volumes, page_number(query, "volumes"), 25);
     html! {
         section data-docker-panel="volumes" hidden class="mt-6" {
-            (panel_header(provider, "Volumes", snapshot.volumes.len()))
+            (panel_header(provider, "Volumes", page.total))
             (create_form(provider, "/docker/volumes/create", "volume-name", csrf_token))
             div class="mt-4 overflow-x-auto rounded-[0.85rem] border border-line" {
                 table class="w-full border-collapse text-left text-sm" {
                     (resource_header(&["Name", "Driver", "Mountpoint", "Actions"]))
                     tbody {
-                        @for volume in &snapshot.volumes { (volume_row(provider, volume, csrf_token)) }
+                        @for volume in page.items { (volume_row(provider, volume, csrf_token)) }
                     }
                 }
             }
+            (pagination_controls("/containers", query, "volumes", &page, Some("volumes")))
         }
     }
 }

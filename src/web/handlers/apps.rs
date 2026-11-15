@@ -2,7 +2,7 @@
 //! and the status/deployments/logs HTMX partials.
 
 use axum::{
-    extract::{Form, Path, Query, State},
+    extract::{Form, Path, RawQuery, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -14,22 +14,26 @@ use super::app_form::{
 };
 use super::{
     html_response, internal_error, page_csrf, post_is_allowed, redirect_with_notice, with_catalog,
-    ProviderNotice,
 };
-use crate::web::{templates, AppState};
+use crate::web::{
+    pagination::{page_number, paginate, parse_query},
+    templates, AppState,
+};
 
 pub(crate) async fn app_list(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(notice): Query<ProviderNotice>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if !super::authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
     }
+    let query = parse_query(raw_query.as_deref());
     let apps = match with_catalog(&state, |catalog| catalog.list_apps()).await {
         Ok(apps) => apps,
         Err(error) => return internal_error(error),
     };
+    let apps_page = paginate(&apps, page_number(&query, "page"), 20);
     let (csrf_token, cookies) = page_csrf(&state, &headers);
     html_response(
         StatusCode::OK,
@@ -37,8 +41,9 @@ pub(crate) async fn app_list(
             &state.config.base_url,
             &state.config.username,
             &csrf_token,
-            &apps,
-            notice.notice.as_deref(),
+            &apps_page,
+            &query,
+            query.get("notice").map(String::as_str),
         ),
         cookies,
     )
@@ -131,6 +136,7 @@ pub(crate) async fn app_detail(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if !super::authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
@@ -148,6 +154,8 @@ pub(crate) async fn app_detail(
         };
     let latest = deployments.first().cloned();
     let previous = deployments.get(1).cloned();
+    let query = parse_query(raw_query.as_deref());
+    let deployments_page = paginate(&deployments, page_number(&query, "deployments_page"), 10);
     let (csrf_token, cookies) = page_csrf(&state, &headers);
     html_response(
         StatusCode::OK,
@@ -156,7 +164,8 @@ pub(crate) async fn app_detail(
             &state.config.username,
             &csrf_token,
             &app,
-            &deployments,
+            &deployments_page,
+            &query,
             latest.as_ref(),
             previous.as_ref(),
         ),
@@ -197,6 +206,7 @@ pub(crate) async fn app_deployments(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if !super::authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
@@ -212,6 +222,8 @@ pub(crate) async fn app_deployments(
             Ok(deployments) => deployments,
             Err(error) => return internal_error(error),
         };
+    let query = parse_query(raw_query.as_deref());
+    let deployments_page = paginate(&deployments, page_number(&query, "deployments_page"), 10);
     let (csrf_token, cookies) = page_csrf(&state, &headers);
     html_response(
         StatusCode::OK,
@@ -220,7 +232,8 @@ pub(crate) async fn app_deployments(
             &state.config.username,
             &csrf_token,
             &app,
-            &deployments,
+            &deployments_page,
+            &query,
         ),
         cookies,
     )

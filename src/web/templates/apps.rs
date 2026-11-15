@@ -1,11 +1,11 @@
 //! CP9 app templates: list page, detail page, create/edit form, status and
 //! logs partials, and the shared deployment-table rows.
 
-use maud::{html, Markup};
-
+use super::{brand, page, pagination_controls, sidebar, CONTENT_WIDTH, EYEBROW};
+use crate::web::pagination::Page;
 use hakobi::catalog::{App, Deployment, DeploymentLog};
-
-use super::{brand, page, sidebar, CONTENT_WIDTH, EYEBROW};
+use maud::{html, Markup};
+use std::collections::HashMap;
 
 fn app_status_class(status: &str) -> &'static str {
     match status {
@@ -55,7 +55,8 @@ pub fn apps(
     base_url: &str,
     username: &str,
     csrf_token: &str,
-    apps: &[App],
+    apps_page: &Page<'_, App>,
+    query: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
     page(
@@ -64,13 +65,17 @@ pub fn apps(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("apps", base_url, username, csrf_token))
                 (apps_mobile_header(username, csrf_token, "/dashboard", "Overview"))
-                (apps_main(apps, notice))
+                (apps_main(apps_page, query, notice))
             }
         },
     )
 }
 
-fn apps_main(apps: &[App], notice: Option<&str>) -> Markup {
+fn apps_main(
+    apps_page: &Page<'_, App>,
+    query: &HashMap<String, String>,
+    notice: Option<&str>,
+) -> Markup {
     html! {
         main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
             div class="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between" {
@@ -89,14 +94,14 @@ fn apps_main(apps: &[App], notice: Option<&str>) -> Markup {
             @if let Some(message) = notice {
                 p class="mb-6 mt-6 rounded-[0.6rem] border border-line bg-surface/60 px-4 py-3 text-sm" role="status" { (message) }
             }
-            (apps_list(apps))
+            (apps_list(apps_page, query))
         }
     }
 }
 
-fn apps_list(apps: &[App]) -> Markup {
+fn apps_list(apps_page: &Page<'_, App>, query: &HashMap<String, String>) -> Markup {
     html! {
-        @if apps.is_empty() {
+        @if apps_page.items.is_empty() {
             div class="mt-8 rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
                 img src="/assets/art/illustrations/empty-stacks.webp" alt="" aria-hidden="true" class="empty-art";
                 p class="m-0 mb-3" { "No apps yet." }
@@ -106,11 +111,12 @@ fn apps_list(apps: &[App]) -> Markup {
             }
         } @else {
             div class="mt-8 grid gap-4" {
-                @for app in apps {
+                @for app in apps_page.items {
                     (app_card(app))
                 }
             }
         }
+        (pagination_controls("/apps", query, "page", apps_page, None))
     }
 }
 
@@ -161,7 +167,8 @@ pub fn app_detail(
     username: &str,
     csrf_token: &str,
     app: &App,
-    deployments: &[Deployment],
+    deployments_page: &Page<'_, Deployment>,
+    query: &HashMap<String, String>,
     latest: Option<&Deployment>,
     previous: Option<&Deployment>,
 ) -> Markup {
@@ -171,7 +178,7 @@ pub fn app_detail(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("apps", base_url, username, csrf_token))
                 (apps_mobile_header(username, csrf_token, "/apps", "Apps"))
-                (app_detail_main(base_url, csrf_token, app, deployments, latest, previous))
+                (app_detail_main(base_url, csrf_token, app, deployments_page, query, latest, previous))
             }
         },
     )
@@ -181,10 +188,12 @@ fn app_detail_main(
     base_url: &str,
     csrf_token: &str,
     app: &App,
-    deployments: &[Deployment],
+    deployments_page: &Page<'_, Deployment>,
+    query: &HashMap<String, String>,
     latest: Option<&Deployment>,
     previous: Option<&Deployment>,
 ) -> Markup {
+    let base = format!("/apps/{}", app.id);
     html! {
         main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
             a class="text-[0.75rem] font-semibold text-muted no-underline hover:text-ink" href="/apps" { "← All apps" }
@@ -213,7 +222,8 @@ fn app_detail_main(
                     h2 class="m-0 text-[1.2rem] font-bold" { "Deployment history" }
                     a class="text-[0.78rem] font-semibold text-brand no-underline hover:underline" href=(format!("/apps/{}/logs", app.id)) { "Latest logs →" }
                 }
-                (deployment_rows(app, deployments, csrf_token))
+                (deployment_rows(app, deployments_page.items, csrf_token))
+                (pagination_controls(&base, query, "deployments_page", deployments_page, None))
             }
         }
     }
@@ -345,7 +355,7 @@ pub fn deployment_rows(app: &App, deployments: &[Deployment], csrf_token: &str) 
                     }
                 }
                 tbody {
-                    @for deployment in deployments.iter().take(10) {
+                    @for deployment in deployments {
                         (deployment_row(app, deployment, csrf_token))
                     }
                 }
@@ -413,8 +423,10 @@ pub fn app_deployments(
     username: &str,
     csrf_token: &str,
     app: &App,
-    deployments: &[Deployment],
+    history: &Page<'_, Deployment>,
+    query: &HashMap<String, String>,
 ) -> Markup {
+    let base = format!("/apps/{}/deployments", app.id);
     page(
         "Deployments · Hakobi",
         html! {
@@ -422,11 +434,12 @@ pub fn app_deployments(
                 (sidebar("apps", base_url, username, csrf_token))
                 (apps_mobile_header(username, csrf_token, "/apps", "Apps"))
                 main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
-                    a class="text-[0.75rem] font-semibold text-muted no-underline hover:text-ink" href=(format!("/apps/{}", app.id)) { "← " (app.name) }
+                    a class="text-[0.75rem] font-semibold text-muted no-underline hover:underline" href=(format!("/apps/{}", app.id)) { "← " (app.name) }
                     p class=(format!("{EYEBROW} mb-3 mt-6 text-brand-bright")) { "History" }
                     h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Deployments" }
                     div class="mt-8" {
-                        (deployment_rows(app, deployments, csrf_token))
+                        (deployment_rows(app, history.items, csrf_token))
+                        (pagination_controls(&base, query, "deployments_page", history, None))
                     }
                 }
             }

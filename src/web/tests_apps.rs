@@ -10,6 +10,20 @@ use tower::ServiceExt;
 
 use super::tests_support::{app, body_text, form_encode, post_form, sign_in};
 
+async fn get_page(app: &Router, authenticated: &str, uri: &str) -> (StatusCode, String) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(uri)
+                .header(COOKIE, authenticated)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    (response.status(), body_text(response, 128 * 1024).await)
+}
+
 fn create_host(path: &Path) -> String {
     let mut catalog = Catalog::open(path).unwrap();
     catalog
@@ -22,34 +36,14 @@ fn create_host(path: &Path) -> String {
 }
 
 async fn check_empty_app_list(app: &Router, authenticated: &str) {
-    let list = app
-        .clone()
-        .oneshot(
-            Request::get("/apps")
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(list.status(), StatusCode::OK);
-    let body = body_text(list, 128 * 1024).await;
+    let (status, body) = get_page(app, authenticated, "/apps").await;
+    assert_eq!(status, StatusCode::OK);
     assert!(body.contains("Create your first app"));
 }
 
 async fn check_new_app_form(app: &Router, authenticated: &str) {
-    let new_page = app
-        .clone()
-        .oneshot(
-            Request::get("/apps/new")
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(new_page.status(), StatusCode::OK);
-    let body = body_text(new_page, 128 * 1024).await;
+    let (status, body) = get_page(app, authenticated, "/apps/new").await;
+    assert_eq!(status, StatusCode::OK);
     assert!(body.contains("New app"));
     assert!(body.contains("name=\"host_id\""));
     assert!(body.contains("name=\"csrf_token\""));
@@ -146,36 +140,16 @@ async fn create_app(
 }
 
 async fn check_created_app_list(app: &Router, authenticated: &str, app_id: &str) {
-    let list = app
-        .clone()
-        .oneshot(
-            Request::get("/apps")
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(list.status(), StatusCode::OK);
-    let body = body_text(list, 128 * 1024).await;
+    let (status, body) = get_page(app, authenticated, "/apps").await;
+    assert_eq!(status, StatusCode::OK);
     assert!(body.contains("web"));
     assert!(body.contains("dockerfile"));
     assert!(body.contains(&format!("/apps/{app_id}")));
 }
 
 async fn check_app_detail(app: &Router, authenticated: &str, app_id: &str) {
-    let detail = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/apps/{app_id}"))
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(detail.status(), StatusCode::OK);
-    let body = body_text(detail, 128 * 1024).await;
+    let (status, body) = get_page(app, authenticated, &format!("/apps/{app_id}")).await;
+    assert_eq!(status, StatusCode::OK);
     assert!(body.contains("Deployment history"));
     assert!(body.contains(&format!("/apps/{app_id}/deploy")));
     assert!(body.contains(&format!("/apps/{app_id}/edit")));
@@ -190,18 +164,8 @@ async fn check_app_detail(app: &Router, authenticated: &str, app_id: &str) {
 }
 
 async fn check_edit_form(app: &Router, authenticated: &str, app_id: &str) {
-    let edit_page = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/apps/{app_id}/edit"))
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(edit_page.status(), StatusCode::OK);
-    let body = body_text(edit_page, 128 * 1024).await;
+    let (status, body) = get_page(app, authenticated, &format!("/apps/{app_id}/edit")).await;
+    assert_eq!(status, StatusCode::OK);
     assert!(body.contains("value=\"web\""));
     assert!(body.contains("name=\"cpu_limit\""));
     assert!(body.contains("value=\"1.5\""));
@@ -294,33 +258,15 @@ async fn deploy_and_rollback(app: &Router, authenticated: &str, csrf: &str, app_
 }
 
 async fn check_deployment_pages(app: &Router, authenticated: &str, app_id: &str) {
-    let deployments = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/apps/{app_id}/deployments"))
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(deployments.status(), StatusCode::OK);
-    assert!(!body_text(deployments, 128 * 1024)
-        .await
-        .contains("No deployments"));
+    let uri = format!("/apps/{app_id}/deployments");
+    let (status, body) = get_page(app, authenticated, &uri).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.contains("No deployments"));
 
-    let logs = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/apps/{app_id}/logs"))
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(logs.status(), StatusCode::OK);
-    assert!(!body_text(logs, 128 * 1024).await.contains("No log lines"));
+    let uri = format!("/apps/{app_id}/logs");
+    let (status, body) = get_page(app, authenticated, &uri).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!body.contains("No log lines"));
 }
 
 async fn reject_missing_and_forbidden_app(app: &Router, authenticated: &str, host_id: &str) {
@@ -393,19 +339,11 @@ async fn apps_can_be_created_edited_and_deleted_over_http() {
     delete_app(&app, &path, &authenticated, &csrf, &app_id).await;
 }
 
-fn create_partial_app(path: &Path) -> (String, String) {
-    let mut catalog = Catalog::open(path).unwrap();
-    let host_id = catalog
-        .create_host_agent(
-            "partial-host",
-            "https://partial.example.com",
-            "tok_partial_01",
-        )
-        .unwrap();
-    let app_id = catalog
+fn create_catalog_app(catalog: &mut Catalog, host_id: &str, name: &str) -> String {
+    catalog
         .create_app(
-            "partial-env",
-            &host_id,
+            name,
+            host_id,
             "dockerfile",
             None,
             None,
@@ -416,23 +354,25 @@ fn create_partial_app(path: &Path) -> (String, String) {
             None,
             None,
         )
+        .unwrap()
+}
+
+fn create_partial_app(path: &Path) -> (String, String) {
+    let mut catalog = Catalog::open(path).unwrap();
+    let host_id = catalog
+        .create_host_agent(
+            "partial-host",
+            "https://partial.example.com",
+            "tok_partial_01",
+        )
         .unwrap();
+    let app_id = create_catalog_app(&mut catalog, &host_id, "partial-env");
     (host_id, app_id)
 }
 
 async fn check_initial_status_partial(app: &Router, authenticated: &str, app_id: &str) {
-    let partial = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/apps/{app_id}/status"))
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(partial.status(), StatusCode::OK);
-    let body = body_text(partial, 64 * 1024).await;
+    let (status, body) = get_page(app, authenticated, &format!("/apps/{app_id}/status")).await;
+    assert_eq!(status, StatusCode::OK);
     assert!(body.contains("id=\"app-status\""));
     assert!(body.contains("every 5s"));
     assert!(body.contains("idle"));
@@ -453,17 +393,7 @@ fn create_partial_deployment(path: &Path, app_id: &str) {
 }
 
 async fn check_updated_status_partial(app: &Router, authenticated: &str, app_id: &str) {
-    let partial = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/apps/{app_id}/status"))
-                .header(COOKIE, authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body = body_text(partial, 64 * 1024).await;
+    let (_, body) = get_page(app, authenticated, &format!("/apps/{app_id}/status")).await;
     assert!(body.contains("running"));
     assert!(body.contains("v1"));
 }
@@ -479,4 +409,56 @@ async fn app_status_partial_refreshes_with_htmx() {
     check_updated_status_partial(&app, &authenticated, &app_id).await;
     let _ = host_id;
     let _ = csrf;
+}
+
+#[tokio::test]
+async fn app_and_deployment_lists_paginate() {
+    let (data, app) = app();
+    let (authenticated, _) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+    let (host_id, app_id) = create_partial_app(&path);
+    let mut catalog = Catalog::open(&path).unwrap();
+    for number in 1..=20 {
+        create_catalog_app(&mut catalog, &host_id, &format!("app-{number}"));
+    }
+    for _ in 0..12 {
+        catalog
+            .create_deployment(&app_id, "manual", None, None)
+            .unwrap();
+    }
+    drop(catalog);
+
+    let (_, first) = get_page(&app, &authenticated, "/apps?notice=Created&filter=live").await;
+    assert!(first.contains("Showing 1–20 of 21 · Page 1 of 2"));
+    assert!(first.contains("filter=live"));
+    assert!(first.contains("page=2"));
+    assert!(!first.contains("notice="));
+    let (_, second) = get_page(&app, &authenticated, "/apps?page=99").await;
+    assert!(second.contains("Showing 21–21 of 21 · Page 2 of 2"));
+    assert!(second.contains("app-20"));
+
+    let uri = format!("/apps/{app_id}?notice=Created&filter=live");
+    let (_, detail) = get_page(&app, &authenticated, &uri).await;
+    assert!(detail.contains("Showing 1–10 of 12 · Page 1 of 2"));
+    assert!(detail.contains(">v12</td>"));
+    assert!(!detail.contains(">v2</td>"));
+    assert!(detail.contains("filter=live"));
+    assert!(detail.contains("deployments_page=2"));
+    assert!(!detail.contains("notice="));
+
+    let uri = format!("/apps/{app_id}?deployments_page=99");
+    let (_, detail) = get_page(&app, &authenticated, &uri).await;
+    assert!(detail.contains("Showing 11–12 of 12 · Page 2 of 2"));
+    assert!(detail.contains(">v2</td>"));
+    assert!(detail.contains("Latest deployment: v12"));
+    assert!(detail.contains("Rollback to v11"));
+    let uri = format!("/apps/{app_id}/deployments?filter=live");
+    let (_, standalone) = get_page(&app, &authenticated, &uri).await;
+    assert!(standalone.contains(&format!("/apps/{app_id}/deployments?")));
+    assert!(standalone.contains("filter=live"));
+    assert!(standalone.contains("deployments_page=2"));
+    let uri = format!("/apps/{app_id}/deployments?deployments_page=2");
+    let (_, second) = get_page(&app, &authenticated, &uri).await;
+    assert!(second.contains("Showing 11–12 of 12 · Page 2 of 2"));
+    assert!(second.contains(">v2</td>"));
 }
