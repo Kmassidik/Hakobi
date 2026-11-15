@@ -181,6 +181,7 @@ async fn check_container_list(app: &Router, authenticated: &str, provider: &str,
     assert!(body.contains("data-docker-panel=\"networks\""));
     assert!(body.contains("data-docker-panel=\"volumes\""));
     assert!(body.contains("alpine:3.20"));
+    assert!(body.contains("&lt;none&gt;"));
     assert!(body.contains("hakobi-data"));
     assert!(body.contains("Built-in"));
 }

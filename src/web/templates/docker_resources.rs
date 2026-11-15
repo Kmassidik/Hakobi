@@ -92,9 +92,14 @@ fn images_panel(
 
 fn image_row(provider: &ProviderConnection, image: &ImageRow, csrf_token: &str) -> Markup {
     let name = image.tags.first().map_or(image.id.as_str(), String::as_str);
+    let tags = if image.tags.is_empty() {
+        "<none>".to_owned()
+    } else {
+        image.tags.join(", ")
+    };
     html! {
         tr class="border-t border-line" {
-            td class="px-4 py-3 font-mono text-xs font-semibold" { (image.tags.join(", ")) }
+            td class="px-4 py-3 font-mono text-xs font-semibold" { (tags) }
             td class="px-4 py-3 font-mono text-xs text-muted" { (image.id.chars().take(19).collect::<String>()) }
             td class="px-4 py-3 text-xs text-muted" { (format!("{:.1} MiB", image.size_bytes as f64 / 1_048_576.0)) }
             td class="px-4 py-3 text-right" { (delete_button(provider, "/docker/images/delete", name, csrf_token)) }

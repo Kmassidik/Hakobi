@@ -58,11 +58,18 @@ impl ContainerBackend for FakeBackend {
                 architecture: "x86_64".into(),
                 cpus: 16,
             },
-            images: vec![ImageRow {
-                id: "sha256:abcdef012345".into(),
-                tags: vec!["alpine:3.20".into()],
-                size_bytes: 8 * 1_048_576,
-            }],
+            images: vec![
+                ImageRow {
+                    id: "sha256:abcdef012345".into(),
+                    tags: vec!["alpine:3.20".into()],
+                    size_bytes: 8 * 1_048_576,
+                },
+                ImageRow {
+                    id: "sha256:untagged".into(),
+                    tags: vec![],
+                    size_bytes: 0,
+                },
+            ],
             volumes: vec![VolumeRow {
                 name: "hakobi-data".into(),
                 driver: "local".into(),
