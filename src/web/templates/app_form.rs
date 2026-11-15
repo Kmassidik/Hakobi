@@ -186,6 +186,9 @@ fn build_settings_fields(values: &AppFormValues, submit_label: &str) -> Markup {
             label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
                 "Environment variables (JSON, optional)"
                 textarea class=(FIELD) name="env_json" rows="3" placeholder="{}" autocomplete="off" { (values.env_json) }
+                span data-gh-env-status class="text-xs font-normal leading-relaxed text-muted" {
+                    "After scanning, keys from .env.example or .env.sample appear here with blank values."
+                }
             }
         }
         (resource_limit_fields(values))

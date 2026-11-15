@@ -12,6 +12,37 @@
     if (!checked) return;
     var dockerfileInput = document.querySelector("[name=github_dockerfile]");
     if (dockerfileInput) dockerfileInput.value = checked.dataset.dockerfile;
+    loadEnvironment(picker, checked.value);
+  }
+
+  async function loadEnvironment(picker, path) {
+    var request = (picker.envRequest || 0) + 1;
+    picker.envRequest = request;
+    picker.envStatus.textContent = "Checking for an example environment file…";
+    try {
+      var query = "?repo=" + encodeURIComponent(picker.reposSel.value) +
+        "&branch=" + encodeURIComponent(picker.branchSel.value) +
+        "&path=" + encodeURIComponent(path);
+      var response = await fetch("/api/github/environment" + query);
+      var data = await response.json();
+      if (!response.ok || request !== picker.envRequest) return;
+      var keys = Object.keys(data.env || {});
+      if (!data.found || !keys.length) {
+        picker.envStatus.textContent = data.found
+          ? "The example environment file has no valid variable names."
+          : "No .env.example or .env.sample found; enter variables manually.";
+        return;
+      }
+      var current = picker.envInput.value.trim();
+      if (picker.envDirty || (current && current !== "{}")) {
+        picker.envStatus.textContent = "Found " + keys.length + " example keys; kept your existing JSON.";
+        return;
+      }
+      picker.envInput.value = JSON.stringify(data.env, null, 2);
+      picker.envStatus.textContent = "Found " + keys.length + " variable names. Add values before deploying.";
+    } catch (e) {
+      picker.envStatus.textContent = "Could not inspect example environment files; enter variables manually.";
+    }
   }
 
   function renderApps(picker, apps) {
@@ -130,8 +161,13 @@
       branchSel: grid.querySelector("[data-gh-branches]"),
       appsBox: grid.querySelector("[data-gh-apps]"),
       status: document.querySelector("[data-gh-status]"),
+      envInput: document.querySelector("[name=env_json]"),
+      envStatus: document.querySelector("[data-gh-env-status]"),
+      envDirty: false,
+      envRequest: 0,
     };
     if (!picker.reposSel) return;
+    picker.envInput.addEventListener("input", function () { picker.envDirty = true; });
     loadRepositories(picker);
   }
 

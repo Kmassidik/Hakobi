@@ -38,7 +38,7 @@ pub(crate) use docker_resources::{
     image_delete, network_create, network_delete, volume_create, volume_delete,
 };
 pub(crate) use github::{
-    branches as github_branches_api, detect as github_detect,
+    branches as github_branches_api, detect as github_detect, environment as github_environment,
     manifest_callback as github_manifest_callback, status as github_status,
     webhook as github_webhook,
 };

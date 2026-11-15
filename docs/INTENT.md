@@ -67,7 +67,10 @@ be honest distinct states. Monorepos and single repositories both work.
 Code reality: Manifest registration, installation webhooks/callback/recheck,
 installation tokens, push matching, and a repository picker. Repository lists
 use a shared five-minute cache and durable last-good snapshots; stale snapshots
-render immediately while one background refresh updates them. Session cookies
+render immediately while one background refresh updates them. Selecting a scanned
+app reads only .env.example or .env.sample and prefills blank JSON values for
+valid variable names; real .env files and example values are never imported.
+Session cookies
 are SameSite=Lax for callbacks; cross-site POST CSRF protection remains.
 Gap: commit statuses and PR checks are not complete.
 

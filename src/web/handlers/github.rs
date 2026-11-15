@@ -66,6 +66,8 @@ pub(crate) async fn branches(
 pub(crate) struct TreeQuery {
     repo: String,
     branch: String,
+    #[serde(default)]
+    path: String,
 }
 
 /// GET /api/github/detect?repo=&branch= — Dockerfile detector.
@@ -81,6 +83,32 @@ pub(crate) async fn detect(
         Ok(detection) => Json(serde_json::json!({
             "apps": detection.apps,
             "truncated": detection.truncated,
+        }))
+        .into_response(),
+        Err(error) => (
+            StatusCode::BAD_GATEWAY,
+            Json(serde_json::json!({ "error": error.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/github/environment?repo=&branch=&path= — example variable names.
+pub(crate) async fn environment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<TreeQuery>,
+) -> Response {
+    let Some(client) = client_for(&state, &headers).await else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
+    match client
+        .example_environment(&query.repo, &query.branch, &query.path)
+        .await
+    {
+        Ok(environment) => Json(serde_json::json!({
+            "found": environment.is_some(),
+            "env": environment.unwrap_or_default(),
         }))
         .into_response(),
         Err(error) => (

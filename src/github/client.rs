@@ -10,9 +10,10 @@ mod webhook;
 pub use webhook::{changed_files_from_push, hex, path_matches, verify_webhook_signature};
 
 use anyhow::{anyhow, Context, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use cache::MutexCache;
 use serde::Deserialize;
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 const GITHUB_API: &str = "https://api.github.com";
 /// Installation tokens are valid 1h; refresh 5 min early.
@@ -50,6 +51,12 @@ struct RepoDto {
 #[derive(Deserialize)]
 struct BranchDto {
     name: String,
+}
+
+#[derive(Deserialize)]
+struct ContentDto {
+    content: String,
+    encoding: String,
 }
 
 #[derive(Deserialize)]
@@ -259,6 +266,52 @@ impl GithubClient {
         })
     }
 
+    /// Reads variable names from an example file, never from a real `.env`.
+    pub async fn example_environment(
+        &self,
+        repo: &str,
+        branch: &str,
+        app_path: &str,
+    ) -> Result<Option<BTreeMap<String, String>>> {
+        validate_app_path(app_path)?;
+        let token = self.installation_token().await?;
+        for filename in [".env.example", ".env.sample"] {
+            let path = example_file_path(app_path, filename);
+            let url = format!("{GITHUB_API}/repos/{repo}/contents/{path}");
+            if let Some(text) = self.get_optional_content(&url, branch, &token).await? {
+                return Ok(Some(parse_example_environment(&text)));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn get_optional_content(
+        &self,
+        url: &str,
+        branch: &str,
+        token: &str,
+    ) -> Result<Option<String>> {
+        let response = self
+            .http
+            .get(url)
+            .query(&[("ref", branch)])
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let response = response.error_for_status()?;
+        let content: ContentDto = response.json().await.context("decode GitHub file")?;
+        anyhow::ensure!(content.encoding == "base64", "unsupported GitHub encoding");
+        let compact: String = content.content.lines().collect();
+        let bytes = BASE64.decode(compact).context("decode GitHub file data")?;
+        Ok(Some(
+            String::from_utf8(bytes).context("GitHub example file is not UTF-8")?,
+        ))
+    }
+
     /// Posts a commit status (state: pending|success|failure|error).
     pub async fn create_status(
         &self,
@@ -340,8 +393,63 @@ impl GithubClient {
     }
 }
 
+fn validate_app_path(path: &str) -> Result<()> {
+    anyhow::ensure!(
+        path.is_empty()
+            || (!path.starts_with('/')
+                && !path.ends_with('/')
+                && path
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..")),
+        "invalid app path"
+    );
+    Ok(())
+}
+
+fn example_file_path(app_path: &str, filename: &str) -> String {
+    if app_path.is_empty() {
+        filename.to_owned()
+    } else {
+        format!("{app_path}/{filename}")
+    }
+}
+
+fn parse_example_environment(text: &str) -> BTreeMap<String, String> {
+    text.lines()
+        .map(str::trim)
+        .map(|line| line.strip_prefix("export ").unwrap_or(line))
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, _)| key.trim())
+        .filter(|key| valid_environment_key(key))
+        .map(|key| (key.to_owned(), String::new()))
+        .collect()
+}
+
+fn valid_environment_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    chars
+        .next()
+        .is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
+        && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn example_environment_returns_keys_without_values() {
+        let vars = super::parse_example_environment(
+            "# comment\nAPI_URL=https://example.test\nexport TOKEN=secret\nINVALID-NAME=x\n",
+        );
+        assert_eq!(vars.keys().collect::<Vec<_>>(), ["API_URL", "TOKEN"]);
+        assert!(vars.values().all(String::is_empty));
+    }
+
+    #[test]
+    fn environment_discovery_rejects_parent_paths() {
+        assert!(super::validate_app_path("../secrets").is_err());
+        assert!(super::validate_app_path("apps/web").is_ok());
+    }
+
     #[tokio::test]
     async fn jwt_crafted_by_wrong_secret_is_rejected_by_github() {
         // Sanity for our app-JWT path: encoding with a different key then

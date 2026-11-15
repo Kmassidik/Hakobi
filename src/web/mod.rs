@@ -287,6 +287,7 @@ fn github_routes() -> Router<AppState> {
         .route("/api/github/repos", get(handlers::github_repos))
         .route("/api/github/branches", get(handlers::github_branches_api))
         .route("/api/github/detect", get(handlers::github_detect))
+        .route("/api/github/environment", get(handlers::github_environment))
 }
 
 fn settings_routes() -> Router<AppState> {
