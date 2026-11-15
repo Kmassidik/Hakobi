@@ -15,8 +15,8 @@ use super::super::docker::{
 use super::local::ensure_local_endpoint;
 use crate::host_agent::{
     AgentEndpoint, AgentErrorBody, AgentHost, DockerContainerInspect, DockerContainerLogs,
-    DockerContainerStats, DockerContainersResponse, DockerSnapshotResponse, DockerVersion,
-    RemoveImageRequest, RunContainerRequest, RunContainerResponse,
+    DockerContainerStats, DockerContainersResponse, DockerResourceRequest, DockerSnapshotResponse,
+    DockerVersion, RemoveImageRequest, RunContainerRequest, RunContainerResponse,
 };
 
 // Client budgets stay above the agent's own limits (20 s for queries and
@@ -231,6 +231,61 @@ impl ContainerBackend for AgentBackend {
             "/v1/docker/images/remove",
             &RemoveImageRequest {
                 image: image.to_owned(),
+            },
+            MUTATION_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn create_network(&self, endpoint: &str, name: &str) -> Result<()> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        self.post_json_unit(
+            "/v1/docker/networks/create",
+            &DockerResourceRequest {
+                name: name.to_owned(),
+            },
+            MUTATION_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn remove_network(&self, endpoint: &str, name: &str) -> Result<()> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        if matches!(name, "bridge" | "host" | "none") {
+            bail!("built-in network `{name}` cannot be removed");
+        }
+        self.post_json_unit(
+            "/v1/docker/networks/delete",
+            &DockerResourceRequest {
+                name: name.to_owned(),
+            },
+            MUTATION_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn create_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        self.post_json_unit(
+            "/v1/docker/volumes/create",
+            &DockerResourceRequest {
+                name: name.to_owned(),
+            },
+            MUTATION_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn remove_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        self.post_json_unit(
+            "/v1/docker/volumes/delete",
+            &DockerResourceRequest {
+                name: name.to_owned(),
             },
             MUTATION_TIMEOUT,
         )

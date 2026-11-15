@@ -6,6 +6,7 @@ mod apps;
 mod container_detail;
 mod containers;
 mod dashboard;
+mod docker_resources;
 mod readiness;
 
 pub(crate) use app_form::{app_form, AppFormValues};
@@ -20,6 +21,7 @@ pub(crate) use dashboard::mobile_header;
 pub use dashboard::{
     chart_section, dashboard, metrics_section, ActivityRow, DashboardMetrics, DashboardView,
 };
+pub(crate) use docker_resources::{docker_resource_panels, docker_tabs, SnapshotResults};
 pub use readiness::readiness_section;
 
 use maud::{html, Markup, DOCTYPE};

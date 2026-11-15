@@ -37,6 +37,7 @@ pub(crate) async fn containers(
         Err(error) => return internal_error(error),
     };
     let (csrf_token, cookies) = page_csrf(&state, &headers);
+    let mut snapshots = std::collections::HashMap::new();
     let mut groups: Vec<(ProviderConnection, Result<ContainerInventory, String>)> = Vec::new();
     for provider in providers.into_iter().filter(|provider| provider.enabled) {
         let result = state
@@ -45,6 +46,12 @@ pub(crate) async fn containers(
             .await
             .map(ContainerInventory::from_rows)
             .map_err(|error| truncate(&error.to_string(), 500));
+        let snapshot = state
+            .backend
+            .snapshot(&provider.endpoint)
+            .await
+            .map_err(|error| truncate(&error.to_string(), 500));
+        snapshots.insert(provider.id.clone(), snapshot);
         groups.push((provider, result));
     }
     html_response(
@@ -54,6 +61,7 @@ pub(crate) async fn containers(
             &state.config.username,
             &csrf_token,
             &groups,
+            &snapshots,
             &app_names,
             notice.notice.as_deref(),
         ),
@@ -137,7 +145,7 @@ async fn enabled_docker_providers(state: &AppState) -> anyhow::Result<Vec<Provid
         .collect())
 }
 
-async fn enabled_docker_provider(
+pub(super) async fn enabled_docker_provider(
     state: &AppState,
     provider_id: &str,
 ) -> anyhow::Result<Option<ProviderConnection>> {

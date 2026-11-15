@@ -104,6 +104,22 @@ impl ContainerBackend for FakeBackend {
         Ok(())
     }
 
+    async fn create_network(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn remove_network(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn create_volume(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn remove_volume(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     async fn run_container(
         &self,
         _endpoint: &str,
@@ -202,6 +218,22 @@ impl ContainerBackend for PipelineBackend {
     }
 
     async fn remove_image(&self, _endpoint: &str, _image: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn create_network(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn remove_network(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn create_volume(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn remove_volume(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
         Ok(())
     }
 

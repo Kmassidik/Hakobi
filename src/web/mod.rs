@@ -181,6 +181,7 @@ fn application_routes() -> Router<AppState> {
     Router::new()
         .merge(core_routes())
         .merge(container_routes())
+        .merge(docker_resource_routes())
         .merge(app_routes())
         .merge(github_routes())
         .merge(settings_routes())
@@ -237,6 +238,15 @@ fn container_routes() -> Router<AppState> {
             "/containers/{provider}/{name}/delete",
             post(handlers::container_delete),
         )
+}
+
+fn docker_resource_routes() -> Router<AppState> {
+    Router::new()
+        .route("/docker/images/delete", post(handlers::image_delete))
+        .route("/docker/networks/create", post(handlers::network_create))
+        .route("/docker/networks/delete", post(handlers::network_delete))
+        .route("/docker/volumes/create", post(handlers::volume_create))
+        .route("/docker/volumes/delete", post(handlers::volume_delete))
 }
 
 fn app_routes() -> Router<AppState> {

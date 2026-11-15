@@ -14,6 +14,7 @@ pub fn containers(
     username: &str,
     csrf_token: &str,
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
+    snapshots: &super::SnapshotResults,
     app_names: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
@@ -23,7 +24,7 @@ pub fn containers(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("containers", base_url, username, csrf_token))
                 (containers_mobile_header(username, csrf_token))
-                (containers_main(base_url, csrf_token, groups, app_names, notice))
+                (containers_main(base_url, csrf_token, groups, snapshots, app_names, notice))
             }
         },
     )
@@ -52,6 +53,7 @@ fn containers_main(
     base_url: &str,
     csrf_token: &str,
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
+    snapshots: &super::SnapshotResults,
     app_names: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
@@ -74,7 +76,9 @@ fn containers_main(
             @if let Some(message) = notice {
                 p class="mb-6 mt-6 rounded-[0.6rem] border border-line bg-surface/60 px-4 py-3 text-sm" role="status" { (message) }
             }
+            (super::docker_tabs())
             (container_provider_groups(groups, app_names, csrf_token))
+            (super::docker_resource_panels(groups, snapshots, csrf_token))
             p class="mt-8 text-xs text-muted" { "Dashboard endpoint: " (base_url) }
         }
     }
@@ -86,17 +90,19 @@ fn container_provider_groups(
     csrf_token: &str,
 ) -> Markup {
     html! {
-        @if groups.is_empty() {
-            div class="mt-8 rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
-                img src="/assets/art/illustrations/empty-containers.webp" alt="" aria-hidden="true" class="empty-art";
-                p class="m-0" {
-                    "No enabled Docker providers. "
-                    a class="font-semibold text-brand" href="/providers" { "Connect one first." }
+        div data-docker-panel="containers" {
+            @if groups.is_empty() {
+                div class="mt-8 rounded-[0.85rem] border border-dashed border-line p-8 text-center text-muted" {
+                    img src="/assets/art/illustrations/empty-containers.webp" alt="" aria-hidden="true" class="empty-art";
+                    p class="m-0" {
+                        "No enabled Docker providers. "
+                        a class="font-semibold text-brand" href="/providers" { "Connect one first." }
+                    }
                 }
             }
-        }
-        @for (provider, result) in groups {
-            (provider_section(provider, result, app_names, csrf_token))
+            @for (provider, result) in groups {
+                (provider_section(provider, result, app_names, csrf_token))
+            }
         }
     }
 }

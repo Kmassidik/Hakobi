@@ -126,6 +126,12 @@ pub struct DockerSnapshotResponse {
     pub networks: Vec<DockerNetworkRow>,
 }
 
+/// Body of Docker network and volume create/delete endpoints.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DockerResourceRequest {
+    pub name: String,
+}
+
 /// Body of `POST /v1/docker/images/remove`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoveImageRequest {

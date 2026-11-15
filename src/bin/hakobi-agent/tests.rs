@@ -46,6 +46,10 @@ fn docker_routes() -> Vec<(Method, &'static str)> {
         (Method::POST, "/v1/docker/containers/demo-api/delete"),
         (Method::POST, "/v1/docker/containers/run"),
         (Method::POST, "/v1/docker/images/remove"),
+        (Method::POST, "/v1/docker/networks/create"),
+        (Method::POST, "/v1/docker/networks/delete"),
+        (Method::POST, "/v1/docker/volumes/create"),
+        (Method::POST, "/v1/docker/volumes/delete"),
     ]
 }
 
@@ -158,6 +162,40 @@ async fn docker_image_removal_rejects_invalid_requests_before_touching_docker() 
         let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
         let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
         assert!(!error.error.is_empty(), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn docker_resource_requests_are_validated_before_touching_docker() {
+    for path in [
+        "/v1/docker/networks/create",
+        "/v1/docker/networks/delete",
+        "/v1/docker/volumes/create",
+        "/v1/docker/volumes/delete",
+    ] {
+        for body in [r#"{"name":"bad name"}"#, r#"{"name":42}"#, "not json"] {
+            let response = app(state())
+                .oneshot(json_request(path, TEST_TOKEN, body))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{path} {body}");
+        }
+    }
+
+    for built_in in ["bridge", "host", "none"] {
+        let body = format!(r#"{{"name":"{built_in}"}}"#);
+        let response = app(state())
+            .oneshot(json_request(
+                "/v1/docker/networks/delete",
+                TEST_TOKEN,
+                &body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
+        assert!(error.error.contains("built-in network"), "{}", error.error);
     }
 }
 

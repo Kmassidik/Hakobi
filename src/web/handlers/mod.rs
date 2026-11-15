@@ -9,6 +9,7 @@ mod auth;
 mod container_detail;
 mod containers;
 mod dashboard;
+mod docker_resources;
 mod github;
 mod github_settings;
 mod partials;
@@ -32,6 +33,9 @@ pub(crate) use containers::{
     container_stop, containers,
 };
 pub(crate) use dashboard::{dashboard, dashboard_redirect};
+pub(crate) use docker_resources::{
+    image_delete, network_create, network_delete, volume_create, volume_delete,
+};
 pub(crate) use github::{
     branches as github_branches_api, detect as github_detect,
     manifest_callback as github_manifest_callback, repos as github_repos, status as github_status,

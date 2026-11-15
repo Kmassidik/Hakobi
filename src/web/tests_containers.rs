@@ -177,6 +177,12 @@ async fn check_container_list(app: &Router, authenticated: &str, provider: &str,
     assert!(body.contains("id=\"delete-container\""));
     assert!(body.contains("data-confirm-input"));
     assert!(body.contains("href=\"/containers/new\""));
+    assert!(body.contains("data-docker-tab=\"images\""));
+    assert!(body.contains("data-docker-panel=\"networks\""));
+    assert!(body.contains("data-docker-panel=\"volumes\""));
+    assert!(body.contains("alpine:3.20"));
+    assert!(body.contains("hakobi-data"));
+    assert!(body.contains("Built-in"));
 }
 
 async fn reject_action_without_valid_auth(
@@ -365,4 +371,30 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     reject_invalid_deletes(&app, &authenticated, &csrf, &provider).await;
     delete_container(&app, &authenticated, &csrf, &provider).await;
     check_disabled_provider(app, &data, &authenticated, &csrf, &provider, &create).await;
+}
+
+#[tokio::test]
+async fn docker_resources_have_guarded_create_and_delete_actions() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let provider = create_provider(&data);
+    for (resource, name) in [("networks", "qa-net"), ("volumes", "qa-vol")] {
+        for (action, confirmation, expected) in [
+            ("create", "", StatusCode::SEE_OTHER),
+            ("delete", "wrong", StatusCode::BAD_REQUEST),
+            ("delete", name, StatusCode::SEE_OTHER),
+        ] {
+            let response = post_form(
+                &app,
+                &format!("/docker/{resource}/{action}"),
+                &authenticated,
+                "null",
+                format!(
+                    "provider_id={provider}&name={name}&confirm_name={confirmation}&csrf_token={csrf}"
+                ),
+            )
+            .await;
+            assert_eq!(response.status(), expected);
+        }
+    }
 }

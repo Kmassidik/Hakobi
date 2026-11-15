@@ -47,10 +47,13 @@ Gap: commit statuses and PR check runs remain separate CP9 work.
 ### Containers
 User intent: See every container, inspect metadata, live stats and logs, and
 perform guarded lifecycle actions.
-Code reality: `/containers` plus provider/name detail pages with HTMX polling.
-The control plane uses the `ContainerBackend` contract across Docker and the
-native host agent. Hakobi-managed containers display the app name, with the
+Code reality: `/containers` is a Docker workbench with Containers, Images,
+Networks, and Volumes tabs backed by real provider snapshots. It includes
+guarded image/network/volume creation and deletion, exact-name confirmation,
+and built-in network protection. `/containers/{provider}/{name}` retains live
+stats/log polling. Hakobi-managed containers display the app name, with the
 real `hakobi-<app-id>` Docker name retained as secondary metadata and in routes.
+Kubernetes is not presented as a deployment target in Settings.
 Gap: none.
 
 ### GitHub integration

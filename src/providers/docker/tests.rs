@@ -1,4 +1,7 @@
-use super::{validate_container_name, validate_endpoint, validate_image_reference};
+use super::{
+    validate_container_name, validate_endpoint, validate_image_reference, ContainerBackend,
+    DockerBackend,
+};
 
 #[test]
 fn docker_endpoints_are_tightly_scoped() {
@@ -23,6 +26,18 @@ fn container_names_are_restricted_to_docker_safe_characters() {
     assert!(validate_container_name("shell;rm").is_err());
     assert!(validate_container_name("flag--option").is_ok());
     assert!(validate_container_name(&"a".repeat(129)).is_err());
+}
+
+#[tokio::test]
+async fn built_in_networks_are_rejected_before_docker_is_contacted() {
+    for built_in in ["bridge", "host", "none"] {
+        let error = DockerBackend
+            .remove_network("unix:///definitely/missing/docker.sock", built_in)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("built-in network"), "{error}");
+    }
 }
 
 #[test]

@@ -33,10 +33,6 @@ pub(super) fn app(state: AgentState) -> Router {
         )
         .route("/v1/docker/snapshot", get(docker::docker_snapshot))
         .route("/v1/docker/containers/run", post(docker::docker_run))
-        .route(
-            "/v1/docker/images/remove",
-            post(docker::docker_remove_image),
-        )
         .merge(auxiliary_routes())
         .route(
             "/v1/docker/containers/{name}/start",
@@ -75,6 +71,31 @@ fn auxiliary_routes() -> Router<AgentState> {
         .route("/build/nixpacks", post(agent_build::build_nixpacks))
         .route("/v1/install/status", get(install::install_status))
         .route("/v1/install/{tool}", post(install::install))
+        .merge(docker_resource_routes())
+}
+
+fn docker_resource_routes() -> Router<AgentState> {
+    Router::new()
+        .route(
+            "/v1/docker/images/remove",
+            post(docker::docker_remove_image),
+        )
+        .route(
+            "/v1/docker/networks/create",
+            post(docker::docker_create_network),
+        )
+        .route(
+            "/v1/docker/networks/delete",
+            post(docker::docker_delete_network),
+        )
+        .route(
+            "/v1/docker/volumes/create",
+            post(docker::docker_create_volume),
+        )
+        .route(
+            "/v1/docker/volumes/delete",
+            post(docker::docker_delete_volume),
+        )
 }
 
 async fn health() -> impl IntoResponse {

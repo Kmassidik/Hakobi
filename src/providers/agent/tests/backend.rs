@@ -169,6 +169,38 @@ async fn agent_backend_removes_images() {
 }
 
 #[tokio::test]
+async fn agent_backend_creates_and_deletes_networks_and_volumes() {
+    let url = spawn_fake_agent(TOKEN).await;
+    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+
+    backend
+        .create_network(host_agent::LOCAL_ENDPOINT, "hakobi-resource")
+        .await
+        .unwrap();
+    backend
+        .remove_network(host_agent::LOCAL_ENDPOINT, "hakobi-resource")
+        .await
+        .unwrap();
+    backend
+        .create_volume(host_agent::LOCAL_ENDPOINT, "hakobi-resource")
+        .await
+        .unwrap();
+    backend
+        .remove_volume(host_agent::LOCAL_ENDPOINT, "hakobi-resource")
+        .await
+        .unwrap();
+
+    for built_in in ["bridge", "host", "none"] {
+        let error = backend
+            .remove_network(host_agent::LOCAL_ENDPOINT, built_in)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("built-in network"), "{error}");
+    }
+}
+
+#[tokio::test]
 async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
     let url = spawn_fake_agent(TOKEN).await;
     let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();

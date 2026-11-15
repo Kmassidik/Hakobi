@@ -39,6 +39,14 @@ pub trait ContainerBackend: Send + Sync {
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Removes an image without forcing deletion or pruning other images.
     async fn remove_image(&self, endpoint: &str, image: &str) -> Result<()>;
+    /// Creates a user-defined Docker network with the default driver.
+    async fn create_network(&self, endpoint: &str, name: &str) -> Result<()>;
+    /// Removes a user-defined Docker network. Built-in networks are protected.
+    async fn remove_network(&self, endpoint: &str, name: &str) -> Result<()>;
+    /// Creates a Docker volume with the default driver.
+    async fn create_volume(&self, endpoint: &str, name: &str) -> Result<()>;
+    /// Removes a Docker volume without forcing deletion.
+    async fn remove_volume(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Creates and starts a container from an image already present locally.
     async fn run_container(
         &self,
@@ -244,6 +252,49 @@ impl ContainerBackend for DockerBackend {
             .await
             .with_context(|| format!("remove image `{image}`"))?;
         Ok(())
+    }
+
+    async fn create_network(&self, endpoint: &str, name: &str) -> Result<()> {
+        validate_container_name(name)?;
+        connect(endpoint)?
+            .create_network(bollard::models::NetworkCreateRequest {
+                name: name.to_owned(),
+                ..Default::default()
+            })
+            .await
+            .with_context(|| format!("create network `{name}`"))?;
+        Ok(())
+    }
+
+    async fn remove_network(&self, endpoint: &str, name: &str) -> Result<()> {
+        validate_container_name(name)?;
+        if matches!(name, "bridge" | "host" | "none") {
+            bail!("built-in network `{name}` cannot be removed");
+        }
+        connect(endpoint)?
+            .remove_network(name)
+            .await
+            .with_context(|| format!("remove network `{name}`"))
+    }
+
+    async fn create_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+        validate_container_name(name)?;
+        connect(endpoint)?
+            .create_volume(bollard::models::VolumeCreateRequest {
+                name: Some(name.to_owned()),
+                ..Default::default()
+            })
+            .await
+            .with_context(|| format!("create volume `{name}`"))?;
+        Ok(())
+    }
+
+    async fn remove_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+        validate_container_name(name)?;
+        connect(endpoint)?
+            .remove_volume(name, None::<bollard::query_parameters::RemoveVolumeOptions>)
+            .await
+            .with_context(|| format!("remove volume `{name}`"))
     }
 
     async fn run_container(

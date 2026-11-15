@@ -42,6 +42,10 @@
       submit.disabled = true;
     }
     dialog.setAttribute("data-expected-name", expected);
+    const resourceName = dialog.querySelector("[data-resource-name]");
+    const provider = dialog.querySelector("[data-resource-provider]");
+    if (resourceName) resourceName.value = expected;
+    if (provider) provider.value = button.getAttribute("data-provider-id") || "";
   };
 
   const openDialogs = (button) => {
@@ -56,7 +60,7 @@
     if (id === "install-tool") {
       prepareInstallDialog(dialog, button);
     }
-    if (id === "delete-stack" || id === "delete-container" || id === "delete-app") {
+    if (["delete-stack", "delete-container", "delete-app", "delete-docker-resource"].includes(id)) {
       prepareDeleteDialog(dialog, button);
     }
     dialog.showModal();
@@ -147,12 +151,25 @@
     }
   };
 
-  for (const id of ["delete-stack", "delete-container", "delete-app"]) {
+  for (const id of ["delete-stack", "delete-container", "delete-app", "delete-docker-resource"]) {
     const dialog = document.getElementById(id);
     if (dialog) {
       bindConfirmDialog(dialog);
     }
   }
+
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const tab = target && target.closest("[data-docker-tab]");
+    if (!tab) return;
+    const selected = tab.getAttribute("data-docker-tab");
+    document.querySelectorAll("[data-docker-panel]").forEach((panel) => {
+      panel.hidden = panel.getAttribute("data-docker-panel") !== selected;
+    });
+    document.querySelectorAll("[data-docker-tab]").forEach((button) => {
+      button.setAttribute("aria-selected", button === tab ? "true" : "false");
+    });
+  });
 
   const updateStamp = () => {
     document.querySelectorAll("[data-updated]").forEach((element) => {

@@ -178,6 +178,34 @@ impl ContainerBackend for RoutingBackend {
             .await
     }
 
+    async fn create_network(&self, endpoint: &str, name: &str) -> Result<()> {
+        self.select(endpoint)
+            .await?
+            .create_network(endpoint, name)
+            .await
+    }
+
+    async fn remove_network(&self, endpoint: &str, name: &str) -> Result<()> {
+        self.select(endpoint)
+            .await?
+            .remove_network(endpoint, name)
+            .await
+    }
+
+    async fn create_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+        self.select(endpoint)
+            .await?
+            .create_volume(endpoint, name)
+            .await
+    }
+
+    async fn remove_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+        self.select(endpoint)
+            .await?
+            .remove_volume(endpoint, name)
+            .await
+    }
+
     async fn run_container(
         &self,
         endpoint: &str,
