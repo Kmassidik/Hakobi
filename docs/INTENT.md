@@ -53,7 +53,8 @@ guarded image/network/volume creation and deletion, exact-name confirmation,
 and built-in network protection. `/containers/{provider}/{name}` retains live
 stats/log polling. Hakobi-managed containers display the app name, with the
 real `hakobi-<app-id>` Docker name retained as secondary metadata and in routes.
-Kubernetes is not presented as a deployment target in Settings.
+Kubernetes remains visible in Settings as a planned future deployment target,
+not as a currently supported runtime.
 Gap: none.
 
 ### GitHub integration
