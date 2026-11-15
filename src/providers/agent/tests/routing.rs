@@ -49,6 +49,10 @@ impl ContainerBackend for StubBackend {
         Ok(())
     }
 
+    async fn remove_image(&self, _endpoint: &str, _image: &str) -> Result<()> {
+        bail!("{} remove image", self.0)
+    }
+
     async fn run_container(
         &self,
         _endpoint: &str,
@@ -97,6 +101,14 @@ async fn routing_dispatches_by_endpoint_scheme() {
             .unwrap_err()
             .to_string(),
         "docker unpause"
+    );
+    assert_eq!(
+        backend
+            .remove_image("agent://local", "alpine:3.20")
+            .await
+            .unwrap_err()
+            .to_string(),
+        "agent remove image"
     );
     assert!(backend.snapshot("agent://local").await.is_err());
     assert!(backend

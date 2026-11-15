@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
-use rusqlite::{Connection, Transaction};
+use rusqlite::{params, Connection, Transaction};
 
 /// Schema version written to `PRAGMA user_version`.
-pub(super) const SCHEMA_VERSION: i64 = 14;
+pub(super) const SCHEMA_VERSION: i64 = 15;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS provider_connections (
@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS deployments (
     id                 TEXT PRIMARY KEY NOT NULL,
     app_id             TEXT NOT NULL REFERENCES apps (id),
     version            INTEGER NOT NULL,
+    image_tag          TEXT,
     status             TEXT NOT NULL DEFAULT 'pending'
                        CHECK (status IN ('pending', 'building', 'deploying', 'running', 'failed', 'cancelled', 'rolled_back')),
     trigger_type       TEXT NOT NULL CHECK (trigger_type IN ('manual', 'webhook')),
@@ -142,6 +143,14 @@ pub(super) fn migrate(connection: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+fn column_exists(transaction: &Transaction<'_>, table: &str, column: &str) -> Result<bool> {
+    Ok(transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+        params![table, column],
+        |row| row.get(0),
+    )?)
+}
+
 fn apply_migrations(transaction: &Transaction<'_>, current: i64) -> Result<()> {
     transaction
         .execute_batch(SCHEMA)
@@ -153,6 +162,11 @@ fn apply_migrations(transaction: &Transaction<'_>, current: i64) -> Result<()> {
     }
     migrate_github(transaction, current)?;
     migrate_apps(transaction, current)?;
+    if (1..15).contains(&current) && !column_exists(transaction, "deployments", "image_tag")? {
+        transaction
+            .execute("ALTER TABLE deployments ADD COLUMN image_tag TEXT", [])
+            .context("add deployments.image_tag")?;
+    }
     migrate_settings(transaction, current)?;
     Ok(())
 }

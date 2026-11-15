@@ -233,7 +233,7 @@ pub(crate) fn delete_app_dialog(app_id: &str, csrf_token: &str) -> Markup {
                 input type="hidden" name="csrf_token" value=(csrf_token);
                 h2 id="delete-app-title" class="m-0 font-display text-[1.5rem] font-normal" { "Delete app?" }
                 p class="mt-3 text-sm leading-relaxed text-muted" {
-                    "This permanently removes " strong class="text-ink" data-confirm-name { "this app" } ", its deployments, and their logs."
+                    "This permanently removes " strong class="text-ink" data-confirm-name { "this app" } ", its container, deployment images, deployments, and logs. Attached volumes are preserved."
                 }
                 label class="mt-4 flex flex-col gap-2 text-[0.8rem] font-bold" {
                     "Type the app name to confirm"

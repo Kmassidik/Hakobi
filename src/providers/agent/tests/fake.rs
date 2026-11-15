@@ -10,7 +10,7 @@ use crate::host_agent::{
     AgentErrorBody, DockerContainerInspect, DockerContainerLogs, DockerContainerMount,
     DockerContainerPort, DockerContainerRow, DockerContainerStats, DockerContainersResponse,
     DockerHostInfo, DockerImageRow, DockerNetworkRow, DockerSnapshotResponse, DockerVersion,
-    DockerVolumeRow, RunContainerRequest, RunContainerResponse,
+    DockerVolumeRow, RemoveImageRequest, RunContainerRequest, RunContainerResponse,
 };
 
 /// Minimal in-process stand-in for the host agent Docker API.
@@ -248,6 +248,26 @@ async fn fake_stats(
     .into_response()
 }
 
+async fn fake_remove_image(
+    State(agent): State<FakeAgent>,
+    headers: HeaderMap,
+    Json(request): Json<RemoveImageRequest>,
+) -> Response {
+    if !agent.authorized(&headers) {
+        return FakeAgent::unauthorized_response();
+    }
+    if request.image != "alpine:3.20" {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(AgentErrorBody {
+                error: "no such image".into(),
+            }),
+        )
+            .into_response();
+    }
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn fake_run(
     State(agent): State<FakeAgent>,
     headers: HeaderMap,
@@ -273,6 +293,7 @@ pub(super) async fn spawn_fake_agent(token: &str) -> String {
         .route("/v1/docker/containers", get(fake_containers))
         .route("/v1/docker/snapshot", get(fake_snapshot))
         .route("/v1/docker/containers/run", post(fake_run))
+        .route("/v1/docker/images/remove", post(fake_remove_image))
         .route("/v1/docker/containers/{name}/inspect", get(fake_inspect))
         .route("/v1/docker/containers/{name}/logs", get(fake_logs))
         .route("/v1/docker/containers/{name}/stats", get(fake_stats))

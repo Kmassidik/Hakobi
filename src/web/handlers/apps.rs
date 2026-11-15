@@ -380,9 +380,14 @@ pub(crate) async fn app_delete(
     if form.confirm_name != app.name {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    // Best-effort cleanup: container + Cloudflare route. The DB delete is
-    // authoritative.
+    let image_tags = match app_image_tags(&state, &app).await {
+        Ok(tags) => tags,
+        Err(error) => return internal_error(error),
+    };
+    // Best-effort cleanup: container, images, and Cloudflare route. The DB
+    // delete is authoritative.
     let app_name = remove_app_container(&state, &app).await;
+    remove_app_images(&state, &app, &image_tags).await;
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
     if result.is_ok() {
         spawn_cloudflare_route_cleanup(&state, app_name);
@@ -396,6 +401,26 @@ pub(crate) async fn app_delete(
     }
 }
 
+async fn app_image_tags(
+    state: &AppState,
+    app: &hakobi::catalog::App,
+) -> anyhow::Result<Vec<String>> {
+    let app_id = app.id.clone();
+    let app_name = app.name.clone();
+    with_catalog(state, move |catalog| {
+        Ok(catalog
+            .list_deployments(&app_id)?
+            .into_iter()
+            .map(|deployment| {
+                deployment.image_tag.unwrap_or_else(|| {
+                    crate::web::deployment::image_tag_for(&app_name, deployment.version)
+                })
+            })
+            .collect())
+    })
+    .await
+}
+
 async fn remove_app_container(state: &AppState, app: &hakobi::catalog::App) -> String {
     let container = crate::web::deployment::container_name_for(&app.id);
     let _ = state
@@ -403,6 +428,15 @@ async fn remove_app_container(state: &AppState, app: &hakobi::catalog::App) -> S
         .remove_container(&format!("agent://{}", app.host_id), &container)
         .await;
     app.name.clone()
+}
+
+async fn remove_app_images(state: &AppState, app: &hakobi::catalog::App, tags: &[String]) {
+    let endpoint = format!("agent://{}", app.host_id);
+    for tag in tags {
+        if let Err(error) = state.backend.remove_image(&endpoint, tag).await {
+            tracing::warn!(app = %app.name, image = %tag, %error, "app image removal skipped");
+        }
+    }
 }
 
 fn spawn_cloudflare_route_cleanup(state: &AppState, app_name: String) {

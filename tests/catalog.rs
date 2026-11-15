@@ -150,6 +150,7 @@ fn create_versioned_deployments(catalog: &mut Catalog, app_id: &str) -> (String,
     assert_eq!(deployments[0].version, 2);
     assert_eq!(deployments[0].trigger_type, "webhook");
     assert_eq!(deployments[0].git_commit_sha.as_deref(), Some("abc123"));
+    assert_eq!(deployments[0].image_tag.as_deref(), Some("hakobi/api:v2"));
     assert_eq!(deployments[1].id, first);
     assert_eq!(deployments[1].version, 1);
     assert_eq!(deployments[1].status, "pending");
@@ -170,7 +171,7 @@ fn catalog_persists_apps_across_reopen() {
     let app_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 14);
+        assert_eq!(catalog.schema_version().expect("schema version"), 15);
         let host_id = catalog
             .create_host_agent("apps-host", "https://apps.example.com", "tok_apps_0123456")
             .expect("create host");
@@ -204,7 +205,7 @@ fn catalog_persists_apps_across_reopen() {
     }
 
     let catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 14);
+    assert_eq!(catalog.schema_version().expect("schema version"), 15);
     assert_eq!(catalog.list_apps().expect("list apps").len(), 1);
 }
 
@@ -222,7 +223,7 @@ fn schema_v12_apps_gain_unlimited_resource_columns() {
     drop(connection);
 
     let catalog = Catalog::open(&path).expect("migrate catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 14);
+    assert_eq!(catalog.schema_version().expect("schema version"), 15);
     drop(catalog);
     let connection = rusqlite::Connection::open(&path).expect("reopen database");
     let mut statement = connection.prepare("PRAGMA table_info(apps)").unwrap();
@@ -234,6 +235,14 @@ fn schema_v12_apps_gain_unlimited_resource_columns() {
     assert!(columns.contains(&"cpu_limit".into()));
     assert!(columns.contains(&"memory_limit_bytes".into()));
     assert!(columns.contains(&"runtime_status".into()));
+    let image_tag_columns: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('deployments') WHERE name = 'image_tag'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(image_tag_columns, 1);
 }
 
 #[test]
@@ -243,7 +252,7 @@ fn apps_crud_round_trip() {
 
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 14);
+        assert_eq!(catalog.schema_version().expect("schema version"), 15);
         let (app_id, host_id) = create_and_load_crud_app(&mut catalog);
 
         catalog

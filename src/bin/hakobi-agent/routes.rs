@@ -16,10 +16,7 @@ use super::{authorized, docker, error_response, install, unauthorized, AgentStat
 /// proxies raw Docker API calls or accepts a user-supplied endpoint.
 pub(super) fn app(state: AgentState) -> Router {
     Router::new()
-        .route("/healthz", get(health))
-        .route("/v1/readiness", get(readiness))
         .route("/v1/docker/metrics", get(docker::docker_metrics))
-        .route("/v1/system/metrics", get(system_metrics))
         .route("/v1/docker/version", get(docker::docker_version))
         .route("/v1/docker/containers", get(docker::docker_containers))
         .route(
@@ -36,6 +33,10 @@ pub(super) fn app(state: AgentState) -> Router {
         )
         .route("/v1/docker/snapshot", get(docker::docker_snapshot))
         .route("/v1/docker/containers/run", post(docker::docker_run))
+        .route(
+            "/v1/docker/images/remove",
+            post(docker::docker_remove_image),
+        )
         .merge(auxiliary_routes())
         .route(
             "/v1/docker/containers/{name}/start",
@@ -66,6 +67,9 @@ pub(super) fn app(state: AgentState) -> Router {
 
 fn auxiliary_routes() -> Router<AgentState> {
     Router::new()
+        .route("/healthz", get(health))
+        .route("/v1/readiness", get(readiness))
+        .route("/v1/system/metrics", get(system_metrics))
         .route("/build/dockerfile", post(agent_build::build_dockerfile))
         .route("/build/compose", post(agent_build::build_compose))
         .route("/build/nixpacks", post(agent_build::build_nixpacks))

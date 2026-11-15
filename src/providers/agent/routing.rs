@@ -171,6 +171,13 @@ impl ContainerBackend for RoutingBackend {
             .await
     }
 
+    async fn remove_image(&self, endpoint: &str, image: &str) -> Result<()> {
+        self.select(endpoint)
+            .await?
+            .remove_image(endpoint, image)
+            .await
+    }
+
     async fn run_container(
         &self,
         endpoint: &str,

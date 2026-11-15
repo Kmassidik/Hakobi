@@ -45,6 +45,7 @@ fn docker_routes() -> Vec<(Method, &'static str)> {
         (Method::POST, "/v1/docker/containers/demo-api/unpause"),
         (Method::POST, "/v1/docker/containers/demo-api/delete"),
         (Method::POST, "/v1/docker/containers/run"),
+        (Method::POST, "/v1/docker/images/remove"),
     ]
 }
 
@@ -132,6 +133,25 @@ async fn docker_run_rejects_invalid_requests_before_touching_docker() {
     for body in cases {
         let response = app(state())
             .oneshot(json_request("/v1/docker/containers/run", TEST_TOKEN, body))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
+        assert!(!error.error.is_empty(), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn docker_image_removal_rejects_invalid_requests_before_touching_docker() {
+    for body in [
+        r#"{"image":"alpine latest"}"#,
+        r#"{"image":"alpine;rm -rf /"}"#,
+        r#"{"image":42}"#,
+        "not json",
+    ] {
+        let response = app(state())
+            .oneshot(json_request("/v1/docker/images/remove", TEST_TOKEN, body))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");

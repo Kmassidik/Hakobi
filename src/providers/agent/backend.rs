@@ -16,7 +16,7 @@ use super::local::ensure_local_endpoint;
 use crate::host_agent::{
     AgentEndpoint, AgentErrorBody, AgentHost, DockerContainerInspect, DockerContainerLogs,
     DockerContainerStats, DockerContainersResponse, DockerSnapshotResponse, DockerVersion,
-    RunContainerRequest, RunContainerResponse,
+    RemoveImageRequest, RunContainerRequest, RunContainerResponse,
 };
 
 // Client budgets stay above the agent's own limits (20 s for queries and
@@ -96,6 +96,26 @@ impl AgentBackend {
             .await
             .with_context(|| format!("call host agent {path}"))?;
         decode(response).await
+    }
+
+    async fn post_json_unit<B>(&self, path: &str, body: &B, limit: Duration) -> Result<()>
+    where
+        B: serde::Serialize + Sync,
+    {
+        let response = self
+            .client
+            .post(format!("{}{path}", self.endpoint.url()))
+            .bearer_auth(self.endpoint.token())
+            .timeout(limit)
+            .json(body)
+            .send()
+            .await
+            .with_context(|| format!("call host agent {path}"))?;
+        let status = response.status();
+        if !status.is_success() {
+            bail!("{}", agent_error_message(response).await);
+        }
+        Ok(())
     }
 
     async fn post_unit(&self, path: &str, limit: Duration) -> Result<()> {
@@ -199,6 +219,19 @@ impl ContainerBackend for AgentBackend {
         validate_container_name(name)?;
         self.post_unit(
             &format!("/v1/docker/containers/{name}/delete"),
+            MUTATION_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn remove_image(&self, endpoint: &str, image: &str) -> Result<()> {
+        ensure_local_endpoint(endpoint)?;
+        validate_image_reference(image)?;
+        self.post_json_unit(
+            "/v1/docker/images/remove",
+            &RemoveImageRequest {
+                image: image.to_owned(),
+            },
             MUTATION_TIMEOUT,
         )
         .await

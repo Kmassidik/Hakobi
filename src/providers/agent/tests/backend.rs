@@ -159,6 +159,16 @@ async fn agent_backend_sends_authenticated_mutations() {
 }
 
 #[tokio::test]
+async fn agent_backend_removes_images() {
+    let url = spawn_fake_agent(TOKEN).await;
+    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+    backend
+        .remove_image(host_agent::LOCAL_ENDPOINT, "alpine:3.20")
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
     let url = spawn_fake_agent(TOKEN).await;
     let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
@@ -173,6 +183,10 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
         .is_err());
     assert!(backend
         .unpause_container(host_agent::LOCAL_ENDPOINT, "bad name")
+        .await
+        .is_err());
+    assert!(backend
+        .remove_image(host_agent::LOCAL_ENDPOINT, "alpine latest")
         .await
         .is_err());
     assert!(backend

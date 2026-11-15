@@ -181,6 +181,10 @@ impl ContainerBackend for DetailBackend {
         Ok(())
     }
 
+    async fn remove_image(&self, _endpoint: &str, _image: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     async fn run_container(
         &self,
         _endpoint: &str,

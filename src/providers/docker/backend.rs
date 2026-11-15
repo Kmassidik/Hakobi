@@ -2,13 +2,13 @@ use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use bollard::query_parameters::{
     InspectContainerOptions, ListContainersOptions, ListImagesOptions, ListNetworksOptions,
-    ListVolumesOptions, LogsOptionsBuilder, StatsOptionsBuilder,
+    ListVolumesOptions, LogsOptionsBuilder, RemoveImageOptions, StatsOptionsBuilder,
 };
 use futures_util::StreamExt;
 
 use super::super::container_detail::{DockerContainerUsage, DockerInspect, DockerLogs};
 use super::super::validate::{connect, connect_with_timeout};
-use super::validate_container_name;
+use super::{validate_container_name, validate_image_reference};
 use super::{
     ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow, NetworkRow, ResourceLimits,
     VolumeRow,
@@ -37,6 +37,8 @@ pub trait ContainerBackend: Send + Sync {
     async fn unpause_container(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Removes a container. Attached volumes are preserved.
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()>;
+    /// Removes an image without forcing deletion or pruning other images.
+    async fn remove_image(&self, endpoint: &str, image: &str) -> Result<()>;
     /// Creates and starts a container from an image already present locally.
     async fn run_container(
         &self,
@@ -233,6 +235,15 @@ impl ContainerBackend for DockerBackend {
 
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()> {
         remove_docker_container(endpoint, name).await
+    }
+
+    async fn remove_image(&self, endpoint: &str, image: &str) -> Result<()> {
+        validate_image_reference(image)?;
+        connect(endpoint)?
+            .remove_image(image, None::<RemoveImageOptions>, None)
+            .await
+            .with_context(|| format!("remove image `{image}`"))?;
+        Ok(())
     }
 
     async fn run_container(

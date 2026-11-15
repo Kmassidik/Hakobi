@@ -126,6 +126,13 @@ pub struct DockerSnapshotResponse {
     pub networks: Vec<DockerNetworkRow>,
 }
 
+/// Body of `POST /v1/docker/images/remove`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoveImageRequest {
+    #[serde(default)]
+    pub image: String,
+}
+
 /// Body of `POST /v1/docker/containers/run`.
 ///
 /// Only an image that already exists locally, a container name, a single

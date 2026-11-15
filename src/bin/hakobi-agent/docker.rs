@@ -7,7 +7,7 @@ use std::{future::Future, time::Duration};
 
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
+    extract::{rejection::JsonRejection, Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -16,9 +16,11 @@ use hakobi::{
     host_agent::{
         self, DockerContainerInspect, DockerContainerLogs, DockerContainerRow,
         DockerContainerStats, DockerContainersResponse, DockerMetrics, DockerSnapshotResponse,
-        DockerVersion,
+        DockerVersion, RemoveImageRequest,
     },
-    providers::{validate_container_name, ContainerBackend, DockerBackend},
+    providers::{
+        validate_container_name, validate_image_reference, ContainerBackend, DockerBackend,
+    },
 };
 use tokio::{process::Command, time::timeout};
 
@@ -316,6 +318,35 @@ pub(super) async fn docker_container_stats(
     .await
     {
         Ok(stats) => Json(DockerContainerStats::from(stats)).into_response(),
+        Err(response) => *response,
+    }
+}
+
+pub(super) async fn docker_remove_image(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<RemoveImageRequest>, JsonRejection>,
+) -> Response {
+    if !authorized(&headers, &state) {
+        return unauthorized();
+    }
+    let Json(request) = match payload {
+        Ok(payload) => payload,
+        Err(rejection) => {
+            return error_response(StatusCode::BAD_REQUEST, rejection.body_text());
+        }
+    };
+    if let Err(error) = validate_image_reference(&request.image) {
+        return error_response(StatusCode::BAD_REQUEST, error.to_string());
+    }
+    let backend = DockerBackend;
+    match docker_call(
+        backend.remove_image(host_agent::DOCKER_SOCKET_ENDPOINT, &request.image),
+        DOCKER_TIMEOUT,
+    )
+    .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(response) => *response,
     }
 }

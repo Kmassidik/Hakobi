@@ -6,7 +6,7 @@
 
 pub(crate) mod executor;
 pub(crate) mod stages;
-pub(crate) use stages::container_name_for;
+pub(crate) use stages::{container_name_for, image_tag_for};
 
 use std::collections::HashSet;
 use std::path::PathBuf;

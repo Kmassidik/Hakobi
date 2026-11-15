@@ -12,6 +12,8 @@ pub struct Deployment {
     pub id: String,
     pub app_id: String,
     pub version: i64,
+    /// Immutable image tag used for this deployment and eventual cleanup.
+    pub image_tag: Option<String>,
     pub status: String,
     pub trigger_type: String,
     pub git_commit_sha: Option<String>,
@@ -71,12 +73,21 @@ fn read_deployment_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Deployment> 
         started_at: row.get(9)?,
         completed_at: row.get(10)?,
         created_at: row.get(11)?,
+        image_tag: row.get(12)?,
     })
 }
 
 const DEPLOYMENT_COLUMNS: &str = "id, app_id, version, status, trigger_type, \
      git_commit_sha, git_commit_message, build_output, deploy_output, started_at, \
-     completed_at, created_at";
+     completed_at, created_at, image_tag";
+
+fn next_deployment_version(transaction: &rusqlite::Transaction<'_>, app_id: &str) -> Result<i64> {
+    Ok(transaction.query_row(
+        "SELECT COALESCE(MAX(version), 0) + 1 FROM deployments WHERE app_id = ?1",
+        params![app_id],
+        |row| row.get(0),
+    )?)
+}
 
 impl Catalog {
     /// Creates a pending deployment at the next version for an app.
@@ -92,37 +103,36 @@ impl Catalog {
         }
         let id = super::new_id();
         let transaction = self.connection.transaction()?;
-        let app_exists: bool = transaction.query_row(
-            "SELECT EXISTS(SELECT 1 FROM apps WHERE id = ?1)",
-            params![app_id],
-            |row| row.get(0),
-        )?;
-        if !app_exists {
+        let app_name: Option<String> = transaction
+            .query_row(
+                "SELECT name FROM apps WHERE id = ?1",
+                params![app_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(app_name) = app_name else {
             bail!("app {app_id} not found");
-        }
-        let version: i64 = transaction.query_row(
-            "SELECT COALESCE(MAX(version), 0) + 1 FROM deployments \
-                 WHERE app_id = ?1",
-            params![app_id],
-            |row| row.get(0),
-        )?;
+        };
+        let version = next_deployment_version(&transaction, app_id)?;
         let commit_message = git_commit_message
             .map(str::trim)
             .filter(|value| !value.is_empty());
+        let image_tag = format!("hakobi/{app_name}:v{version}");
         transaction.execute(
             "INSERT INTO deployments \
                  (id, app_id, version, status, trigger_type, git_commit_sha, \
-                  git_commit_message, started_at, created_at) \
+                  git_commit_message, started_at, created_at, image_tag) \
              VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6, \
                      strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
-                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?7)",
             params![
                 id,
                 app_id,
                 version,
                 trigger_type,
                 git_commit_sha,
-                commit_message
+                commit_message,
+                image_tag
             ],
         )?;
         super::record_created(&transaction, "deployment", &id)?;
