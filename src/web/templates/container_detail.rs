@@ -27,6 +27,7 @@ pub fn container_detail(
     username: &str,
     csrf_token: &str,
     name: &str,
+    display_name: &str,
     detail: Option<&ContainerDetailData>,
     stats: Option<&DockerContainerUsage>,
     logs: Option<&DockerLogs>,
@@ -53,24 +54,33 @@ pub fn container_detail(
                     a class="text-[0.75rem] font-semibold text-muted no-underline hover:text-ink" href="/containers" { "← All containers" }
                     @if let Some(data) = detail {
                         p class=(format!("{EYEBROW} mb-3 mt-6 text-brand-bright")) { (data.provider_name) }
-                        h1 class="m-0 font-display text-[clamp(2rem,4.5vw,3.4rem)] font-normal tracking-[-0.04em] break-all" { (name) }
+                        h1 class="m-0 font-display text-[clamp(2rem,4.5vw,3.4rem)] font-normal tracking-[-0.04em] break-all" { (display_name) }
+                        @if display_name != name {
+                            p class="mb-0 mt-2 break-all font-mono text-xs text-muted" { "Docker name: " (name) }
+                        }
                         (detail_header_actions(&data.provider_id, name, csrf_token))
                         (detail_metadata(&data.detail))
                         (stats_slot(&data.provider_id, name, stats))
                         (logs_slot(&data.provider_id, name, logs))
                         (detail_delete_dialog(csrf_token, &data.provider_id, name))
                     } @else {
-                        p class=(format!("{EYEBROW} mb-3 mt-6 text-brand-bright")) { "Docker" }
-                        h1 class="m-0 font-display text-[clamp(2rem,4.5vw,3.4rem)] font-normal tracking-[-0.04em]" { (name) }
-                        div class="mt-6 rounded-[0.85rem] border border-danger/30 bg-danger/5 p-5 text-sm text-danger" {
-                            strong class="block" { "Provider read failed" }
-                            span class="mt-1 block break-words" { (detail_error_text()) }
-                        }
+                        (container_detail_error(display_name))
                     }
                 }
             }
         },
     )
+}
+
+fn container_detail_error(display_name: &str) -> Markup {
+    html! {
+        p class=(format!("{EYEBROW} mb-3 mt-6 text-brand-bright")) { "Docker" }
+        h1 class="m-0 font-display text-[clamp(2rem,4.5vw,3.4rem)] font-normal tracking-[-0.04em]" { (display_name) }
+        div class="mt-6 rounded-[0.85rem] border border-danger/30 bg-danger/5 p-5 text-sm text-danger" {
+            strong class="block" { "Provider read failed" }
+            span class="mt-1 block break-words" { (detail_error_text()) }
+        }
+    }
 }
 
 fn detail_error_text() -> &'static str {

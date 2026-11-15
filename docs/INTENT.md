@@ -36,7 +36,8 @@ User intent: See every container, inspect metadata, live stats and logs, and
 perform guarded lifecycle actions.
 Code reality: `/containers` plus provider/name detail pages with HTMX polling.
 The control plane uses the `ContainerBackend` contract across Docker and the
-native host agent.
+native host agent. Hakobi-managed containers display the app name, with the
+real `hakobi-<app-id>` Docker name retained as secondary metadata and in routes.
 Gap: none.
 
 ### GitHub integration

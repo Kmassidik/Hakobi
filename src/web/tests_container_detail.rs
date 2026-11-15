@@ -66,17 +66,30 @@ impl ContainerBackend for DetailBackend {
     }
 
     async fn containers(&self, _endpoint: &str) -> anyhow::Result<Vec<ContainerRow>> {
-        Ok(vec![ContainerRow {
-            id: "0123456789abcdef".into(),
-            name: "demo-api".into(),
-            image: "hakobi/demo:latest".into(),
-            state: "running".into(),
-            status: "Up 2 hours".into(),
-            health: Some("healthy".into()),
-            compose_project: None,
-            compose_service: None,
-            ports: vec![],
-        }])
+        Ok(vec![
+            ContainerRow {
+                id: "0123456789abcdef".into(),
+                name: "demo-api".into(),
+                image: "hakobi/demo:latest".into(),
+                state: "running".into(),
+                status: "Up 2 hours".into(),
+                health: Some("healthy".into()),
+                compose_project: None,
+                compose_service: None,
+                ports: vec![],
+            },
+            ContainerRow {
+                id: "fedcba9876543210".into(),
+                name: "hakobi-test-app".into(),
+                image: "hakobi/algo-lab:latest".into(),
+                state: "running".into(),
+                status: "Up 2 hours".into(),
+                health: Some("healthy".into()),
+                compose_project: None,
+                compose_service: None,
+                ports: vec![],
+            },
+        ])
     }
 
     async fn snapshot(&self, _endpoint: &str) -> anyhow::Result<DockerSnapshot> {
@@ -102,7 +115,7 @@ impl ContainerBackend for DetailBackend {
         _endpoint: &str,
         name: &str,
     ) -> anyhow::Result<hakobi::providers::DockerInspect> {
-        if name == "demo-api" {
+        if matches!(name, "demo-api" | "hakobi-test-app") {
             Ok(detail_inspect())
         } else {
             Err(anyhow::anyhow!(
@@ -117,7 +130,7 @@ impl ContainerBackend for DetailBackend {
         name: &str,
         tail: usize,
     ) -> anyhow::Result<hakobi::providers::DockerLogs> {
-        if name != "demo-api" {
+        if !matches!(name, "demo-api" | "hakobi-test-app") {
             return Err(anyhow::anyhow!("No such container: {name}"));
         }
         let count = tail.min(3);
@@ -132,7 +145,7 @@ impl ContainerBackend for DetailBackend {
         _endpoint: &str,
         name: &str,
     ) -> anyhow::Result<hakobi::providers::DockerContainerUsage> {
-        if name != "demo-api" {
+        if !matches!(name, "demo-api" | "hakobi-test-app") {
             return Err(anyhow::anyhow!("No such container: {name}"));
         }
         Ok(hakobi::providers::DockerContainerUsage {
@@ -262,6 +275,63 @@ async fn check_detail_list_link(app: &Router, authenticated: &str, provider: &st
     assert_eq!(list.status(), StatusCode::OK);
     let list_body = body_text(list, 256 * 1024).await;
     assert!(list_body.contains(&format!("href=\"/containers/{provider}/demo-api\"")));
+}
+
+fn seed_named_app(data: &TempDir) {
+    let path = data.path().join("catalog.sqlite3");
+    let mut catalog = Catalog::open(&path).unwrap();
+    let host = catalog
+        .create_host_agent("local", "https://agent.example.com", "token-123456789")
+        .unwrap();
+    let app_id = catalog
+        .create_app(
+            "algo-lab",
+            &host,
+            "dockerfile",
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    drop(catalog);
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection
+        .execute(
+            "UPDATE apps SET id = ?2 WHERE id = ?1",
+            (app_id, "test-app"),
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn managed_containers_show_app_names_and_real_docker_names() {
+    let (data, app) = detail_app();
+    let (authenticated, _csrf) = sign_in(&app).await;
+    let provider = detail_provider(&data);
+    seed_named_app(&data);
+    for path in [
+        "/containers".to_owned(),
+        format!("/containers/{provider}/hakobi-test-app"),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header(COOKIE, authenticated.clone())
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = body_text(response, 256 * 1024).await;
+        assert!(body.contains("algo-lab"));
+        assert!(body.contains("hakobi-test-app"));
+    }
 }
 
 #[tokio::test]

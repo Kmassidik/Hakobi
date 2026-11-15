@@ -8,8 +8,8 @@ use axum::{
 use serde::Deserialize;
 
 use super::{
-    html_response, internal_error, load_providers, page_csrf, post_is_allowed, redirect_response,
-    truncate, CsrfForm, ProviderNotice,
+    app_container_names, html_response, internal_error, load_providers, page_csrf, post_is_allowed,
+    redirect_response, truncate, CsrfForm, ProviderNotice,
 };
 use crate::web::{handlers::redirect_with_notice, templates, AppState};
 use hakobi::{
@@ -32,6 +32,10 @@ pub(crate) async fn containers(
         Ok(providers) => providers,
         Err(error) => return internal_error(error),
     };
+    let app_names = match app_container_names(&state).await {
+        Ok(names) => names,
+        Err(error) => return internal_error(error),
+    };
     let (csrf_token, cookies) = page_csrf(&state, &headers);
     let mut groups: Vec<(ProviderConnection, Result<ContainerInventory, String>)> = Vec::new();
     for provider in providers.into_iter().filter(|provider| provider.enabled) {
@@ -50,6 +54,7 @@ pub(crate) async fn containers(
             &state.config.username,
             &csrf_token,
             &groups,
+            &app_names,
             notice.notice.as_deref(),
         ),
         cookies,

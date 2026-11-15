@@ -9,7 +9,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{html_response, internal_error, load_providers, page_csrf, truncate};
+use super::{
+    app_container_names, html_response, internal_error, load_providers, page_csrf, truncate,
+};
 use crate::web::{templates, AppState};
 use hakobi::{
     catalog::ProviderConnection,
@@ -56,6 +58,11 @@ async fn render_container_detail(
     provider: &ProviderConnection,
     name: &str,
 ) -> Response {
+    let app_names = match app_container_names(state).await {
+        Ok(names) => names,
+        Err(error) => return internal_error(error),
+    };
+    let display_name = app_names.get(name).map_or(name, String::as_str);
     let (csrf_token, cookies) = page_csrf(state, headers);
     let inspect = state
         .backend
@@ -70,17 +77,7 @@ async fn render_container_detail(
         }
         Err(error) => Err(truncate(&error.to_string(), 500)),
     };
-    let (stats, logs) = match &detail {
-        Ok(_) => (
-            container_detail_stats(state, &provider.endpoint, name)
-                .await
-                .ok(),
-            container_detail_logs(state, &provider.endpoint, name, DETAIL_TAIL_LINES)
-                .await
-                .ok(),
-        ),
-        Err(_) => (None, None),
-    };
+    let (stats, logs) = load_live_sections(state, provider, name, detail.is_ok()).await;
     let data = detail.ok().map(|inspect| templates::ContainerDetailData {
         provider_id: provider.id.clone(),
         provider_name: provider.name.clone(),
@@ -93,11 +90,31 @@ async fn render_container_detail(
             &state.config.username,
             &csrf_token,
             name,
+            display_name,
             data.as_ref(),
             stats.as_ref(),
             logs.as_ref(),
         ),
         cookies,
+    )
+}
+
+async fn load_live_sections(
+    state: &AppState,
+    provider: &ProviderConnection,
+    name: &str,
+    available: bool,
+) -> (Option<DockerContainerUsage>, Option<DockerLogs>) {
+    if !available {
+        return (None, None);
+    }
+    (
+        container_detail_stats(state, &provider.endpoint, name)
+            .await
+            .ok(),
+        container_detail_logs(state, &provider.endpoint, name, DETAIL_TAIL_LINES)
+            .await
+            .ok(),
     )
 }
 

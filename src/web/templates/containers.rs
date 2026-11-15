@@ -1,5 +1,7 @@
 //! Container inventory, run form, and dialog templates.
 
+use std::collections::HashMap;
+
 use maud::{html, Markup};
 
 use hakobi::catalog::ProviderConnection;
@@ -12,6 +14,7 @@ pub fn containers(
     username: &str,
     csrf_token: &str,
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
+    app_names: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
     page(
@@ -20,7 +23,7 @@ pub fn containers(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("containers", base_url, username, csrf_token))
                 (containers_mobile_header(username, csrf_token))
-                (containers_main(base_url, csrf_token, groups, notice))
+                (containers_main(base_url, csrf_token, groups, app_names, notice))
             }
         },
     )
@@ -49,6 +52,7 @@ fn containers_main(
     base_url: &str,
     csrf_token: &str,
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
+    app_names: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
     html! {
@@ -70,7 +74,7 @@ fn containers_main(
             @if let Some(message) = notice {
                 p class="mb-6 mt-6 rounded-[0.6rem] border border-line bg-surface/60 px-4 py-3 text-sm" role="status" { (message) }
             }
-            (container_provider_groups(groups, csrf_token))
+            (container_provider_groups(groups, app_names, csrf_token))
             p class="mt-8 text-xs text-muted" { "Dashboard endpoint: " (base_url) }
         }
     }
@@ -78,6 +82,7 @@ fn containers_main(
 
 fn container_provider_groups(
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
+    app_names: &HashMap<String, String>,
     csrf_token: &str,
 ) -> Markup {
     html! {
@@ -91,7 +96,7 @@ fn container_provider_groups(
             }
         }
         @for (provider, result) in groups {
-            (provider_section(provider, result, csrf_token))
+            (provider_section(provider, result, app_names, csrf_token))
         }
     }
 }
@@ -99,6 +104,7 @@ fn container_provider_groups(
 fn provider_section(
     provider: &ProviderConnection,
     result: &Result<ContainerInventory, String>,
+    app_names: &HashMap<String, String>,
     csrf_token: &str,
 ) -> Markup {
     html! {
@@ -108,7 +114,7 @@ fn provider_section(
                 span class="break-all font-mono text-xs text-muted" { (provider.endpoint) }
             }
             @match result {
-                Ok(inventory) => (provider_inventory(provider, inventory, csrf_token)),
+                Ok(inventory) => (provider_inventory(provider, inventory, app_names, csrf_token)),
                 Err(error) => {
                     div class="rounded-[0.85rem] border border-danger/30 bg-danger/5 p-5 text-sm text-danger" {
                         strong class="block" { "Provider read failed" }
@@ -123,6 +129,7 @@ fn provider_section(
 fn provider_inventory(
     provider: &ProviderConnection,
     inventory: &ContainerInventory,
+    app_names: &HashMap<String, String>,
     csrf_token: &str,
 ) -> Markup {
     html! {
@@ -138,7 +145,7 @@ fn provider_inventory(
             p class="rounded-[0.85rem] border border-dashed border-line p-6 text-sm text-muted" { "No containers found." }
         } @else {
             @for group in &inventory.groups {
-                (container_group(provider, group, csrf_token))
+                (container_group(provider, group, app_names, csrf_token))
             }
         }
     }
@@ -147,6 +154,7 @@ fn provider_inventory(
 fn container_group(
     provider: &ProviderConnection,
     group: &hakobi::providers::ContainerGroup,
+    app_names: &HashMap<String, String>,
     csrf_token: &str,
 ) -> Markup {
     html! {
@@ -163,7 +171,7 @@ fn container_group(
                     (container_table_header())
                     tbody {
                         @for container in &group.containers {
-                            (container_row(provider, container, csrf_token))
+                            (container_row(provider, container, app_names, csrf_token))
                         }
                     }
                 }
@@ -190,12 +198,19 @@ fn container_table_header() -> Markup {
 fn container_row(
     provider: &ProviderConnection,
     container: &ContainerRow,
+    app_names: &HashMap<String, String>,
     csrf_token: &str,
 ) -> Markup {
+    let display_name = app_names
+        .get(&container.name)
+        .map_or(&container.name, |name| name);
     html! {
         tr class="border-t border-line" {
             td class="px-4 py-3" {
-                a class="block font-semibold no-underline hover:text-brand" href=(format!("/containers/{}/{}", provider.id, container.name)) { (container.name) }
+                a class="block font-semibold no-underline hover:text-brand" href=(format!("/containers/{}/{}", provider.id, container.name)) { (display_name) }
+                @if display_name != &container.name {
+                    span class="block break-all font-mono text-[0.68rem] text-muted" { (container.name) }
+                }
                 span class="font-mono text-[0.68rem] text-muted" { (container.id.chars().take(12).collect::<String>()) }
                 @if let Some(service) = &container.compose_service {
                     span class="ml-2 text-[0.65rem] text-muted" { (service) }

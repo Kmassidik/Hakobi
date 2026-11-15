@@ -109,6 +109,19 @@ pub(crate) async fn load_providers(
     with_catalog(state, |catalog| catalog.list_provider_connections()).await
 }
 
+pub(crate) async fn app_container_names(
+    state: &AppState,
+) -> anyhow::Result<std::collections::HashMap<String, String>> {
+    with_catalog(state, |catalog| {
+        Ok(catalog
+            .list_apps()?
+            .into_iter()
+            .map(|app| (format!("hakobi-{}", app.id), app.name))
+            .collect())
+    })
+    .await
+}
+
 pub(crate) async fn with_catalog<T, F>(state: &AppState, operation: F) -> anyhow::Result<T>
 where
     T: Send + 'static,
