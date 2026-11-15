@@ -1,4 +1,16 @@
 @layer components {
+  dialog[open] {
+    max-height: calc(100dvh - 2rem);
+    margin: auto;
+    overflow-y: auto;
+    box-shadow: 0 24px 80px rgb(15 23 42 / 24%);
+  }
+
+  dialog::backdrop {
+    background: rgb(15 23 42 / 45%);
+    backdrop-filter: blur(2px);
+  }
+
   .hero-orbit {
     pointer-events: none;
     position: absolute;
