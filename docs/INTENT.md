@@ -65,7 +65,9 @@ User intent: GitHub App repository selection, push-to-build, auto-deploy,
 rollback, and deletion. Registration, installation, and user connection must
 be honest distinct states. Monorepos and single repositories both work.
 Code reality: Manifest registration, installation webhooks/callback/recheck,
-installation tokens, push matching, and a repository picker. Session cookies
+installation tokens, push matching, and a repository picker. Repository lists
+use a shared five-minute cache and durable last-good snapshots; stale snapshots
+render immediately while one background refresh updates them. Session cookies
 are SameSite=Lax for callbacks; cross-site POST CSRF protection remains.
 Gap: commit statuses and PR checks are not complete.
 

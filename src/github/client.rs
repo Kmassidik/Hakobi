@@ -3,7 +3,7 @@
 //! commit status posting.
 
 #[path = "cache.rs"]
-mod cache;
+pub mod cache;
 #[path = "webhook.rs"]
 mod webhook;
 
@@ -15,7 +15,6 @@ use serde::Deserialize;
 use std::time::Duration;
 
 const GITHUB_API: &str = "https://api.github.com";
-const CACHE_TTL: Duration = Duration::from_secs(300);
 /// Installation tokens are valid 1h; refresh 5 min early.
 const TOKEN_TTL: Duration = Duration::from_secs(55 * 60);
 
@@ -27,7 +26,6 @@ pub struct GithubClient {
     private_key_pem: String,
     app_installation_token: MutexCache<String>,
     user_token: String,
-    cache: MutexCache<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -107,7 +105,6 @@ impl GithubClient {
             private_key_pem: private_key_pem.to_owned(),
             app_installation_token: MutexCache::new(),
             user_token: user_token.to_owned(),
-            cache: MutexCache::new(),
         })
     }
 
@@ -169,11 +166,12 @@ impl GithubClient {
         serde_json::from_str(&body).with_context(|| format!("decode github response from {url}"))
     }
 
+    pub fn installation_id(&self) -> i64 {
+        self.installation_id
+    }
+
     /// Repositories the installation can access.
     pub async fn list_repos(&self) -> Result<Vec<RepoSummary>> {
-        if let Some(cached) = self.cache.get(CACHE_TTL) {
-            return Ok(serde_json::from_str(&cached)?);
-        }
         let token = self.installation_token().await?;
         let mut repos = Vec::new();
         let mut page = 1;
@@ -204,7 +202,6 @@ impl GithubClient {
                 private: r.private,
             })
             .collect();
-        self.cache.set(serde_json::to_string(&summaries)?);
         Ok(summaries)
     }
 

@@ -57,6 +57,7 @@ use self::auth::{LoginLimiter, Sessions};
 use crate::config::PublicConfig;
 use hakobi::{
     catalog::Catalog,
+    github::RepositoryCache,
     providers::{ContainerBackend, RoutingBackend},
 };
 
@@ -74,6 +75,7 @@ pub(super) struct AppState {
     /// components share one metrics-db read and fall back to the last-good
     /// reading instead of rendering zeros when the database is empty.
     pub live_cache: Arc<std::sync::Mutex<LiveSampleCache>>,
+    pub github_repo_cache: Arc<RepositoryCache>,
 }
 
 /// Last-good live samples with a short shared TTL.
@@ -175,6 +177,7 @@ fn build_app_state(
         build_runner,
         deployments: deployment::DeploymentGuard::new(),
         live_cache: Arc::new(std::sync::Mutex::new(LiveSampleCache::default())),
+        github_repo_cache: Arc::new(RepositoryCache::new()),
     })
 }
 

@@ -11,6 +11,7 @@ mod containers;
 mod dashboard;
 mod docker_resources;
 mod github;
+mod github_repos;
 mod github_settings;
 mod partials;
 mod settings;
@@ -38,9 +39,10 @@ pub(crate) use docker_resources::{
 };
 pub(crate) use github::{
     branches as github_branches_api, detect as github_detect,
-    manifest_callback as github_manifest_callback, repos as github_repos, status as github_status,
+    manifest_callback as github_manifest_callback, status as github_status,
     webhook as github_webhook,
 };
+pub(crate) use github_repos::repos as github_repos;
 pub(crate) use github_settings::{
     github_connect_callback, github_connect_start, github_disconnect, github_install_start,
     github_manifest_post_install, github_recheck_installation, github_settings_page,

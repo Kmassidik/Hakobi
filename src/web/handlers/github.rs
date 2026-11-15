@@ -38,21 +38,6 @@ pub(crate) async fn status(State(state): State<AppState>, headers: HeaderMap) ->
     .into_response()
 }
 
-/// GET /api/github/repos — installation repos (cached).
-pub(crate) async fn repos(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let Some(client) = client_for(&state, &headers).await else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    match client.list_repos().await {
-        Ok(repos) => Json(serde_json::json!({ "repos": repos })).into_response(),
-        Err(error) => (
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": error.to_string() })),
-        )
-            .into_response(),
-    }
-}
-
 #[derive(Deserialize)]
 pub(crate) struct RepoQuery {
     repo: String,
@@ -108,7 +93,7 @@ pub(crate) async fn detect(
 
 /// Resolves a GitHub client when the app is installed and the session user
 /// has connected their GitHub identity.
-async fn client_for(state: &AppState, headers: &HeaderMap) -> Option<GithubClient> {
+pub(super) async fn client_for(state: &AppState, headers: &HeaderMap) -> Option<GithubClient> {
     if !authenticated(state, headers).await {
         return None;
     }

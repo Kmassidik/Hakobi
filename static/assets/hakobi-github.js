@@ -113,6 +113,9 @@
           .then(function (r) { return r.json(); })
           .then(function (data) {
             populateRepositories(picker, data.repos || []);
+            if (data.stale) {
+              setStatus(picker, "Showing saved repositories; refreshing from GitHub in the background.");
+            }
           });
       })
       .catch(function () { setStatus(picker, "Could not reach GitHub."); });

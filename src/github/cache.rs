@@ -1,4 +1,44 @@
-use std::time::{Duration, Instant};
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
+
+/// Process-wide repository snapshot with single-flight background refreshes.
+pub struct RepositoryCache {
+    snapshot: MutexCache<String>,
+    refreshing: AtomicBool,
+}
+
+impl RepositoryCache {
+    pub fn new() -> Self {
+        Self {
+            snapshot: MutexCache::new(),
+            refreshing: AtomicBool::new(false),
+        }
+    }
+
+    pub fn get(&self, ttl: Duration) -> Option<String> {
+        self.snapshot.get(ttl)
+    }
+
+    pub fn set(&self, repos_json: String) {
+        self.snapshot.set(repos_json);
+    }
+
+    pub fn begin_refresh(&self) -> bool {
+        !self.refreshing.swap(true, Ordering::AcqRel)
+    }
+
+    pub fn finish_refresh(&self) {
+        self.refreshing.store(false, Ordering::Release);
+    }
+}
+
+impl Default for RepositoryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Tiny single-value TTL cache (one entry per kind).
 pub(super) struct MutexCache<T> {
