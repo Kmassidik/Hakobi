@@ -7,7 +7,8 @@ use axum::{
 };
 use tower::ServiceExt;
 
-use super::tests_support::{app, sign_in};
+use super::tests_support::{app, post_form, sign_in};
+use hakobi::catalog::Catalog;
 
 #[tokio::test]
 async fn host_delete_unknown_id_returns_not_found() {
@@ -68,4 +69,29 @@ async fn empty_or_long_fields_are_rejected() {
         .await
         .unwrap();
     assert_eq!(long.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn blank_cloudflare_token_preserves_encrypted_credentials() {
+    let (data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let path = data.path().join("catalog.sqlite3");
+    let catalog = Catalog::open(&path).unwrap();
+    catalog
+        .settings_set_encrypted("cf_api_token", "existing-token")
+        .unwrap();
+    drop(catalog);
+
+    let body = format!(
+        "account_id={}&zone_id={}&tunnel_id={}&domain=glicc.id&api_token=&csrf_token={csrf}",
+        "a".repeat(32),
+        "b".repeat(32),
+        uuid::Uuid::nil(),
+    );
+    let response = post_form(&app, "/settings/cloudflare", &authenticated, "null", body).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let settings = crate::cloudflare::apps_route::load_settings(&Catalog::open(&path).unwrap())
+        .expect("saved Cloudflare settings");
+    assert_eq!(settings.api_token, "existing-token");
+    assert_eq!(settings.domain, "glicc.id");
 }

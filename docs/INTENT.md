@@ -66,9 +66,12 @@ Gap: commit statuses and PR checks are not complete.
 User intent: Each app receives a public subdomain with DNS/ingress lifecycle
 cleanup. Settings can list and guard domain CRUD. Existing LLM frontend/API
 and Tailscale access must remain untouched by general edge changes.
-Code reality: Cloudflare API manages zone records and tunnel ingress. Explicit
-LLM routes remain on ports 8081/8082; wildcard apps route through the edge.
-Only records marked `Managed by Hakobi` can be deleted through Hakobi.
+Code reality: first setup stores the API token in the encrypted catalog vault
+for later DNS/ingress management; the separate connector token only runs
+cloudflared. Settings reuses that vault entry and allows blank-token updates.
+Cloudflare API manages zone records and tunnel ingress. Explicit LLM routes
+remain on ports 8081/8082; wildcard apps route through the edge. Only records
+marked `Managed by Hakobi` can be deleted through Hakobi.
 Gap: none.
 
 ### Edge proxy

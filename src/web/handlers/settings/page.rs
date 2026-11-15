@@ -35,8 +35,17 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         .flatten();
     let (default_branch, auto_deploy) = deployment_defaults(&catalog);
 
+    let cf_settings = crate::cloudflare::apps_route::load_settings(&catalog).ok();
+    let cf_configured = cf_settings.is_some();
+    let cf_domain = cf_settings
+        .map(|settings| settings.domain)
+        .unwrap_or_default();
     // Cloudflare failures degrade to an empty list so the page still renders.
-    let cf_domains = fetch_cf_domains(&state).await.unwrap_or_default();
+    let cf_domains = if cf_configured {
+        fetch_cf_domains(&state).await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
     let page = SettingsPage {
         base_url: &state.config.base_url,
         username: &state.config.username,
@@ -47,6 +56,8 @@ pub(crate) async fn settings_page(State(state): State<AppState>, headers: Header
         default_branch: &default_branch,
         auto_deploy,
         csrf_token: &csrf_token,
+        cf_configured,
+        cf_domain,
         cf_domains,
     };
     let markup = settings_page_markup(&page, &readiness);
@@ -78,6 +89,8 @@ struct SettingsPage<'a> {
     default_branch: &'a str,
     auto_deploy: bool,
     csrf_token: &'a str,
+    cf_configured: bool,
+    cf_domain: String,
     cf_domains: Vec<CfDomainRow>,
 }
 
@@ -235,8 +248,19 @@ fn cloudflare_section(page: &SettingsPage<'_>) -> Markup {
             @if !page.cf_domains.is_empty() {
                 (cf_domains_table(page))
             }
-            (cloudflare_settings_form(page.csrf_token))
-            (subdomain_form(page.csrf_token))
+            @if page.cf_configured {
+                p class="m-0 mt-3 text-sm text-muted" {
+                    "Connected for " span class="font-semibold text-ink" { (page.cf_domain) }
+                    " · API token stored encrypted."
+                }
+                (subdomain_form(page.csrf_token))
+                details class="mt-4 border-t border-line pt-4" {
+                    summary class="cursor-pointer text-sm font-semibold text-muted" { "Update Cloudflare credentials" }
+                    (cloudflare_settings_form(page.csrf_token))
+                }
+            } @else {
+                (cloudflare_settings_form(page.csrf_token))
+            }
         }
     }
 }
@@ -305,7 +329,7 @@ fn cloudflare_settings_form(csrf_token: &str) -> Markup {
             label class="grid gap-1 text-sm" { "Root domain (e.g. glicc.id)"
                 input name="domain" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
             label class="grid gap-1 text-sm sm:col-span-2" { "API token (Tunnel:Edit + DNS:Edit) — stored encrypted"
-                input name="api_token" type="password" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" required; }
+                input name="api_token" type="password" class="rounded-lg border border-line bg-surface px-3 py-2 text-sm" placeholder="Leave blank to keep the current token"; }
             div class="sm:col-span-2" {
                 button class="rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white" type="submit" { "Save Cloudflare settings" }
             }

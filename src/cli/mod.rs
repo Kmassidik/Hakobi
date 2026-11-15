@@ -14,6 +14,9 @@ use hakobi::{
 use tokio::{net::TcpListener, task};
 use zeroize::Zeroizing;
 
+#[cfg(test)]
+mod tests;
+
 use crate::{
     cloudflare::{tunnel::TunnelProcess, CloudflareClient, CreatedTunnel},
     config::{
@@ -168,13 +171,14 @@ async fn provision_cloudflare(
     input: &CloudflareSetupInput,
     hostname: &str,
     listen_port: u16,
-) -> Result<(CloudflareClient, CreatedTunnel, Option<String>)> {
+) -> Result<(CloudflareClient, CreatedTunnel, Option<String>, String)> {
     let client = CloudflareClient::new(input.api_token.to_string())?;
     let tunnel_name = format!("hakobi-{hostname}");
     let tunnel = client
         .create_tunnel(&input.account_id, &tunnel_name)
         .await?;
     let mut dns_record_id = None;
+    let mut domain = None;
     let provisioning = async {
         client
             .configure_tunnel(&input.account_id, tunnel.id, hostname, listen_port)
@@ -183,6 +187,7 @@ async fn provision_cloudflare(
             .create_dns_record(&input.zone_id, hostname, tunnel.id)
             .await?;
         dns_record_id = Some(record.id);
+        domain = Some(client.zone_name(&input.zone_id).await?);
         Ok(())
     }
     .await;
@@ -198,7 +203,12 @@ async fn provision_cloudflare(
         .await;
         return Err(error);
     }
-    Ok((client, tunnel, dns_record_id))
+    Ok((
+        client,
+        tunnel,
+        dns_record_id,
+        domain.context("Cloudflare zone name was not returned")?,
+    ))
 }
 
 fn confirm_cloudflare_setup(hostname: &str) -> Result<()> {
@@ -232,6 +242,30 @@ fn cloudflare_config(
     )
 }
 
+fn save_cloudflare_settings(
+    store: &ConfigStore,
+    input: &CloudflareSetupInput,
+    tunnel: &CreatedTunnel,
+    domain: &str,
+) -> Result<()> {
+    let catalog = hakobi::catalog::Catalog::open(store.data_dir().join("catalog.sqlite3"))?;
+    catalog.settings_set(
+        crate::cloudflare::apps_route::KEY_ACCOUNT_ID,
+        &input.account_id,
+    )?;
+    catalog.settings_set(crate::cloudflare::apps_route::KEY_ZONE_ID, &input.zone_id)?;
+    catalog.settings_set(
+        crate::cloudflare::apps_route::KEY_TUNNEL_ID,
+        &tunnel.id.to_string(),
+    )?;
+    catalog.settings_set(crate::cloudflare::apps_route::KEY_DOMAIN, domain)?;
+    catalog.settings_set_encrypted(
+        crate::cloudflare::apps_route::KEY_API_TOKEN,
+        input.api_token.as_str(),
+    )?;
+    Ok(())
+}
+
 async fn setup_cloudflare(
     store: &ConfigStore,
     username: String,
@@ -243,7 +277,7 @@ async fn setup_cloudflare(
     let hostname = config.hostname()?.to_owned();
     confirm_cloudflare_setup(&hostname)?;
 
-    let (client, tunnel, dns_record_id) =
+    let (client, tunnel, dns_record_id, domain) =
         provision_cloudflare(&input, &hostname, listen_port).await?;
     let config = cloudflare_config(&config, &input, &tunnel)?;
     if let Err(error) = store.save_new(&config) {
@@ -259,11 +293,24 @@ async fn setup_cloudflare(
         return Err(error);
     }
 
+    if let Err(error) = save_cloudflare_settings(store, &input, &tunnel, &domain) {
+        rollback(
+            &client,
+            &input.account_id,
+            &input.zone_id,
+            &tunnel,
+            &hostname,
+            dns_record_id.as_deref(),
+        )
+        .await;
+        let _ = std::fs::remove_file(store.path());
+        return Err(error).context("save Cloudflare settings in the catalog vault");
+    }
     println!(
         "\nSetup complete. Hakobi will be available at {}.",
         config.base_url
     );
-    println!("The Cloudflare API token was not saved.");
+    println!("Cloudflare API credentials are stored encrypted for app domain management.");
     Ok(())
 }
 

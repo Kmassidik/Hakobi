@@ -77,10 +77,17 @@ pub(crate) async fn cloudflare_save(
             &form.tunnel_id,
         )?;
         catalog.settings_set(crate::cloudflare::apps_route::KEY_DOMAIN, &form.domain)?;
-        catalog.settings_set_encrypted(
-            crate::cloudflare::apps_route::KEY_API_TOKEN,
-            &form.api_token,
-        )?;
+        if !form.api_token.trim().is_empty() {
+            catalog.settings_set_encrypted(
+                crate::cloudflare::apps_route::KEY_API_TOKEN,
+                &form.api_token,
+            )?;
+        } else if !catalog
+            .settings_get(crate::cloudflare::apps_route::KEY_API_TOKEN)?
+            .is_some_and(|value| !value.is_empty())
+        {
+            anyhow::bail!("Cloudflare API token is required for initial configuration");
+        }
         Ok(())
     })
     .await;

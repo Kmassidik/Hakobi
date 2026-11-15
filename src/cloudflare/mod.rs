@@ -93,6 +93,11 @@ pub struct DnsRecord {
     pub comment: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ZoneResponse {
+    name: String,
+}
+
 impl CloudflareClient {
     pub fn new(api_token: String) -> Result<Self> {
         let client = Client::builder()
@@ -101,6 +106,13 @@ impl CloudflareClient {
             .user_agent(concat!("hakobi/", env!("CARGO_PKG_VERSION")))
             .build()?;
         Ok(Self { client, api_token })
+    }
+
+    pub async fn zone_name(&self, zone_id: &str) -> Result<String> {
+        let zone: ZoneResponse = self
+            .send(self.request(Method::GET, &format!("/zones/{zone_id}")))
+            .await?;
+        Ok(zone.name)
     }
 
     pub async fn create_tunnel(&self, account_id: &str, name: &str) -> Result<CreatedTunnel> {
