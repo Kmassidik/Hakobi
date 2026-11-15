@@ -174,6 +174,26 @@ impl ContainerBackend for AgentBackend {
         .await
     }
 
+    async fn pause_container(&self, endpoint: &str, name: &str) -> Result<()> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        self.post_unit(
+            &format!("/v1/docker/containers/{name}/pause"),
+            MUTATION_TIMEOUT,
+        )
+        .await
+    }
+
+    async fn unpause_container(&self, endpoint: &str, name: &str) -> Result<()> {
+        ensure_local_endpoint(endpoint)?;
+        validate_container_name(name)?;
+        self.post_unit(
+            &format!("/v1/docker/containers/{name}/unpause"),
+            MUTATION_TIMEOUT,
+        )
+        .await
+    }
+
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()> {
         ensure_local_endpoint(endpoint)?;
         validate_container_name(name)?;

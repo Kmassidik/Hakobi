@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{Connection, Transaction};
 
 /// Schema version written to `PRAGMA user_version`.
-pub(super) const SCHEMA_VERSION: i64 = 13;
+pub(super) const SCHEMA_VERSION: i64 = 14;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS provider_connections (
@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS apps (
     webhook_enabled    INTEGER NOT NULL DEFAULT 0,
     status             TEXT NOT NULL DEFAULT 'idle'
                        CHECK (status IN ('idle', 'building', 'deploying', 'running', 'failed')),
+    runtime_status     TEXT CHECK (runtime_status IS NULL OR runtime_status IN ('running', 'stopped', 'paused')),
     created_at         TEXT NOT NULL CHECK (length(created_at) > 0),
     updated_at         TEXT NOT NULL CHECK (length(updated_at) > 0)
 );
@@ -195,6 +196,14 @@ fn migrate_apps(transaction: &Transaction<'_>, current: i64) -> Result<()> {
                  ALTER TABLE apps ADD COLUMN memory_limit_bytes INTEGER;",
             )
             .context("add app resource limits")?;
+    }
+    if (1..14).contains(&current) {
+        transaction
+            .execute(
+                "ALTER TABLE apps ADD COLUMN runtime_status TEXT CHECK (runtime_status IS NULL OR runtime_status IN ('running', 'stopped', 'paused'))",
+                [],
+            )
+            .context("add apps.runtime_status")?;
     }
     Ok(())
 }

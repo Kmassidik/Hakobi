@@ -31,10 +31,21 @@ pub struct App {
     /// JSON object of environment variables passed to the container.
     pub env_json: String,
     pub status: String,
+    /// Last explicit runtime action; deployment status remains separate.
+    pub runtime_status: Option<String>,
     pub webhook_secret: Option<String>,
     pub webhook_enabled: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl App {
+    pub fn display_status(&self) -> &str {
+        if matches!(self.status.as_str(), "building" | "deploying") {
+            return &self.status;
+        }
+        self.runtime_status.as_deref().unwrap_or(&self.status)
+    }
 }
 
 /// Validates that `value` is one of the accepted app statuses.
@@ -126,13 +137,14 @@ fn read_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<App> {
         updated_at: row.get(16)?,
         cpu_limit: row.get(17)?,
         memory_limit_bytes: row.get::<_, Option<i64>>(18)?.map(|value| value as u64),
+        runtime_status: row.get(19)?,
     })
 }
 
 const APP_COLUMNS: &str = "id, name, host_id, build_type, github_repo, \
      github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, host_port, \
      env_json, status, webhook_secret, webhook_enabled, created_at, updated_at, \
-     cpu_limit, memory_limit_bytes";
+     cpu_limit, memory_limit_bytes, runtime_status";
 
 impl Catalog {
     /// Replaces the app's container environment variables (JSON object).
@@ -277,6 +289,29 @@ impl Catalog {
         }
         super::record_audit(&transaction, "update", "app", id)?;
         transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn set_app_runtime_status_for_deployment(&mut self, deployment_id: &str) -> Result<()> {
+        self.connection.execute(
+            "UPDATE apps SET runtime_status = NULL \
+             WHERE id = (SELECT app_id FROM deployments WHERE id = ?1)",
+            params![deployment_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_app_runtime_status(&mut self, id: &str, status: Option<&str>) -> Result<()> {
+        if status.is_some_and(|value| !matches!(value, "running" | "stopped" | "paused")) {
+            bail!("runtime status must be running, stopped, paused, or unset");
+        }
+        let updated = self.connection.execute(
+            "UPDATE apps SET runtime_status = ?2 WHERE id = ?1",
+            params![id, status],
+        )?;
+        if updated == 0 {
+            bail!("app {id} not found");
+        }
         Ok(())
     }
 

@@ -3,6 +3,7 @@
 
 pub(crate) mod app_deploy;
 pub(crate) mod app_form;
+mod app_runtime;
 mod apps;
 mod auth;
 mod container_detail;
@@ -17,6 +18,7 @@ pub(crate) use settings::{
 };
 
 pub(crate) use app_deploy::{app_deploy, app_rollback};
+pub(crate) use app_runtime::{app_runtime_action, app_usage};
 pub(crate) use apps::{
     app_create, app_delete, app_deployments, app_detail, app_edit_page, app_edit_submit, app_list,
     app_logs, app_new, app_status_partial,

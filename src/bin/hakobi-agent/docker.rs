@@ -1,8 +1,13 @@
+#[path = "docker/run.rs"]
+mod run;
+
+pub(super) use run::docker_run;
+
 use std::{future::Future, time::Duration};
 
 use anyhow::Result;
 use axum::{
-    extract::{rejection::JsonRejection, Path, State},
+    extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
@@ -11,12 +16,9 @@ use hakobi::{
     host_agent::{
         self, DockerContainerInspect, DockerContainerLogs, DockerContainerRow,
         DockerContainerStats, DockerContainersResponse, DockerMetrics, DockerSnapshotResponse,
-        DockerVersion, RunContainerRequest, RunContainerResponse,
+        DockerVersion,
     },
-    providers::{
-        validate_container_name, validate_image_reference, ContainerBackend, DockerBackend,
-        ResourceLimits,
-    },
+    providers::{validate_container_name, ContainerBackend, DockerBackend},
 };
 use tokio::{process::Command, time::timeout};
 
@@ -25,7 +27,6 @@ use super::{authorized, error_response, truncate_to, unauthorized, AgentState};
 const MAX_REPORTED_ROWS: usize = 512;
 const MAX_ERROR_DETAIL: usize = 500;
 const DOCKER_TIMEOUT: Duration = Duration::from_secs(20);
-const DOCKER_RUN_TIMEOUT: Duration = Duration::from_secs(120);
 /// Log window served when the dashboard omits `tail`, matching the 100 lines
 /// the detail page polls for.
 pub(super) const DEFAULT_TAIL_LINES: usize = 100;
@@ -324,6 +325,8 @@ enum ContainerAction {
     Start,
     Stop,
     Restart,
+    Pause,
+    Unpause,
     Delete,
 }
 
@@ -350,6 +353,12 @@ async fn container_action(
         }
         ContainerAction::Restart => {
             docker_call(backend.restart_container(endpoint, &name), DOCKER_TIMEOUT).await
+        }
+        ContainerAction::Pause => {
+            docker_call(backend.pause_container(endpoint, &name), DOCKER_TIMEOUT).await
+        }
+        ContainerAction::Unpause => {
+            docker_call(backend.unpause_container(endpoint, &name), DOCKER_TIMEOUT).await
         }
         ContainerAction::Delete => {
             docker_call(backend.remove_container(endpoint, &name), DOCKER_TIMEOUT).await
@@ -385,63 +394,28 @@ pub(super) async fn docker_restart(
     container_action(state, headers, name, ContainerAction::Restart).await
 }
 
+pub(super) async fn docker_pause(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    container_action(state, headers, name, ContainerAction::Pause).await
+}
+
+pub(super) async fn docker_unpause(
+    State(state): State<AgentState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    container_action(state, headers, name, ContainerAction::Unpause).await
+}
+
 pub(super) async fn docker_delete(
     State(state): State<AgentState>,
     headers: HeaderMap,
     Path(name): Path<String>,
 ) -> Response {
     container_action(state, headers, name, ContainerAction::Delete).await
-}
-
-pub(super) async fn docker_run(
-    State(state): State<AgentState>,
-    headers: HeaderMap,
-    payload: std::result::Result<Json<RunContainerRequest>, JsonRejection>,
-) -> Response {
-    if !authorized(&headers, &state) {
-        return unauthorized();
-    }
-    let Json(request) = match payload {
-        Ok(payload) => payload,
-        Err(rejection) => {
-            return error_response(StatusCode::BAD_REQUEST, rejection.body_text());
-        }
-    };
-    if let Err(error) = validate_image_reference(&request.image) {
-        return error_response(StatusCode::BAD_REQUEST, error.to_string());
-    }
-    if let Err(error) = validate_container_name(&request.name) {
-        return error_response(StatusCode::BAD_REQUEST, error.to_string());
-    }
-    if request.container_port == 0 {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "container port must be between 1 and 65535",
-        );
-    }
-    let backend = DockerBackend;
-    match docker_call(
-        backend.run_container(
-            host_agent::DOCKER_SOCKET_ENDPOINT,
-            &request.image,
-            &request.name,
-            request.container_port,
-            &request.env,
-            ResourceLimits {
-                cpu: request.cpu_limit,
-                memory_bytes: request.memory_limit_bytes,
-            },
-        ),
-        DOCKER_RUN_TIMEOUT,
-    )
-    .await
-    {
-        Ok(result) => {
-            let body = RunContainerResponse::from(result);
-            (StatusCode::CREATED, Json(body)).into_response()
-        }
-        Err(response) => *response,
-    }
 }
 
 fn host_memory_total() -> Option<u64> {

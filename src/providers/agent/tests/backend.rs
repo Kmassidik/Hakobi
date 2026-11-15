@@ -124,10 +124,17 @@ async fn agent_backend_sends_authenticated_mutations() {
         .await
         .unwrap();
     backend
+        .pause_container(host_agent::LOCAL_ENDPOINT, "demo-api")
+        .await
+        .unwrap();
+    backend
+        .unpause_container(host_agent::LOCAL_ENDPOINT, "demo-api")
+        .await
+        .unwrap();
+    backend
         .remove_container(host_agent::LOCAL_ENDPOINT, "demo-api")
         .await
         .unwrap();
-
     let result = backend
         .run_container(
             host_agent::LOCAL_ENDPOINT,
@@ -158,6 +165,14 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
 
     assert!(backend
         .start_container(host_agent::LOCAL_ENDPOINT, "bad name")
+        .await
+        .is_err());
+    assert!(backend
+        .pause_container(host_agent::LOCAL_ENDPOINT, "bad name")
+        .await
+        .is_err());
+    assert!(backend
+        .unpause_container(host_agent::LOCAL_ENDPOINT, "bad name")
         .await
         .is_err());
     assert!(backend

@@ -80,9 +80,63 @@
     tick(state);
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
+  const APP_USAGE_POLL_MS = 5000;
+  const APP_USAGE_POINTS = 60;
+
+  function updateAppUsage(state) {
+    state.root.querySelectorAll("canvas[data-usage-kind]").forEach(function (canvas) {
+      var memory = canvas.dataset.usageKind === "memory";
+      var values = state.samples.map(function (sample) {
+        return memory ? sample.memory_used_bytes / 1048576 : sample.cpu_percent;
+      });
+      canvas.dataset.series = JSON.stringify([{ label: canvas.dataset.usageKind, values: values }]);
+    });
+    if (hakobi.drawCharts) hakobi.drawCharts();
+  }
+
+  async function tickAppUsage(state) {
+    if (!state.busy && !document.hidden) {
+      state.busy = true;
+      try {
+        var response = await fetch(state.url, { headers: { Accept: "application/json" } });
+        if (response.ok) {
+          var sample = await response.json();
+          state.samples.push(sample);
+          state.samples = state.samples.slice(-APP_USAGE_POINTS);
+          state.status.textContent = "Live · last 5 minutes";
+          updateAppUsage(state);
+        } else {
+          state.status.textContent = "Stats unavailable · retrying";
+        }
+      } catch (error) {
+        state.status.textContent = "Stats unavailable · retrying";
+      }
+      state.busy = false;
+    }
+    setTimeout(function () { tickAppUsage(state); }, APP_USAGE_POLL_MS);
+  }
+
+  function initAppUsage() {
+    var root = document.querySelector("[data-app-usage]");
+    if (!root) return;
+    var state = {
+      url: root.dataset.appUsage,
+      root: root,
+      status: root.querySelector("[data-app-usage-status]"),
+      samples: [],
+      busy: false,
+    };
+    tickAppUsage(state);
+  }
+
+  function start() {
     init();
+    initAppUsage();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start);
+  } else {
+    start();
   }
 }

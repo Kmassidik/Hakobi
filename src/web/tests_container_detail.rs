@@ -169,6 +169,14 @@ impl ContainerBackend for DetailBackend {
         Ok(())
     }
 
+    async fn pause_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn unpause_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     async fn remove_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
         Ok(())
     }
@@ -332,6 +340,20 @@ async fn managed_containers_show_app_names_and_real_docker_names() {
         assert!(body.contains("algo-lab"));
         assert!(body.contains("hakobi-test-app"));
     }
+    let usage = app
+        .clone()
+        .oneshot(
+            Request::get("/apps/test-app/usage")
+                .header(COOKIE, authenticated)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(usage.status(), StatusCode::OK);
+    let body = body_text(usage, 16 * 1024).await;
+    assert!(body.contains("\"cpu_percent\":12.5"));
+    assert!(body.contains("\"memory_used_bytes\":1048576"));
 }
 
 #[tokio::test]

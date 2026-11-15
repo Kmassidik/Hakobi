@@ -36,9 +36,7 @@ pub(super) fn app(state: AgentState) -> Router {
         )
         .route("/v1/docker/snapshot", get(docker::docker_snapshot))
         .route("/v1/docker/containers/run", post(docker::docker_run))
-        .route("/build/dockerfile", post(agent_build::build_dockerfile))
-        .route("/build/compose", post(agent_build::build_compose))
-        .route("/build/nixpacks", post(agent_build::build_nixpacks))
+        .merge(auxiliary_routes())
         .route(
             "/v1/docker/containers/{name}/start",
             post(docker::docker_start),
@@ -52,12 +50,27 @@ pub(super) fn app(state: AgentState) -> Router {
             post(docker::docker_restart),
         )
         .route(
+            "/v1/docker/containers/{name}/pause",
+            post(docker::docker_pause),
+        )
+        .route(
+            "/v1/docker/containers/{name}/unpause",
+            post(docker::docker_unpause),
+        )
+        .route(
             "/v1/docker/containers/{name}/delete",
             post(docker::docker_delete),
         )
+        .with_state(state)
+}
+
+fn auxiliary_routes() -> Router<AgentState> {
+    Router::new()
+        .route("/build/dockerfile", post(agent_build::build_dockerfile))
+        .route("/build/compose", post(agent_build::build_compose))
+        .route("/build/nixpacks", post(agent_build::build_nixpacks))
         .route("/v1/install/status", get(install::install_status))
         .route("/v1/install/{tool}", post(install::install))
-        .with_state(state)
 }
 
 async fn health() -> impl IntoResponse {

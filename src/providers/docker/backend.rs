@@ -31,6 +31,10 @@ pub trait ContainerBackend: Send + Sync {
     async fn stop_container(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Restarts a container.
     async fn restart_container(&self, endpoint: &str, name: &str) -> Result<()>;
+    /// Pauses a running container.
+    async fn pause_container(&self, endpoint: &str, name: &str) -> Result<()>;
+    /// Unpauses a paused container.
+    async fn unpause_container(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Removes a container. Attached volumes are preserved.
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Creates and starts a container from an image already present locally.
@@ -209,6 +213,22 @@ impl ContainerBackend for DockerBackend {
             .restart_container(name, None)
             .await
             .with_context(|| format!("restart container `{name}`"))
+    }
+
+    async fn pause_container(&self, endpoint: &str, name: &str) -> Result<()> {
+        validate_container_name(name)?;
+        connect(endpoint)?
+            .pause_container(name)
+            .await
+            .with_context(|| format!("pause container `{name}`"))
+    }
+
+    async fn unpause_container(&self, endpoint: &str, name: &str) -> Result<()> {
+        validate_container_name(name)?;
+        connect(endpoint)?
+            .unpause_container(name)
+            .await
+            .with_context(|| format!("unpause container `{name}`"))
     }
 
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()> {

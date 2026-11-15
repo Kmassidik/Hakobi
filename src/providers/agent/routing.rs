@@ -150,6 +150,20 @@ impl ContainerBackend for RoutingBackend {
             .await
     }
 
+    async fn pause_container(&self, endpoint: &str, name: &str) -> Result<()> {
+        self.select(endpoint)
+            .await?
+            .pause_container(endpoint, name)
+            .await
+    }
+
+    async fn unpause_container(&self, endpoint: &str, name: &str) -> Result<()> {
+        self.select(endpoint)
+            .await?
+            .unpause_container(endpoint, name)
+            .await
+    }
+
     async fn remove_container(&self, endpoint: &str, name: &str) -> Result<()> {
         self.select(endpoint)
             .await?

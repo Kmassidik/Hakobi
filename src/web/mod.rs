@@ -254,6 +254,11 @@ fn app_routes() -> Router<AppState> {
         .route("/apps/{id}/deployments", get(handlers::app_deployments))
         .route("/apps/{id}/logs", get(handlers::app_logs))
         .route("/apps/{id}/status", get(handlers::app_status_partial))
+        .route("/apps/{id}/usage", get(handlers::app_usage))
+        .route(
+            "/apps/{id}/runtime/{action}",
+            post(handlers::app_runtime_action),
+        )
         .route("/webhook/{app_id}/{secret}", post(webhook::webhook_receive))
 }
 

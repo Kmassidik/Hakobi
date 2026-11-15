@@ -279,6 +279,8 @@ pub(super) async fn spawn_fake_agent(token: &str) -> String {
         .route("/v1/docker/containers/{name}/start", post(fake_action))
         .route("/v1/docker/containers/{name}/stop", post(fake_action))
         .route("/v1/docker/containers/{name}/restart", post(fake_action))
+        .route("/v1/docker/containers/{name}/pause", post(fake_action))
+        .route("/v1/docker/containers/{name}/unpause", post(fake_action))
         .route("/v1/docker/containers/{name}/delete", post(fake_action))
         .with_state(FakeAgent {
             token: token.to_owned(),

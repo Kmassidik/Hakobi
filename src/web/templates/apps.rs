@@ -12,6 +12,7 @@ fn app_status_class(status: &str) -> &'static str {
         "running" => "bg-emerald-500/10 text-emerald-700",
         "building" | "deploying" => "bg-sky-500/10 text-sky-700",
         "failed" => "bg-red-500/10 text-red-700",
+        "paused" => "bg-amber-500/10 text-amber-700",
         _ => "bg-slate-500/10 text-slate-600",
     }
 }
@@ -119,10 +120,11 @@ fn app_card(app: &App) -> Markup {
             div class="flex flex-col justify-between gap-3 sm:flex-row sm:items-start" {
                 div {
                     h2 class="m-0 flex items-center gap-2.5 text-[1.1rem] font-bold" {
-                        span class=(format!("size-2 shrink-0 rounded-full {}", match app.status.as_str() {
+                        span class=(format!("size-2 shrink-0 rounded-full {}", match app.display_status() {
                             "running" => "bg-emerald-500",
                             "building" | "deploying" => "bg-sky-500 animate-pulse",
                             "failed" => "bg-red-500",
+                            "paused" => "bg-amber-500",
                             _ => "bg-slate-400",
                         })) aria-hidden="true" {}
                         a class="no-underline text-inherit hover:underline" href=(format!("/apps/{}", app.id)) { (app.name) }
@@ -139,8 +141,8 @@ fn app_card(app: &App) -> Markup {
                         " · build: " (app.build_type)
                     }
                 }
-                span class=(format!("inline-flex w-fit items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold {}", app_status_class(&app.status))) {
-                    (app.status)
+                span class=(format!("inline-flex w-fit items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold {}", app_status_class(app.display_status()))) {
+                    (app.display_status())
                 }
             }
             div class="mt-4 flex flex-wrap gap-2" {
@@ -205,6 +207,7 @@ fn app_detail_main(
             (super::app_form::delete_app_dialog(&app.id, csrf_token))
             (app_status_body(app, latest))
             (app_detail_cards(base_url, csrf_token, app, previous))
+            (super::app_usage_section(app))
             section id="app-deployments" class="mt-10" {
                 div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
                     h2 class="m-0 text-[1.2rem] font-bold" { "Deployment history" }
@@ -228,6 +231,7 @@ fn app_detail_cards(
             (app_source_card(app))
             (app_webhook_card(base_url, app))
             (app_deploy_card(app, previous, csrf_token))
+            (super::app_runtime_card(app, csrf_token))
         }
     }
 }
@@ -386,8 +390,8 @@ pub fn app_status_body(app: &App, latest: Option<&Deployment>) -> Markup {
     html! {
         section id="app-status" hx-get=(format!("/apps/{}/status", app.id)) hx-trigger="every 5s" hx-swap="outerHTML" {
             div class="mt-6 flex flex-wrap items-center gap-3 rounded-[0.85rem] border border-line bg-surface/45 px-5 py-4" {
-                span class=(format!("rounded-full px-3 py-1 text-xs font-semibold {}", app_status_class(&app.status))) {
-                    (app.status)
+                span class=(format!("rounded-full px-3 py-1 text-xs font-semibold {}", app_status_class(app.display_status()))) {
+                    (app.display_status())
                 }
                 @match latest {
                     Some(deployment) => span class="text-sm text-muted" {

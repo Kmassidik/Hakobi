@@ -88,6 +88,14 @@ impl ContainerBackend for FakeBackend {
         Ok(())
     }
 
+    async fn pause_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn unpause_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
     async fn remove_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
         Ok(())
     }
@@ -174,6 +182,14 @@ impl ContainerBackend for PipelineBackend {
     }
 
     async fn restart_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn pause_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn unpause_container(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
         Ok(())
     }
 

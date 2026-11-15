@@ -11,6 +11,15 @@ keep historical implementation claims here after a clean cutover.
 
 ## Entries
 
+### Self-hosted CI direction
+User intent: Hakobi must not permanently depend on GitHub-hosted compute for
+its own verification. GitHub remains the repository and event source.
+Code reality: application builds run on the configured host; Hakobi's own CI
+currently uses GitHub-hosted runners.
+Gap: migrate CI to an isolated self-hosted runner on a separate VM or machine,
+then dogfood Hakobi CI orchestration when available. Never run untrusted public
+PR code directly on the production host or expose its Docker socket/secrets.
+
 ### Dashboard
 User intent: Live host/container metrics, 24-hour charts, deployment activity,
 and honest empty/stale states. Polling must never append duplicate panels or
@@ -24,11 +33,15 @@ Gap: none.
 User intent: Railway-shaped applications, not overlapping environment/stack
 pages. An app binds a GitHub repository, branch, path, Dockerfile, port,
 environment variables, optional CPU/memory limits, and auto-deploy policy. Create, edit, deploy, roll back,
-view logs/history, and delete with full cleanup.
+view logs/history, start/stop/restart/pause/resume, inspect live CPU/memory
+charts, and delete with full cleanup.
 Code reality: `apps` and `deployments(app_id)` in SQLite. The host agent builds
 and runs containers; deployments publish `app.container_port` on loopback. Optional
 CPU-core and MiB limits are stored as bytes and enforced through Docker `HostConfig`
-for both Dockerfile and Nixpacks builds; blank fields remain unlimited.
+for both Dockerfile and Nixpacks builds; blank fields remain unlimited. Runtime
+actions use the app's managed container and persist stopped/paused state apart
+from deployment state. Usage charts accumulate up to 60 real samples over five
+minutes in the browser; failed polls never insert zero samples.
 Gap: commit statuses and PR check runs remain separate CP9 work.
 
 ### Containers

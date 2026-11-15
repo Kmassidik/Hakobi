@@ -41,6 +41,8 @@ fn docker_routes() -> Vec<(Method, &'static str)> {
         (Method::POST, "/v1/docker/containers/demo-api/start"),
         (Method::POST, "/v1/docker/containers/demo-api/stop"),
         (Method::POST, "/v1/docker/containers/demo-api/restart"),
+        (Method::POST, "/v1/docker/containers/demo-api/pause"),
+        (Method::POST, "/v1/docker/containers/demo-api/unpause"),
         (Method::POST, "/v1/docker/containers/demo-api/delete"),
         (Method::POST, "/v1/docker/containers/run"),
     ]
@@ -105,7 +107,7 @@ async fn docker_run_requires_the_bearer_token_even_with_an_invalid_body() {
 
 #[tokio::test]
 async fn docker_container_names_are_validated_before_docker_is_contacted() {
-    for action in ["start", "stop", "restart", "delete"] {
+    for action in ["start", "stop", "restart", "pause", "unpause", "delete"] {
         let uri = format!("/v1/docker/containers/bad%20name/{action}");
         let response = app(state())
             .oneshot(request(Method::POST, &uri, Some(TEST_TOKEN)))

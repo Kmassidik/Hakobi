@@ -1,6 +1,7 @@
 //! Shared layout for Maud SSR templates: page shell, sidebar, and badges.
 
 pub(crate) mod app_form;
+mod app_runtime;
 mod apps;
 mod container_detail;
 mod containers;
@@ -8,6 +9,7 @@ mod dashboard;
 mod readiness;
 
 pub(crate) use app_form::{app_form, AppFormValues};
+pub(crate) use app_runtime::{app_runtime_card, app_usage_section};
 pub(crate) use apps::{app_deployments, app_detail, app_logs, app_status_body, apps};
 pub(crate) use container_detail::{
     container_detail, container_logs_error, container_logs_section, container_stats_error,

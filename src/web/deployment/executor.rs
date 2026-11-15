@@ -291,6 +291,7 @@ async fn transition(
     let message = message.to_owned();
     run_catalog_op(path, move |catalog| {
         catalog.update_deployment_status(&deployment_id, &status, None)?;
+        catalog.set_app_runtime_status_for_deployment(&deployment_id)?;
         catalog.add_deployment_log(&deployment_id, "info", &message)?;
         Ok(())
     })

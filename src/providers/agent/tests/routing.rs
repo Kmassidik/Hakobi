@@ -37,6 +37,14 @@ impl ContainerBackend for StubBackend {
         Ok(())
     }
 
+    async fn pause_container(&self, _endpoint: &str, _name: &str) -> Result<()> {
+        bail!("{} pause", self.0)
+    }
+
+    async fn unpause_container(&self, _endpoint: &str, _name: &str) -> Result<()> {
+        bail!("{} unpause", self.0)
+    }
+
     async fn remove_container(&self, _endpoint: &str, _name: &str) -> Result<()> {
         Ok(())
     }
@@ -73,6 +81,22 @@ async fn routing_dispatches_by_endpoint_scheme() {
     assert_eq!(
         backend.test("tcp://127.0.0.1:2375").await.unwrap(),
         "docker test"
+    );
+    assert_eq!(
+        backend
+            .pause_container("agent://local", "demo")
+            .await
+            .unwrap_err()
+            .to_string(),
+        "agent pause"
+    );
+    assert_eq!(
+        backend
+            .unpause_container("unix:///var/run/docker.sock", "demo")
+            .await
+            .unwrap_err()
+            .to_string(),
+        "docker unpause"
     );
     assert!(backend.snapshot("agent://local").await.is_err());
     assert!(backend

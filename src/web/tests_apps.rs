@@ -182,6 +182,11 @@ async fn check_app_detail(app: &Router, authenticated: &str, app_id: &str) {
     assert!(body.contains(&format!("/apps/{app_id}/delete")));
     assert!(body.contains("delete-app"));
     assert!(body.contains("data-confirm-input"));
+    assert!(body.contains("Runtime"));
+    assert!(body.contains("/runtime/start"));
+    assert!(body.contains("data-app-usage"));
+    assert!(body.contains("CPU usage (%)"));
+    assert!(body.contains("Memory usage (MiB)"));
 }
 
 async fn check_edit_form(app: &Router, authenticated: &str, app_id: &str) {
@@ -235,6 +240,35 @@ async fn update_app(
     assert!(updated.container_port.is_none());
     assert!(updated.cpu_limit.is_none());
     assert!(updated.memory_limit_bytes.is_none());
+}
+
+async fn exercise_runtime_actions(
+    app: &Router,
+    path: &Path,
+    authenticated: &str,
+    csrf: &str,
+    app_id: &str,
+) {
+    for (action, expected) in [
+        ("start", "running"),
+        ("pause", "paused"),
+        ("unpause", "running"),
+        ("restart", "running"),
+        ("stop", "stopped"),
+    ] {
+        let response = post_form(
+            app,
+            &format!("/apps/{app_id}/runtime/{action}"),
+            authenticated,
+            "null",
+            format!("csrf_token={csrf}"),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let catalog = Catalog::open(path).unwrap();
+        let app = catalog.get_app(app_id).unwrap().unwrap();
+        assert_eq!(app.display_status(), expected);
+    }
 }
 
 async fn deploy_and_rollback(app: &Router, authenticated: &str, csrf: &str, app_id: &str) {
@@ -343,6 +377,7 @@ async fn apps_can_be_created_edited_and_deleted_over_http() {
     check_app_detail(&app, &authenticated, &app_id).await;
     check_edit_form(&app, &authenticated, &app_id).await;
     update_app(&app, &path, &authenticated, &csrf, &host_id, &app_id).await;
+    exercise_runtime_actions(&app, &path, &authenticated, &csrf, &app_id).await;
     deploy_and_rollback(&app, &authenticated, &csrf, &app_id).await;
     check_deployment_pages(&app, &authenticated, &app_id).await;
     reject_missing_and_forbidden_app(&app, &authenticated, &host_id).await;

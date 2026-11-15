@@ -28,7 +28,7 @@
     return max;
   }
 
-  function drawAxes(ctx, width, height, pad, cw, ch, max, isPercent, count) {
+  function drawAxes(ctx, width, height, pad, cw, ch, max, isPercent, count, windowMinutes) {
     ctx.font = "10px ui-monospace, monospace";
     ctx.fillStyle = "#a1a1a6";
     ctx.strokeStyle = "#ececf0";
@@ -43,7 +43,9 @@
       ctx.fillText(formatAxis(max * (1 - i / 4), isPercent), 4, y + 3);
     }
     if (count >= 2) {
-      ["-60m", "-45m", "-30m", "-15m", "now"].forEach(function (label, idx) {
+      [1, 0.75, 0.5, 0.25, 0].map(function (fraction) {
+        return fraction === 0 ? "now" : "-" + Math.round(windowMinutes * fraction) + "m";
+      }).forEach(function (label, idx) {
         ctx.fillText(label, pad.left + (idx * cw) / 4 - 10, height - 5);
       });
     }
@@ -90,7 +92,7 @@
     var isPercent = canvas.dataset.chart === "percent";
     var max = chartMaximum(series, isPercent);
     var count = series[0].values.length;
-    drawAxes(ctx, width, height, pad, cw, ch, max, isPercent, count);
+    drawAxes(ctx, width, height, pad, cw, ch, max, isPercent, count, Number(canvas.dataset.window || 60));
     drawSeries(ctx, series, pad, cw, ch, count, max);
   }
 
