@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 
 use hakobi::buildrunner::BuildRequest;
-use hakobi::providers::docker::validate_image_reference;
+use hakobi::providers::{docker::validate_image_reference, ResourceLimits};
 
 use super::stages::{
     container_name_for, BuildContext, STAGE_BUILDING, STAGE_DEPLOYING, STAGE_FAILED, STAGE_RUNNING,
@@ -56,6 +56,7 @@ pub(super) async fn run_pipeline(
         &image_tag,
         context.container_port,
         &context.env_json,
+        context.resources,
     )
     .await
     {
@@ -194,6 +195,7 @@ async fn deploy_image(
     image_tag: &str,
     container_port: u16,
     env_json: &str,
+    resources: ResourceLimits,
 ) -> Result<()> {
     validate_image_reference(image_tag)?;
     let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
@@ -203,7 +205,14 @@ async fn deploy_image(
         serde_json::from_str(env_json).unwrap_or_default();
     let run = deps
         .backend
-        .run_container(&endpoint, image_tag, &container_name, container_port, &env)
+        .run_container(
+            &endpoint,
+            image_tag,
+            &container_name,
+            container_port,
+            &env,
+            resources,
+        )
         .await
         .context("agent could not start the new container")?;
     let host_port = run.host_port;
@@ -313,6 +322,10 @@ async fn load_build_context(
         let is_compose = build_type == "compose";
         Ok(BuildContext {
             container_port: app.container_port.unwrap_or(8080),
+            resources: ResourceLimits {
+                cpu: app.cpu_limit,
+                memory_bytes: app.memory_limit_bytes,
+            },
             env_json: app.env_json.clone(),
             build_type,
             branch: app

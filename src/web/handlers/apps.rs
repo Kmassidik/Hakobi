@@ -9,8 +9,8 @@ use axum::{
 
 use super::app_deploy::load_app;
 use super::app_form::{
-    display_error, enabled_hosts, form_values, non_empty, parse_port, render_app_form,
-    validate_app_inputs, AppForm,
+    create_app_record, display_error, edit_form_values, enabled_hosts, form_values,
+    render_app_form, update_app_record, validate_app_inputs, AppForm,
 };
 use super::{
     html_response, internal_error, page_csrf, post_is_allowed, redirect_with_notice, with_catalog,
@@ -65,6 +65,8 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
         github_dockerfile: "Dockerfile".into(),
         github_auto_deploy: true,
         container_port: String::new(),
+        cpu_limit: String::new(),
+        memory_limit_mb: String::new(),
         env_json: "{}".into(),
     };
     render_app_form(
@@ -123,36 +125,6 @@ pub(crate) async fn app_create(
             StatusCode::BAD_REQUEST,
         ),
     }
-}
-
-async fn create_app_record(
-    state: &AppState,
-    values: &templates::AppFormValues,
-) -> anyhow::Result<String> {
-    let name = values.name.clone();
-    let host_id = values.host_id.clone();
-    let build_type = values.build_type.clone();
-    let github_repo = non_empty(&values.github_repo);
-    let github_branch = non_empty(&values.github_branch);
-    let github_path = non_empty(&values.github_path);
-    let github_dockerfile = non_empty(&values.github_dockerfile);
-    let github_auto_deploy = values.github_auto_deploy;
-    let container_port = parse_port(&values.container_port);
-    // env_json saved via update below when editing; default {} on create.
-    with_catalog(state, move |catalog| {
-        catalog.create_app(
-            &name,
-            &host_id,
-            &build_type,
-            github_repo.as_deref(),
-            github_branch.as_deref(),
-            github_path.as_deref(),
-            github_dockerfile.as_deref(),
-            github_auto_deploy,
-            container_port,
-        )
-    })
-    .await
 }
 
 pub(crate) async fn app_detail(
@@ -319,21 +291,7 @@ pub(crate) async fn app_edit_page(
         Ok(hosts) => hosts,
         Err(error) => return internal_error(error),
     };
-    let values = templates::AppFormValues {
-        name: app.name.clone(),
-        host_id: app.host_id.clone(),
-        build_type: app.build_type.clone(),
-        github_repo: app.github_repo.clone().unwrap_or_default(),
-        github_branch: app.github_branch.clone().unwrap_or_default(),
-        github_path: app.github_path.clone().unwrap_or_default(),
-        github_dockerfile: app.github_dockerfile.clone().unwrap_or_default(),
-        github_auto_deploy: app.github_auto_deploy,
-        container_port: app
-            .container_port
-            .map(|port| port.to_string())
-            .unwrap_or_default(),
-        env_json: app.env_json.clone(),
-    };
+    let values = edit_form_values(app);
     render_app_form(
         &state,
         &headers,
@@ -394,40 +352,6 @@ pub(crate) async fn app_edit_submit(
             StatusCode::BAD_REQUEST,
         ),
     }
-}
-
-async fn update_app_record(
-    state: &AppState,
-    id: &str,
-    values: &templates::AppFormValues,
-) -> anyhow::Result<()> {
-    let name = values.name.clone();
-    let host_id = values.host_id.clone();
-    let build_type = values.build_type.clone();
-    let github_repo = non_empty(&values.github_repo);
-    let github_branch = non_empty(&values.github_branch);
-    let github_path = non_empty(&values.github_path);
-    let github_dockerfile = non_empty(&values.github_dockerfile);
-    let github_auto_deploy = values.github_auto_deploy;
-    let container_port = parse_port(&values.container_port);
-    let env_json = values.env_json.clone();
-    let app_id = id.to_owned();
-    with_catalog(state, move |catalog| {
-        catalog.update_app(
-            &app_id,
-            &name,
-            &host_id,
-            &build_type,
-            github_repo.as_deref(),
-            github_branch.as_deref(),
-            github_path.as_deref(),
-            github_dockerfile.as_deref(),
-            github_auto_deploy,
-            container_port,
-            &env_json,
-        )
-    })
-    .await
 }
 
 pub(crate) async fn app_delete(

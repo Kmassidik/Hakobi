@@ -4,7 +4,7 @@
 
 Hakobi is a self-hosted DevOps control plane: Rust/Axum SSR, SQLite, a native
 host agent, and a Rust L7 edge. Apps bind a GitHub repository, branch, path,
-Dockerfile, container port, environment, and auto-deploy policy. Primary UI:
+Dockerfile, container port, environment, CPU/memory limits, and auto-deploy policy. Primary UI:
 Dashboard, Apps, Containers, Settings.
 
 GitHub App registration and installation are separate states. Push-to-build,

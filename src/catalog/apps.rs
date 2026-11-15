@@ -22,6 +22,10 @@ pub struct App {
     pub github_dockerfile: Option<String>,
     pub github_auto_deploy: bool,
     pub container_port: Option<u16>,
+    /// Maximum CPU cores; None leaves the container unlimited.
+    pub cpu_limit: Option<f64>,
+    /// Maximum memory in bytes; None leaves the container unlimited.
+    pub memory_limit_bytes: Option<u64>,
     /// Host port the current deployment publishes (None = not running).
     pub host_port: Option<u16>,
     /// JSON object of environment variables passed to the container.
@@ -49,6 +53,19 @@ pub fn validate_app_status(value: &str) -> Result<()> {
 fn validate_port(port: Option<u16>) -> Result<()> {
     if port == Some(0) {
         bail!("container port must be between 1 and 65535");
+    }
+    Ok(())
+}
+
+pub fn validate_resource_limits(cpu: Option<f64>, memory_bytes: Option<u64>) -> Result<()> {
+    crate::providers::ResourceLimits { cpu, memory_bytes }.validate()
+}
+
+fn validate_env_json(env_json: &str) -> Result<()> {
+    let parsed: serde_json::Value = serde_json::from_str(env_json)
+        .map_err(|error| anyhow::anyhow!("env must be a JSON object: {error}"))?;
+    if !parsed.is_object() {
+        bail!("env must be a JSON object");
     }
     Ok(())
 }
@@ -107,12 +124,15 @@ fn read_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<App> {
         webhook_enabled: row.get::<_, i64>(14)? != 0,
         created_at: row.get(15)?,
         updated_at: row.get(16)?,
+        cpu_limit: row.get(17)?,
+        memory_limit_bytes: row.get::<_, Option<i64>>(18)?.map(|value| value as u64),
     })
 }
 
 const APP_COLUMNS: &str = "id, name, host_id, build_type, github_repo, \
      github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, host_port, \
-     env_json, status, webhook_secret, webhook_enabled, created_at, updated_at";
+     env_json, status, webhook_secret, webhook_enabled, created_at, updated_at, \
+     cpu_limit, memory_limit_bytes";
 
 impl Catalog {
     /// Replaces the app's container environment variables (JSON object).
@@ -149,11 +169,14 @@ impl Catalog {
         github_dockerfile: Option<&str>,
         github_auto_deploy: bool,
         container_port: Option<u16>,
+        cpu_limit: Option<f64>,
+        memory_limit_bytes: Option<u64>,
     ) -> Result<String> {
         let name = name.trim();
         validate_app_name(name)?;
         validate_build_type(build_type)?;
         validate_port(container_port)?;
+        validate_resource_limits(cpu_limit, memory_limit_bytes)?;
 
         let id = super::new_id();
         let transaction = self.connection.transaction()?;
@@ -173,6 +196,8 @@ impl Catalog {
             github_dockerfile,
             github_auto_deploy,
             container_port,
+            cpu_limit,
+            memory_limit_bytes,
         )?;
         super::record_created(&transaction, "app", &id)?;
         transaction.commit()?;
@@ -216,18 +241,16 @@ impl Catalog {
         github_dockerfile: Option<&str>,
         github_auto_deploy: bool,
         container_port: Option<u16>,
+        cpu_limit: Option<f64>,
+        memory_limit_bytes: Option<u64>,
         env_json: &str,
     ) -> Result<()> {
         let name = name.trim();
         validate_app_name(name)?;
-        let parsed: serde_json::Value = serde_json::from_str(env_json)
-            .map_err(|error| anyhow::anyhow!("env must be a JSON object: {error}"))?;
-        if !parsed.is_object() {
-            bail!("env must be a JSON object");
-        }
+        validate_env_json(env_json)?;
         validate_build_type(build_type)?;
         validate_port(container_port)?;
-
+        validate_resource_limits(cpu_limit, memory_limit_bytes)?;
         let transaction = self.connection.transaction()?;
         ensure_enabled_host(&transaction, host_id)?;
         if app_name_taken(&transaction, name, Some(id))? {
@@ -245,6 +268,8 @@ impl Catalog {
             github_dockerfile,
             github_auto_deploy,
             container_port,
+            cpu_limit,
+            memory_limit_bytes,
             env_json,
         )?;
         if updated == 0 {
@@ -302,13 +327,15 @@ fn insert_app(
     github_dockerfile: Option<&str>,
     github_auto_deploy: bool,
     container_port: Option<u16>,
+    cpu_limit: Option<f64>,
+    memory_limit_bytes: Option<u64>,
 ) -> Result<()> {
     transaction.execute(
         "INSERT INTO apps \
              (id, name, host_id, build_type, github_repo, github_branch, \
               github_path, github_dockerfile, github_auto_deploy, container_port, \
-              status, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'idle', \
+              cpu_limit, memory_limit_bytes, status, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'idle', \
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
         params![
@@ -326,6 +353,8 @@ fn insert_app(
                 .filter(|value| !value.is_empty()),
             i64::from(github_auto_deploy),
             container_port,
+            cpu_limit,
+            memory_limit_bytes.map(|value| value as i64),
         ],
     )?;
     Ok(())
@@ -344,6 +373,8 @@ fn update_app_record(
     github_dockerfile: Option<&str>,
     github_auto_deploy: bool,
     container_port: Option<u16>,
+    cpu_limit: Option<f64>,
+    memory_limit_bytes: Option<u64>,
     env_json: &str,
 ) -> Result<usize> {
     Ok(transaction.execute(
@@ -351,6 +382,7 @@ fn update_app_record(
          SET name = ?2, host_id = ?3, build_type = ?4, github_repo = ?5, \
              github_branch = ?6, github_path = ?7, github_dockerfile = ?8, \
              github_auto_deploy = ?9, container_port = ?10, env_json = ?11, \
+             cpu_limit = ?12, memory_limit_bytes = ?13, \
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
          WHERE id = ?1",
         params![
@@ -369,6 +401,8 @@ fn update_app_record(
             i64::from(github_auto_deploy),
             container_port,
             env_json,
+            cpu_limit,
+            memory_limit_bytes.map(|value| value as i64),
         ],
     )?)
 }

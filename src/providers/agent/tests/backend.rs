@@ -135,6 +135,7 @@ async fn agent_backend_sends_authenticated_mutations() {
             "demo-api",
             8080,
             &Default::default(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -166,6 +167,7 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
             "demo-api",
             8080,
             &Default::default(),
+            Default::default(),
         )
         .await
         .is_err());
@@ -175,7 +177,8 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
             "alpine:3.20",
             "demo-api",
             0,
-            &Default::default()
+            &Default::default(),
+            Default::default(),
         )
         .await
         .is_err());

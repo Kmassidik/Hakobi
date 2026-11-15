@@ -10,7 +10,8 @@ use super::super::container_detail::{DockerContainerUsage, DockerInspect, Docker
 use super::super::validate::connect;
 use super::validate_container_name;
 use super::{
-    ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow, NetworkRow, VolumeRow,
+    ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow, NetworkRow, ResourceLimits,
+    VolumeRow,
 };
 use crate::providers::docker_exec::{remove_container as remove_docker_container, run_image};
 
@@ -40,6 +41,7 @@ pub trait ContainerBackend: Send + Sync {
         name: &str,
         container_port: u16,
         env: &std::collections::HashMap<String, String>,
+        resources: ResourceLimits,
     ) -> Result<RunResult>;
 
     /// Returns the full inspect data of one container.
@@ -220,8 +222,9 @@ impl ContainerBackend for DockerBackend {
         name: &str,
         container_port: u16,
         env: &std::collections::HashMap<String, String>,
+        resources: ResourceLimits,
     ) -> Result<RunResult> {
-        run_image(endpoint, image, name, container_port, env).await
+        run_image(endpoint, image, name, container_port, env, resources).await
     }
 }
 

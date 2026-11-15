@@ -4,6 +4,8 @@ use anyhow::{bail, Context, Result};
 use bollard::query_parameters::CreateContainerOptionsBuilder;
 use bollard::Docker;
 
+use crate::providers::docker::ResourceLimits;
+
 use super::super::endpoint::connect;
 use super::super::ports::{is_port_collision, used_host_ports, PORT_RANGE_END, PORT_RANGE_START};
 use super::{
@@ -31,16 +33,18 @@ pub async fn run_image(
     name: &str,
     container_port: u16,
     env: &HashMap<String, String>,
+    resources: ResourceLimits,
 ) -> Result<RunResult> {
     validate_image_reference(image)?;
     validate_container_name(name)?;
     validate_container_port(container_port)?;
+    resources.validate()?;
     let docker = connect(endpoint)?;
     let candidates = candidate_ports(&docker).await?;
 
     let mut last_collision: Option<String> = None;
     for host_port in candidates {
-        let config = container_config(image, container_port, host_port, env);
+        let config = container_config(image, container_port, host_port, env, resources);
         let options = CreateContainerOptionsBuilder::new().name(name).build();
         match docker.create_container(Some(options), config).await {
             Ok(created) => {

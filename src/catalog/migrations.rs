@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{Connection, Transaction};
 
 /// Schema version written to `PRAGMA user_version`.
-pub(super) const SCHEMA_VERSION: i64 = 12;
+pub(super) const SCHEMA_VERSION: i64 = 13;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS provider_connections (
@@ -76,6 +76,8 @@ CREATE TABLE IF NOT EXISTS apps (
     -- runtime
     container_port     INTEGER,
     host_port          INTEGER,
+    cpu_limit          REAL,
+    memory_limit_bytes INTEGER,
     env_json           TEXT NOT NULL DEFAULT '{}',
     webhook_secret     TEXT,
     webhook_enabled    INTEGER NOT NULL DEFAULT 0,
@@ -185,6 +187,14 @@ fn migrate_apps(transaction: &Transaction<'_>, current: i64) -> Result<()> {
                 [],
             )
             .context("add apps.env_json")?;
+    }
+    if (1..13).contains(&current) {
+        transaction
+            .execute_batch(
+                "ALTER TABLE apps ADD COLUMN cpu_limit REAL;
+                 ALTER TABLE apps ADD COLUMN memory_limit_bytes INTEGER;",
+            )
+            .context("add app resource limits")?;
     }
     Ok(())
 }

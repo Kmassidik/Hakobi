@@ -5,7 +5,7 @@ use async_trait::async_trait;
 
 use super::super::container_detail::{DockerContainerUsage, DockerInspect, DockerLogs};
 use super::super::docker::{
-    ContainerBackend, ContainerRow, DockerBackend, DockerSnapshot, RunResult,
+    ContainerBackend, ContainerRow, DockerBackend, DockerSnapshot, ResourceLimits, RunResult,
 };
 use super::backend::AgentBackend;
 use crate::catalog::Catalog;
@@ -164,10 +164,11 @@ impl ContainerBackend for RoutingBackend {
         name: &str,
         container_port: u16,
         env: &std::collections::HashMap<String, String>,
+        resources: ResourceLimits,
     ) -> Result<RunResult> {
         self.select(endpoint)
             .await?
-            .run_container(endpoint, image, name, container_port, env)
+            .run_container(endpoint, image, name, container_port, env, resources)
             .await
     }
 

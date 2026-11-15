@@ -167,6 +167,7 @@ impl ContainerBackend for DetailBackend {
         name: &str,
         _container_port: u16,
         _env: &std::collections::HashMap<String, String>,
+        _resources: hakobi::providers::ResourceLimits,
     ) -> anyhow::Result<RunResult> {
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),

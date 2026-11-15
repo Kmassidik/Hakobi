@@ -4,7 +4,9 @@ use anyhow::{bail, Result};
 use async_trait::async_trait;
 
 use crate::providers::agent::RoutingBackend;
-use crate::providers::docker::{ContainerBackend, ContainerRow, DockerSnapshot, RunResult};
+use crate::providers::docker::{
+    ContainerBackend, ContainerRow, DockerSnapshot, ResourceLimits, RunResult,
+};
 
 /// Backend that records which endpoint it was asked to serve.
 struct StubBackend(&'static str);
@@ -46,6 +48,7 @@ impl ContainerBackend for StubBackend {
         _name: &str,
         _container_port: u16,
         _env: &std::collections::HashMap<String, String>,
+        _resources: ResourceLimits,
     ) -> Result<RunResult> {
         bail!("{} run", self.0)
     }
@@ -78,7 +81,8 @@ async fn routing_dispatches_by_endpoint_scheme() {
             "alpine:3.20",
             "demo",
             80,
-            &std::collections::HashMap::new()
+            &std::collections::HashMap::new(),
+            ResourceLimits::default(),
         )
         .await
         .is_err());

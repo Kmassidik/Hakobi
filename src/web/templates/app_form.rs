@@ -16,6 +16,8 @@ pub struct AppFormValues {
     pub github_dockerfile: String,
     pub github_auto_deploy: bool,
     pub container_port: String,
+    pub cpu_limit: String,
+    pub memory_limit_mb: String,
     pub env_json: String,
 }
 
@@ -186,6 +188,7 @@ fn build_settings_fields(values: &AppFormValues, submit_label: &str) -> Markup {
                 textarea class=(FIELD) name="env_json" rows="3" placeholder="{}" autocomplete="off" { (values.env_json) }
             }
         }
+        (resource_limit_fields(values))
         label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
             "Context path"
             p class="m-0 text-xs font-normal leading-relaxed text-muted" {
@@ -200,6 +203,25 @@ fn build_settings_fields(values: &AppFormValues, submit_label: &str) -> Markup {
         div class="flex flex-wrap items-center gap-3" {
             button class="rounded-[0.6rem] bg-brand px-4 py-3 font-bold text-white transition hover:bg-[#0f4130]" type="submit" { (submit_label) }
             a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/apps" { "Cancel" }
+        }
+    }
+}
+
+fn resource_limit_fields(values: &AppFormValues) -> Markup {
+    html! {
+        fieldset class="m-0 grid grid-cols-1 gap-4 border-0 border-t border-line p-0 pt-5 md:grid-cols-2" {
+            legend class="mb-1 px-0 text-[0.8rem] font-bold" { "Runtime resource limits" }
+            p class="col-span-full m-0 text-xs font-normal leading-relaxed text-muted" {
+                "Optional hard limits for the running container. Leave blank for unlimited. Changes apply on the next deploy and work for Dockerfile and Nixpacks apps."
+            }
+            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
+                "CPU limit (cores)"
+                input class=(FIELD) name="cpu_limit" type="number" value=(values.cpu_limit) min="0.01" max="256" step="0.01" placeholder="Unlimited";
+            }
+            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
+                "Memory limit (MiB)"
+                input class=(FIELD) name="memory_limit_mb" type="number" value=(values.memory_limit_mb) min="16" max="1048576" step="1" placeholder="Unlimited";
+            }
         }
     }
 }

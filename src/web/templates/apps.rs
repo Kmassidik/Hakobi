@@ -246,6 +246,16 @@ fn app_build_card(app: &App) -> Markup {
             @if let Some(port) = app.container_port {
                 p class="m-0 mt-1 text-sm text-muted" { "Container port: " span class="font-semibold text-ink" { (port) } }
             }
+            p class="m-0 mt-1 text-sm text-muted" {
+                "CPU limit: " span class="font-semibold text-ink" {
+                    (app.cpu_limit.map(|value| format!("{value} cores")).unwrap_or_else(|| "Unlimited".into()))
+                }
+            }
+            p class="m-0 mt-1 text-sm text-muted" {
+                "Memory limit: " span class="font-semibold text-ink" {
+                    (app.memory_limit_bytes.map(|value| format!("{} MiB", value / (1024 * 1024))).unwrap_or_else(|| "Unlimited".into()))
+                }
+            }
         }
     }
 }

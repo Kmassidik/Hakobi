@@ -128,10 +128,10 @@ pub struct DockerSnapshotResponse {
 
 /// Body of `POST /v1/docker/containers/run`.
 ///
-/// Only an image that already exists locally, a container name, and a single
-/// container port are accepted. There is no endpoint, command, or environment
-/// field on purpose.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Only an image that already exists locally, a container name, a single
+/// container port, environment variables, and optional resource limits are
+/// accepted. There is no endpoint or command override.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunContainerRequest {
     #[serde(default)]
     pub image: String,
@@ -142,6 +142,12 @@ pub struct RunContainerRequest {
     /// Extra environment variables set inside the container.
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,
+    /// Maximum CPU cores; omitted means unlimited.
+    #[serde(default)]
+    pub cpu_limit: Option<f64>,
+    /// Maximum memory in bytes; omitted means unlimited.
+    #[serde(default)]
+    pub memory_limit_bytes: Option<u64>,
 }
 
 /// Result of `POST /v1/docker/containers/run`.

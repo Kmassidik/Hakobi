@@ -7,6 +7,7 @@ use super::containers::{
 };
 use super::ports::is_port_collision;
 use super::{apply_compose, choose_free_port, run_image, PORT_RANGE_END, PORT_RANGE_START};
+use crate::providers::ResourceLimits;
 
 #[test]
 fn free_port_starts_at_range_start() {
@@ -151,6 +152,7 @@ async fn invalid_inputs_fail_before_connecting() {
         "web",
         80,
         &Default::default(),
+        Default::default(),
     )
     .await
     .expect_err("invalid image");
@@ -162,14 +164,22 @@ async fn invalid_inputs_fail_before_connecting() {
         "bad name",
         80,
         &Default::default(),
+        Default::default(),
     )
     .await
     .expect_err("invalid name");
     assert!(error.to_string().contains("container name"), "{error}");
 
-    let error = run_image("tcp://127.0.0.1:1", "nginx", "web", 0, &Default::default())
-        .await
-        .expect_err("invalid port");
+    let error = run_image(
+        "tcp://127.0.0.1:1",
+        "nginx",
+        "web",
+        0,
+        &Default::default(),
+        Default::default(),
+    )
+    .await
+    .expect_err("invalid port");
     assert!(error.to_string().contains("container port"), "{error}");
 }
 
@@ -188,13 +198,24 @@ async fn compose_inputs_fail_before_invoking_docker() {
 
 #[test]
 fn container_config_binds_exposed_port() {
-    let config = container_config("nginx", 80, 18000, &Default::default());
+    let config = container_config(
+        "nginx",
+        80,
+        18000,
+        &Default::default(),
+        ResourceLimits {
+            cpu: Some(1.5),
+            memory_bytes: Some(512 * 1024 * 1024),
+        },
+    );
     assert_eq!(config.image.as_deref(), Some("nginx"));
     assert_eq!(
         config.exposed_ports.as_deref(),
         Some(&["80/tcp".to_owned()][..])
     );
     let host = config.host_config.expect("host config");
+    assert_eq!(host.nano_cpus, Some(1_500_000_000));
+    assert_eq!(host.memory, Some(512 * 1024 * 1024));
     let binding = host
         .port_bindings
         .expect("port bindings")

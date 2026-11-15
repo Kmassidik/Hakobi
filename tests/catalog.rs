@@ -15,6 +15,8 @@ fn create_and_load_crud_app(catalog: &mut Catalog) -> (String, String) {
             Some("Dockerfile"),
             false,
             Some(8080),
+            Some(2.0),
+            Some(512 * 1024 * 1024),
         )
         .expect("create app");
     let loaded = catalog
@@ -24,6 +26,8 @@ fn create_and_load_crud_app(catalog: &mut Catalog) -> (String, String) {
     assert_eq!(loaded.name, "web-prod");
     assert_eq!(loaded.build_type, "dockerfile");
     assert_eq!(loaded.container_port, Some(8080));
+    assert_eq!(loaded.cpu_limit, Some(2.0));
+    assert_eq!(loaded.memory_limit_bytes, Some(512 * 1024 * 1024));
     assert!(catalog
         .get_app("missing-id")
         .expect("get missing app")
@@ -62,6 +66,8 @@ fn assert_invalid_app_updates(catalog: &mut Catalog, app_id: &str, host_id: &str
             Some("Dockerfile"),
             false,
             Some(0),
+            None,
+            None,
             "{}"
         )
         .is_err());
@@ -78,6 +84,8 @@ fn assert_invalid_app_updates(catalog: &mut Catalog, app_id: &str, host_id: &str
             None,
             None,
             false,
+            None,
+            None,
             None,
             "{}",
         )
@@ -102,6 +110,8 @@ fn create_deployment_app(catalog: &mut Catalog) -> String {
             None,
             None,
             false,
+            None,
+            None,
             None,
         )
         .expect("create app")
@@ -160,7 +170,7 @@ fn catalog_persists_apps_across_reopen() {
     let app_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 12);
+        assert_eq!(catalog.schema_version().expect("schema version"), 13);
         let host_id = catalog
             .create_host_agent("apps-host", "https://apps.example.com", "tok_apps_0123456")
             .expect("create host");
@@ -176,6 +186,8 @@ fn catalog_persists_apps_across_reopen() {
                 Some("Dockerfile"),
                 true,
                 Some(3000),
+                None,
+                None,
             )
             .expect("create app");
 
@@ -192,8 +204,35 @@ fn catalog_persists_apps_across_reopen() {
     }
 
     let catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 12);
+    assert_eq!(catalog.schema_version().expect("schema version"), 13);
     assert_eq!(catalog.list_apps().expect("list apps").len(), 1);
+}
+
+#[test]
+fn schema_v12_apps_gain_unlimited_resource_columns() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let path = directory.path().join("catalog.sqlite3");
+    let connection = rusqlite::Connection::open(&path).expect("create v12 database");
+    connection
+        .execute_batch("CREATE TABLE apps (id TEXT PRIMARY KEY);")
+        .expect("create legacy apps table");
+    connection
+        .pragma_update(None, "user_version", 12)
+        .expect("set v12 schema");
+    drop(connection);
+
+    let catalog = Catalog::open(&path).expect("migrate catalog");
+    assert_eq!(catalog.schema_version().expect("schema version"), 13);
+    drop(catalog);
+    let connection = rusqlite::Connection::open(&path).expect("reopen database");
+    let mut statement = connection.prepare("PRAGMA table_info(apps)").unwrap();
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(columns.contains(&"cpu_limit".into()));
+    assert!(columns.contains(&"memory_limit_bytes".into()));
 }
 
 #[test]
@@ -203,7 +242,7 @@ fn apps_crud_round_trip() {
 
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 12);
+        assert_eq!(catalog.schema_version().expect("schema version"), 13);
         let (app_id, host_id) = create_and_load_crud_app(&mut catalog);
 
         catalog
@@ -217,6 +256,8 @@ fn apps_crud_round_trip() {
                 Some("services/api"),
                 Some("docker/Dockerfile"),
                 true,
+                None,
+                None,
                 None,
                 "{}",
             )
@@ -256,6 +297,8 @@ fn apps_validate_name_host_and_enums() {
                 Some("Dockerfile"),
                 false,
                 $port,
+                None,
+                None,
             )
         };
     }

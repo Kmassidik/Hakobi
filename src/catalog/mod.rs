@@ -17,7 +17,8 @@ mod vault;
 pub const DEPLOYMENT_PAGE_LIMIT: u32 = 100;
 
 pub use apps::{
-    validate_app_name, validate_app_status, validate_deployment_status, validate_log_level, App,
+    validate_app_name, validate_app_status, validate_deployment_status, validate_log_level,
+    validate_resource_limits, App,
 };
 pub use deployments::{
     validate_build_type, validate_registry_mode, validate_source_type, Deployment, DeploymentLog,

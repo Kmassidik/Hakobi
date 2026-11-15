@@ -23,10 +23,12 @@ Gap: none.
 ### Apps
 User intent: Railway-shaped applications, not overlapping environment/stack
 pages. An app binds a GitHub repository, branch, path, Dockerfile, port,
-environment variables, and auto-deploy policy. Create, edit, deploy, roll back,
+environment variables, optional CPU/memory limits, and auto-deploy policy. Create, edit, deploy, roll back,
 view logs/history, and delete with full cleanup.
 Code reality: `apps` and `deployments(app_id)` in SQLite. The host agent builds
-and runs containers; deployments publish `app.container_port` on loopback.
+and runs containers; deployments publish `app.container_port` on loopback. Optional
+CPU-core and MiB limits are stored as bytes and enforced through Docker `HostConfig`
+for both Dockerfile and Nixpacks builds; blank fields remain unlimited.
 Gap: commit statuses and PR check runs remain separate CP9 work.
 
 ### Containers

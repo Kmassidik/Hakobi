@@ -1,3 +1,30 @@
+/// Optional hard limits applied when a container is created.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ResourceLimits {
+    pub cpu: Option<f64>,
+    pub memory_bytes: Option<u64>,
+}
+
+impl ResourceLimits {
+    pub fn validate(self) -> anyhow::Result<()> {
+        if self
+            .cpu
+            .is_some_and(|value| !value.is_finite() || !(0.01..=256.0).contains(&value))
+        {
+            anyhow::bail!("CPU limit must be between 0.01 and 256 cores");
+        }
+        const MIN_MEMORY: u64 = 16 * 1024 * 1024;
+        const MAX_MEMORY: u64 = 1024 * 1024 * 1024 * 1024;
+        if self
+            .memory_bytes
+            .is_some_and(|value| !(MIN_MEMORY..=MAX_MEMORY).contains(&value))
+        {
+            anyhow::bail!("memory limit must be between 16 MiB and 1 TiB");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ContainerPort {
     pub host_ip: Option<String>,

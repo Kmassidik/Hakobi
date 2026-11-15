@@ -273,6 +273,7 @@ async fn run_new_container(
             &values.name,
             container_port,
             &std::collections::HashMap::new(),
+            hakobi::providers::ResourceLimits::default(),
         )
         .await;
     match result {

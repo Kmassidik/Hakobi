@@ -47,6 +47,8 @@ fn seed_app(path: &std::path::Path, secret: Option<&str>) -> (String, String) {
             Some("Dockerfile"),
             false,
             Some(3000),
+            None,
+            None,
         )
         .unwrap();
     if let Some(secret) = secret {

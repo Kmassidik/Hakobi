@@ -115,6 +115,8 @@ fn run_requests_and_results_round_trip_through_json() {
         image: "alpine:3.20".into(),
         name: "demo-api".into(),
         container_port: 8080,
+        cpu_limit: Some(1.5),
+        memory_limit_bytes: Some(512 * 1024 * 1024),
     };
     let encoded = serde_json::to_string(&request).unwrap();
     assert_eq!(

@@ -14,7 +14,7 @@ use axum::{
 };
 use hakobi::providers::{
     ContainerBackend, ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow, NetworkRow,
-    RunResult, VolumeRow,
+    ResourceLimits, RunResult, VolumeRow,
 };
 use tempfile::TempDir;
 use tower::ServiceExt;
@@ -99,6 +99,7 @@ impl ContainerBackend for FakeBackend {
         name: &str,
         _container_port: u16,
         _env: &std::collections::HashMap<String, String>,
+        _resources: ResourceLimits,
     ) -> anyhow::Result<RunResult> {
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),
@@ -187,6 +188,7 @@ impl ContainerBackend for PipelineBackend {
         name: &str,
         _container_port: u16,
         _env: &std::collections::HashMap<String, String>,
+        _resources: ResourceLimits,
     ) -> anyhow::Result<RunResult> {
         *self.deployed.lock().await = Some((name.to_owned(), image.to_owned()));
         Ok(RunResult {

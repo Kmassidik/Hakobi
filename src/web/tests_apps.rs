@@ -93,6 +93,21 @@ async fn reject_invalid_apps(app: &Router, authenticated: &str, csrf: &str, host
     )
     .await;
     assert_eq!(invalid_host.status(), StatusCode::BAD_REQUEST);
+    reject_invalid_resources(app, authenticated, csrf, host_id).await;
+}
+
+async fn reject_invalid_resources(app: &Router, authenticated: &str, csrf: &str, host_id: &str) {
+    let response = post_form(
+        app,
+        "/apps",
+        authenticated,
+        "null",
+        format!(
+            "name=web&host_id={host_id}&build_type=dockerfile&cpu_limit=0&memory_limit_mb=1&csrf_token={csrf}"
+        ),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
 async fn create_app(
@@ -108,7 +123,7 @@ async fn create_app(
         authenticated,
         "null",
         format!(
-            "name=web&host_id={host_id}&build_type=dockerfile&github_repo={}&github_branch=main&github_dockerfile=Dockerfile&container_port=3000&csrf_token={csrf}",
+            "name=web&host_id={host_id}&build_type=dockerfile&github_repo={}&github_branch=main&github_dockerfile=Dockerfile&container_port=3000&cpu_limit=1.5&memory_limit_mb=512&csrf_token={csrf}",
             form_encode("user/repo")
         ),
     )
@@ -125,6 +140,8 @@ async fn create_app(
     let catalog = Catalog::open(path).unwrap();
     let apps = catalog.list_apps().unwrap();
     assert_eq!(apps.len(), 1);
+    assert_eq!(apps[0].cpu_limit, Some(1.5));
+    assert_eq!(apps[0].memory_limit_bytes, Some(512 * 1024 * 1024));
     apps[0].id.clone()
 }
 
@@ -181,6 +198,10 @@ async fn check_edit_form(app: &Router, authenticated: &str, app_id: &str) {
     assert_eq!(edit_page.status(), StatusCode::OK);
     let body = body_text(edit_page, 128 * 1024).await;
     assert!(body.contains("value=\"web\""));
+    assert!(body.contains("name=\"cpu_limit\""));
+    assert!(body.contains("value=\"1.5\""));
+    assert!(body.contains("name=\"memory_limit_mb\""));
+    assert!(body.contains("value=\"512\""));
     assert!(body.contains("Edit app"));
 }
 
@@ -212,6 +233,8 @@ async fn update_app(
     assert_eq!(updated.github_dockerfile.as_deref(), Some("Dockerfile"));
     assert!(!updated.github_auto_deploy);
     assert!(updated.container_port.is_none());
+    assert!(updated.cpu_limit.is_none());
+    assert!(updated.memory_limit_bytes.is_none());
 }
 
 async fn deploy_and_rollback(app: &Router, authenticated: &str, csrf: &str, app_id: &str) {
@@ -345,6 +368,8 @@ fn create_partial_app(path: &Path) -> (String, String) {
             None,
             Some("Dockerfile"),
             false,
+            None,
+            None,
             None,
         )
         .unwrap();

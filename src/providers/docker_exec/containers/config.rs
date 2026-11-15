@@ -3,11 +3,14 @@ use std::collections::HashMap;
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
 use bollard::query_parameters::{RemoveContainerOptions, RemoveContainerOptionsBuilder};
 
+use crate::providers::docker::ResourceLimits;
+
 pub(in crate::providers::docker_exec) fn container_config(
     image: &str,
     container_port: u16,
     host_port: u16,
     env: &HashMap<String, String>,
+    resources: ResourceLimits,
 ) -> ContainerCreateBody {
     let key = format!("{container_port}/tcp");
     let binding = PortBinding {
@@ -27,6 +30,8 @@ pub(in crate::providers::docker_exec) fn container_config(
         exposed_ports: Some(vec![key]),
         host_config: Some(HostConfig {
             port_bindings: Some(port_bindings),
+            nano_cpus: resources.cpu.map(|cores| (cores * 1_000_000_000.0) as i64),
+            memory: resources.memory_bytes.map(|bytes| bytes as i64),
             ..Default::default()
         }),
         ..Default::default()

@@ -2,6 +2,7 @@
 //! transitions, log lines, and the versioned image tag scheme.
 
 use anyhow::Result;
+use hakobi::providers::ResourceLimits;
 
 use super::{run_catalog_op, ExecutorDeps};
 
@@ -21,6 +22,7 @@ pub(super) struct BuildContext {
     pub image_tag: String,
     /// Container port the app listens on (host port maps to this).
     pub container_port: u16,
+    pub resources: ResourceLimits,
     /// Raw JSON object of container environment variables.
     pub env_json: String,
 }

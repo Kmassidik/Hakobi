@@ -15,6 +15,7 @@ use hakobi::{
     },
     providers::{
         validate_container_name, validate_image_reference, ContainerBackend, DockerBackend,
+        ResourceLimits,
     },
 };
 use tokio::{process::Command, time::timeout};
@@ -426,16 +427,19 @@ pub(super) async fn docker_run(
             &request.name,
             request.container_port,
             &request.env,
+            ResourceLimits {
+                cpu: request.cpu_limit,
+                memory_bytes: request.memory_limit_bytes,
+            },
         ),
         DOCKER_RUN_TIMEOUT,
     )
     .await
     {
-        Ok(result) => (
-            StatusCode::CREATED,
-            Json(RunContainerResponse::from(result)),
-        )
-            .into_response(),
+        Ok(result) => {
+            let body = RunContainerResponse::from(result);
+            (StatusCode::CREATED, Json(body)).into_response()
+        }
         Err(response) => *response,
     }
 }

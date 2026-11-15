@@ -10,7 +10,7 @@ use super::super::container_detail::{
 };
 use super::super::docker::{
     validate_container_name, validate_image_reference, ContainerBackend, ContainerPort,
-    ContainerRow, DockerSnapshot, RunResult,
+    ContainerRow, DockerSnapshot, ResourceLimits, RunResult,
 };
 use super::local::ensure_local_endpoint;
 use crate::host_agent::{
@@ -191,6 +191,7 @@ impl ContainerBackend for AgentBackend {
         name: &str,
         container_port: u16,
         env: &std::collections::HashMap<String, String>,
+        resources: ResourceLimits,
     ) -> Result<RunResult> {
         ensure_local_endpoint(endpoint)?;
         validate_image_reference(image)?;
@@ -203,6 +204,8 @@ impl ContainerBackend for AgentBackend {
             name: name.to_owned(),
             container_port,
             env: env.clone(),
+            cpu_limit: resources.cpu,
+            memory_limit_bytes: resources.memory_bytes,
         };
         let response: RunContainerResponse = self
             .post("/v1/docker/containers/run", &request, RUN_TIMEOUT)
