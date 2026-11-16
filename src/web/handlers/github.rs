@@ -68,6 +68,8 @@ pub(crate) struct TreeQuery {
     branch: String,
     #[serde(default)]
     path: String,
+    #[serde(default)]
+    dockerfile: String,
 }
 
 /// GET /api/github/detect?repo=&branch= — Dockerfile detector.
@@ -102,6 +104,15 @@ pub(crate) async fn environment(
     let Some(client) = client_for(&state, &headers).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    let port = if query.dockerfile.is_empty() {
+        None
+    } else {
+        client
+            .dockerfile_exposed_port(&query.repo, &query.branch, &query.dockerfile)
+            .await
+            .ok()
+            .flatten()
+    };
     match client
         .example_environment(&query.repo, &query.branch, &query.path)
         .await
@@ -109,6 +120,7 @@ pub(crate) async fn environment(
         Ok(environment) => Json(serde_json::json!({
             "found": environment.is_some(),
             "env": environment.unwrap_or_default(),
+            "port": port,
         }))
         .into_response(),
         Err(error) => (

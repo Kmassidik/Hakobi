@@ -4,6 +4,8 @@
 
 #[path = "cache.rs"]
 pub mod cache;
+#[path = "environment.rs"]
+mod environment;
 #[path = "webhook.rs"]
 mod webhook;
 
@@ -12,6 +14,9 @@ pub use webhook::{changed_files_from_push, hex, path_matches, verify_webhook_sig
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use cache::MutexCache;
+use environment::{
+    example_file_path, parse_example_environment, parse_exposed_port, validate_app_path,
+};
 use serde::Deserialize;
 use std::{collections::BTreeMap, time::Duration};
 
@@ -266,6 +271,20 @@ impl GithubClient {
         })
     }
 
+    /// Reads the first valid EXPOSE port from the selected Dockerfile.
+    pub async fn dockerfile_exposed_port(
+        &self,
+        repo: &str,
+        branch: &str,
+        dockerfile: &str,
+    ) -> Result<Option<u16>> {
+        validate_app_path(dockerfile)?;
+        let token = self.installation_token().await?;
+        let url = format!("{GITHUB_API}/repos/{repo}/contents/{dockerfile}");
+        let text = self.get_optional_content(&url, branch, &token).await?;
+        Ok(text.as_deref().and_then(parse_exposed_port))
+    }
+
     /// Reads variable names from an example file, never from a real `.env`.
     pub async fn example_environment(
         &self,
@@ -393,63 +412,8 @@ impl GithubClient {
     }
 }
 
-fn validate_app_path(path: &str) -> Result<()> {
-    anyhow::ensure!(
-        path.is_empty()
-            || (!path.starts_with('/')
-                && !path.ends_with('/')
-                && path
-                    .split('/')
-                    .all(|part| !part.is_empty() && part != "." && part != "..")),
-        "invalid app path"
-    );
-    Ok(())
-}
-
-fn example_file_path(app_path: &str, filename: &str) -> String {
-    if app_path.is_empty() {
-        filename.to_owned()
-    } else {
-        format!("{app_path}/{filename}")
-    }
-}
-
-fn parse_example_environment(text: &str) -> BTreeMap<String, String> {
-    text.lines()
-        .map(str::trim)
-        .map(|line| line.strip_prefix("export ").unwrap_or(line))
-        .filter_map(|line| line.split_once('='))
-        .map(|(key, _)| key.trim())
-        .filter(|key| valid_environment_key(key))
-        .map(|key| (key.to_owned(), String::new()))
-        .collect()
-}
-
-fn valid_environment_key(key: &str) -> bool {
-    let mut chars = key.chars();
-    chars
-        .next()
-        .is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
-        && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
-}
-
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn example_environment_returns_keys_without_values() {
-        let vars = super::parse_example_environment(
-            "# comment\nAPI_URL=https://example.test\nexport TOKEN=secret\nINVALID-NAME=x\n",
-        );
-        assert_eq!(vars.keys().collect::<Vec<_>>(), ["API_URL", "TOKEN"]);
-        assert!(vars.values().all(String::is_empty));
-    }
-
-    #[test]
-    fn environment_discovery_rejects_parent_paths() {
-        assert!(super::validate_app_path("../secrets").is_err());
-        assert!(super::validate_app_path("apps/web").is_ok());
-    }
-
     #[tokio::test]
     async fn jwt_crafted_by_wrong_secret_is_rejected_by_github() {
         // Sanity for our app-JWT path: encoding with a different key then

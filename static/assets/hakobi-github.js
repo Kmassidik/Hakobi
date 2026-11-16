@@ -31,10 +31,14 @@
     try {
       var query = "?repo=" + encodeURIComponent(picker.reposSel.value) +
         "&branch=" + encodeURIComponent(picker.branchSel.value) +
-        "&path=" + encodeURIComponent(path);
+        "&path=" + encodeURIComponent(path) +
+        "&dockerfile=" + encodeURIComponent(document.querySelector("[name=github_dockerfile]").value);
       var response = await fetch("/api/github/environment" + query);
       var data = await response.json();
       if (!response.ok || request !== picker.envRequest) return;
+      if (data.port && !picker.portDirty) {
+        document.querySelector("[name=container_port]").value = data.port;
+      }
       var keys = Object.keys(data.env || {});
       if (!data.found || !keys.length) {
         picker.envStatus.textContent = data.found
@@ -181,6 +185,7 @@
       envRequest: 0,
       nameInput: document.querySelector("[name=name]"),
       nameDirty: false,
+      portDirty: false,
     };
     if (!picker.reposSel) return;
     if (picker.nameInput) {
@@ -188,6 +193,10 @@
       picker.nameInput.addEventListener("input", function () { picker.nameDirty = true; });
     }
     picker.envInput.addEventListener("input", function () { picker.envDirty = true; });
+    var portInput = document.querySelector("[name=container_port]");
+    if (portInput) {
+      portInput.addEventListener("input", function () { picker.portDirty = true; });
+    }
     loadRepositories(picker);
   }
 
