@@ -205,7 +205,8 @@ pub(crate) fn login_key(headers: &HeaderMap) -> String {
 
 pub(crate) fn redirect_with_notice(base: &str, message: &str) -> Response {
     let encoded: String = url::form_urlencoded::byte_serialize(message.as_bytes()).collect();
-    redirect_response(&format!("{base}?notice={encoded}"), Vec::new())
+    let separator = if base.contains('?') { '&' } else { '?' };
+    redirect_response(&format!("{base}{separator}notice={encoded}"), Vec::new())
 }
 
 #[derive(RustEmbed)]

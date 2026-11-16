@@ -130,34 +130,31 @@
     }
   };
 
-  const bindConfirmDialog = (deleteDialog) => {
-    const form = deleteDialog.querySelector("form");
-    const input = deleteDialog.querySelector("[data-confirm-input]");
-    const submit = deleteDialog.querySelector("[data-confirm-submit]");
-    if (form && input && submit) {
-      input.addEventListener("input", () => {
-        const expected = deleteDialog.getAttribute("data-expected-name") || "";
-        const matches = input.value === expected && expected !== "";
-        submit.disabled = !matches;
-        input.setAttribute("aria-invalid", matches ? "false" : "true");
-      });
-      form.addEventListener("submit", (event) => {
-        const expected = deleteDialog.getAttribute("data-expected-name") || "";
-        if (expected === "" || input.value !== expected) {
-          event.preventDefault();
-          input.setAttribute("aria-invalid", "true");
-          input.focus();
-        }
-      });
-    }
+  const confirmationMatches = (dialog) => {
+    const input = dialog.querySelector("[data-confirm-input]");
+    const submit = dialog.querySelector("[data-confirm-submit]");
+    const expected = dialog.getAttribute("data-expected-name") || "";
+    const matches = input && input.value === expected && expected !== "";
+    if (submit) submit.disabled = !matches;
+    if (input) input.setAttribute("aria-invalid", matches ? "false" : "true");
+    return matches;
   };
 
-  for (const id of ["delete-stack", "delete-container", "delete-app", "delete-docker-resource"]) {
-    const dialog = document.getElementById(id);
-    if (dialog) {
-      bindConfirmDialog(dialog);
+  document.addEventListener("input", (event) => {
+    const input = event.target instanceof Element ? event.target.closest("[data-confirm-input]") : null;
+    const dialog = input && input.closest("dialog[data-expected-name]");
+    if (dialog) confirmationMatches(dialog);
+  });
+
+  document.addEventListener("submit", (event) => {
+    const dialog = event.target instanceof Element ? event.target.closest("dialog[data-expected-name]") : null;
+    if (dialog && !confirmationMatches(dialog)) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const input = dialog.querySelector("[data-confirm-input]");
+      if (input) input.focus();
     }
-  }
+  }, true);
 
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;

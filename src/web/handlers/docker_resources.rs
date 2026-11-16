@@ -108,7 +108,12 @@ async fn perform(
     if let Err(error) = result {
         return internal_error(error);
     }
-    redirect_with_notice("/containers", &action.notice(name))
+    let tab = match action {
+        ResourceAction::ImageDelete => "images",
+        ResourceAction::NetworkCreate | ResourceAction::NetworkDelete => "networks",
+        ResourceAction::VolumeCreate | ResourceAction::VolumeDelete => "volumes",
+    };
+    redirect_with_notice(&format!("/containers?tab={tab}"), &action.notice(name))
 }
 
 async fn execute(

@@ -86,7 +86,7 @@
   }
 
   document.addEventListener("htmx:beforeSwap", function (event) {
-    var form = event.detail.elt;
+    var form = event.detail.xhr._hakobiForm || event.detail.elt;
     if (!(form instanceof HTMLFormElement) || form.dataset.ssrBoost !== "true") return;
     if (event.detail.xhr.status === 400 && event.detail.xhr.responseText.includes("<main")) {
       event.detail.shouldSwap = true;
@@ -110,14 +110,15 @@
   document.addEventListener("htmx:beforeRequest", function (event) {
     var form = event.detail.elt;
     if (form instanceof HTMLFormElement) {
+      event.detail.xhr._hakobiForm = form;
       if (!form._pendingButton) form._pendingButton = form.querySelector('[type="submit"]');
       setPending(form, true);
     }
   });
 
   document.addEventListener("htmx:afterRequest", function (event) {
-    var form = event.detail.elt;
     var xhr = event.detail.xhr;
+    var form = xhr._hakobiForm || event.detail.elt;
     if (form instanceof HTMLFormElement) {
       setPending(form, false);
       if (form.dataset.ssrBoost === "true") {
