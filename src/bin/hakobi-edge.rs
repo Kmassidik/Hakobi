@@ -226,8 +226,7 @@ fn main() -> Result<()> {
     server.run_forever()
 }
 
-/// Builds the routing table from the catalog: apps (by name → host_port)
-/// plus the control-plane console.
+/// Builds the routing table from published app subdomains plus the console.
 fn load_table(catalog_path: &std::path::Path) -> Result<RouteTable> {
     let catalog = hakobi::catalog::Catalog::open(catalog_path)?;
     let apps = catalog.list_apps()?;
@@ -235,8 +234,9 @@ fn load_table(catalog_path: &std::path::Path) -> Result<RouteTable> {
         .iter()
         .filter_map(|app| {
             let port = app.host_port?;
+            let subdomain = app.subdomain.as_ref()?;
             Some(Route {
-                host: format!("{}.glicc.id", app.name),
+                host: format!("{subdomain}.glicc.id"),
                 port,
             })
         })
