@@ -211,6 +211,22 @@ fn catalog_persists_apps_across_reopen() {
 }
 
 #[test]
+fn deployment_transition_projects_running_state_to_app() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("catalog.sqlite3");
+    let mut catalog = Catalog::open(&path).unwrap();
+    let app_id = create_deployment_app(&mut catalog);
+    let deployment_id = catalog
+        .create_deployment(&app_id, "manual", None, None)
+        .unwrap();
+
+    catalog
+        .set_app_status_for_deployment(&deployment_id, "running")
+        .unwrap();
+    assert_eq!(catalog.get_app(&app_id).unwrap().unwrap().status, "running");
+}
+
+#[test]
 fn app_subdomain_survives_reopen_and_validates_dns_labels() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("catalog.sqlite3");

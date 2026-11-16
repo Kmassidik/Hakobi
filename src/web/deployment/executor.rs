@@ -273,6 +273,8 @@ async fn fail(deps: &ExecutorDeps, deployment_id: &str, message: &str) -> Result
     let message = message.to_owned();
     run_catalog_op(path, move |catalog| {
         catalog.update_deployment_status(&deployment_id, STAGE_FAILED, None)?;
+        catalog.set_app_status_for_deployment(&deployment_id, STAGE_FAILED)?;
+        catalog.set_app_runtime_status_for_deployment(&deployment_id)?;
         catalog.add_deployment_log(&deployment_id, "error", &message)?;
         Ok(())
     })
@@ -291,6 +293,7 @@ async fn transition(
     let message = message.to_owned();
     run_catalog_op(path, move |catalog| {
         catalog.update_deployment_status(&deployment_id, &status, None)?;
+        catalog.set_app_status_for_deployment(&deployment_id, &status)?;
         catalog.set_app_runtime_status_for_deployment(&deployment_id)?;
         catalog.add_deployment_log(&deployment_id, "info", &message)?;
         Ok(())

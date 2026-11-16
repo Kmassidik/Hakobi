@@ -317,6 +317,19 @@ impl Catalog {
         Ok(())
     }
 
+    pub fn set_app_status_for_deployment(
+        &mut self,
+        deployment_id: &str,
+        status: &str,
+    ) -> Result<()> {
+        let app_id: String = self.connection.query_row(
+            "SELECT app_id FROM deployments WHERE id = ?1",
+            params![deployment_id],
+            |row| row.get(0),
+        )?;
+        self.set_app_status(&app_id, status)
+    }
+
     /// Sets the app status to one of the allowed values.
     pub fn set_app_status(&mut self, id: &str, status: &str) -> Result<()> {
         validate_app_status(status)?;
