@@ -109,6 +109,11 @@
 
   document.addEventListener("htmx:beforeRequest", function (event) {
     var form = event.detail.elt;
+    if (form instanceof HTMLElement && form.hasAttribute("hx-get") &&
+        form.querySelector('form[aria-busy="true"]')) {
+      event.preventDefault();
+      return;
+    }
     if (form instanceof HTMLFormElement) {
       event.detail.xhr._hakobiForm = form;
       if (!form._pendingButton) form._pendingButton = form.querySelector('[type="submit"]');
