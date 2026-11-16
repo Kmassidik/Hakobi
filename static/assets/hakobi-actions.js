@@ -48,6 +48,13 @@
     if (form.dataset.ssrPrepared || form.method.toLowerCase() !== "post") return;
     form.dataset.ssrPrepared = "true";
     if (form.hasAttribute("hx-post") || form.dataset.nativeForm !== undefined) return;
+    var destination = new URL(form.action, window.location.href);
+    var externalFlow = destination.origin !== window.location.origin ||
+      ["/settings/github/install", "/settings/github/connect"].includes(destination.pathname);
+    if (externalFlow) {
+      form.dataset.nativeForm = "";
+      return;
+    }
     form.dataset.ssrBoost = "true";
     form.setAttribute("hx-post", form.action);
     form.setAttribute("hx-target", "main");

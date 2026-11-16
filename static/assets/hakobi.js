@@ -26,10 +26,11 @@
     const submit = dialog.querySelector("[data-confirm-submit]");
     const expected = button.getAttribute("data-delete-name") || "";
     if (form) {
-      form.setAttribute(
-        "action",
-        button.getAttribute("data-delete-action") || "",
-      );
+      const action = button.getAttribute("data-delete-action") || "";
+      form.setAttribute("action", action);
+      if (form.dataset.ssrBoost === "true") {
+        form.setAttribute("hx-post", action);
+      }
     }
     if (name) {
       name.textContent = expected;
