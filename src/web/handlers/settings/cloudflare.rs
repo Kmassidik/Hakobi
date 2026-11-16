@@ -4,9 +4,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hakobi::catalog::Catalog;
+use rusqlite::{params, Connection, Transaction};
 
 use super::super::{
-    authenticated, internal_error, post_is_allowed, redirect_with_notice, with_catalog,
+    authenticated, internal_error, post_is_allowed, redirect_with_error, redirect_with_notice,
+    with_catalog,
 };
 use super::{CfDomainRow, CloudflareForm};
 use crate::web::AppState;
@@ -71,33 +73,80 @@ pub(crate) async fn cloudflare_save(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    if let Some(message) = cloudflare_validation_error(&form) {
+        return redirect_with_error("/settings", &message);
+    }
+    let path = (*state.catalog_path).clone();
     let result = with_catalog(&state, move |catalog| {
-        catalog.settings_set(
-            crate::cloudflare::apps_route::KEY_ACCOUNT_ID,
-            &form.account_id,
-        )?;
-        catalog.settings_set(crate::cloudflare::apps_route::KEY_ZONE_ID, &form.zone_id)?;
-        catalog.settings_set(
-            crate::cloudflare::apps_route::KEY_TUNNEL_ID,
-            &form.tunnel_id,
-        )?;
-        catalog.settings_set(crate::cloudflare::apps_route::KEY_DOMAIN, &form.domain)?;
-        if !form.api_token.trim().is_empty() {
-            catalog.settings_set_encrypted(
-                crate::cloudflare::apps_route::KEY_API_TOKEN,
-                &form.api_token,
-            )?;
-        } else if !catalog
-            .settings_get(crate::cloudflare::apps_route::KEY_API_TOKEN)?
-            .is_some_and(|value| !value.is_empty())
-        {
-            anyhow::bail!("Cloudflare API token is required for initial configuration");
-        }
-        Ok(())
+        persist_cloudflare_settings(catalog, &path, &form)
     })
     .await;
     match result {
-        Ok(()) => redirect_with_notice("/settings", "Cloudflare settings saved."),
+        Ok(true) => redirect_with_notice("/settings", "Cloudflare settings saved."),
+        Ok(false) => redirect_with_error(
+            "/settings",
+            "Cloudflare API token is required for initial configuration.",
+        ),
         Err(error) => internal_error(error),
     }
+}
+
+fn cloudflare_validation_error(form: &CloudflareForm) -> Option<String> {
+    let fields = [
+        ("account ID", &form.account_id),
+        ("zone ID", &form.zone_id),
+        ("tunnel ID", &form.tunnel_id),
+        ("application domain", &form.domain),
+    ];
+    fields
+        .into_iter()
+        .find(|(_, value)| value.trim().is_empty())
+        .map(|(name, _)| format!("Cloudflare {name} is required."))
+}
+
+fn persist_cloudflare_settings(
+    catalog: &Catalog,
+    path: &std::path::Path,
+    form: &CloudflareForm,
+) -> anyhow::Result<bool> {
+    use crate::cloudflare::apps_route as keys;
+
+    let token = form.api_token.trim();
+    if token.is_empty()
+        && !catalog
+            .settings_get(keys::KEY_API_TOKEN)?
+            .is_some_and(|value| !value.is_empty())
+    {
+        return Ok(false);
+    }
+    let encrypted = if token.is_empty() {
+        None
+    } else {
+        Some(catalog.encrypt_secret(&form.api_token)?)
+    };
+    let mut connection = Connection::open(path)?;
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    let transaction = connection.transaction()?;
+    for (key, value) in [
+        (keys::KEY_ACCOUNT_ID, &form.account_id),
+        (keys::KEY_ZONE_ID, &form.zone_id),
+        (keys::KEY_TUNNEL_ID, &form.tunnel_id),
+        (keys::KEY_DOMAIN, &form.domain),
+    ] {
+        write_setting(&transaction, key, value)?;
+    }
+    if let Some(value) = encrypted {
+        write_setting(&transaction, keys::KEY_API_TOKEN, &value)?;
+    }
+    transaction.commit()?;
+    Ok(true)
+}
+
+fn write_setting(transaction: &Transaction<'_>, key: &str, value: &str) -> anyhow::Result<()> {
+    transaction.execute(
+        "INSERT INTO settings_kv (key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
 }

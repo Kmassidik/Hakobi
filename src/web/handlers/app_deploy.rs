@@ -91,6 +91,66 @@ pub(crate) async fn app_rollback(
     )
 }
 
+/// Cancels one active deployment and redirects to its app's detail page.
+pub(crate) async fn app_deployment_cancel(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(deployment_id): Path<String>,
+    Form(form): Form<DeployForm>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+    if !post_is_allowed(&state, &headers, &form.csrf_token) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let _cancellation = state.deployments.lock_cancellation(&deployment_id).await;
+    match cancel_deployment(&state, &deployment_id).await {
+        Ok(Some((app_id, true))) => redirect_with_notice(
+            &format!("/apps/{app_id}"),
+            "Deployment cancelled. The remaining pipeline stages have been stopped.",
+        ),
+        Ok(Some((app_id, false))) => redirect_with_notice(
+            &format!("/apps/{app_id}"),
+            "Deployment already finished; there was nothing to cancel.",
+        ),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => internal_error(error),
+    }
+}
+
+async fn cancel_deployment(
+    state: &AppState,
+    deployment_id: &str,
+) -> anyhow::Result<Option<(String, bool)>> {
+    let deployment_id = deployment_id.to_owned();
+    with_catalog(state, move |catalog| {
+        let Some(deployment) = catalog.get_deployment(&deployment_id)? else {
+            return Ok(None);
+        };
+        let app_id = deployment.app_id;
+        if !matches!(
+            deployment.status.as_str(),
+            "pending" | "building" | "deploying"
+        ) {
+            return Ok(Some((app_id, false)));
+        }
+        let cancelled = catalog.advance_deployment_status(&deployment_id, "cancelled", None)?;
+        if cancelled {
+            let has_running = catalog
+                .list_deployments(&app_id)?
+                .into_iter()
+                .any(|record| record.id != deployment_id && record.status == "running");
+            let app_status = if has_running { "running" } else { "idle" };
+            catalog.set_app_status_for_deployment(&deployment_id, app_status)?;
+            catalog.set_app_runtime_status_for_deployment(&deployment_id)?;
+            catalog.add_deployment_log(&deployment_id, "info", "Deployment cancelled by user")?;
+        }
+        Ok(Some((app_id, cancelled)))
+    })
+    .await
+}
+
 /// Shared tail of deploy/rollback: queue the deployment and redirect with a
 /// notice, or surface the concurrent-deployment conflict.
 fn start_or_redirect(

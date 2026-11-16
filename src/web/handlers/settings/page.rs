@@ -321,11 +321,10 @@ fn cf_domain_row(row: &CfDomainRow, csrf_token: &str) -> Markup {
             td class="px-3 py-2 font-mono text-[0.8rem] text-muted" { (row.service.as_deref().unwrap_or("-")) }
             td class="px-3 py-2 text-right" {
                 @if row.managed {
-                    form method="post" action="/settings/cloudflare/domains/delete" class="m-0 inline" {
+                    form method="post" action="/settings/cloudflare/domains/delete" class="m-0 flex items-center justify-end gap-2" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
                         input type="hidden" name="hostname" value=(row.name);
-                        input type="hidden" name="record_id" value="";
-                        input type="hidden" name="port" value=(row.service.as_deref().and_then(|service| service.rsplit(':').next()).and_then(|port| port.parse::<u16>().ok()).unwrap_or(0));
+                        input name="confirm_name" value="" placeholder="Confirm hostname" aria-label=(format!("Type {} to confirm deletion", row.name)) title=(format!("Type {} to confirm deletion", row.name)) autocomplete="off" required class="w-36 rounded-md border border-line bg-surface px-2 py-1 text-[0.7rem]";
                         button class="rounded-md border border-danger/40 px-2 py-1 text-[0.7rem] font-bold text-danger transition hover:bg-danger/5" type="submit" { "Delete" }
                     }
                 } @else {

@@ -69,6 +69,12 @@ port 8080, and recommended 1-core/512-MiB limits (custom values remain visible).
 Creating an app immediately queues its first build and container start. Apps
 remain private until a running app is explicitly assigned a subdomain; only
 then are managed DNS and tunnel ingress created and public health checked.
+Managed existing DNS/ingress that exactly matches the app's loopback target can
+be adopted; foreign or wrong-target routes remain protected. Hostname
+availability is checked before submission and again authoritatively on publish.
+Unpublished deletion never guesses a hostname, and Settings cannot delete a
+route assigned to an app. Deployment cancellation blocks later pipeline stages,
+and host installation uses the authenticated native-agent API.
 Future deployments update that stored route. Public traffic still enters only
 through the existing tunnel/L7 edge; raw application host ports stay private.
 Code reality: Manifest registration, installation webhooks/callback/recheck,

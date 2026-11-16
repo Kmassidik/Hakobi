@@ -19,6 +19,31 @@ use hakobi::providers::{
 use tempfile::TempDir;
 use tower::ServiceExt;
 
+pub(crate) fn location(response: &Response) -> &str {
+    response
+        .headers()
+        .get("location")
+        .unwrap()
+        .to_str()
+        .unwrap()
+}
+
+pub(crate) fn assert_error(response: &Response, expected: &str) {
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = location(response);
+    assert!(location.contains("status=error"));
+    let encoded = location
+        .split("notice=")
+        .nth(1)
+        .and_then(|query| query.split('&').next())
+        .unwrap();
+    let notice = url::form_urlencoded::parse(format!("notice={encoded}").as_bytes())
+        .find(|(key, _)| key == "notice")
+        .map(|(_, value)| value.into_owned())
+        .unwrap();
+    assert!(notice.contains(&expected.replace('+', " ")), "{notice}");
+}
+
 pub(crate) struct FakeBackend;
 
 #[async_trait]

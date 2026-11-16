@@ -13,7 +13,7 @@ use super::stages::{
 };
 use hakobi::catalog::Catalog;
 
-use super::{run_catalog_op, ExecutorDeps};
+use super::{run_catalog_op, DeploymentGuard, ExecutorDeps};
 
 /// Pause after starting the container before the first state poll.
 const CONTAINER_SETTLE: Duration = Duration::from_secs(2);
@@ -24,16 +24,19 @@ const CONTAINER_VERIFY_TIMEOUT: Duration = Duration::from_secs(30);
 /// Executes the full pipeline for an existing pending deployment.
 pub(super) async fn run_pipeline(
     deps: &ExecutorDeps,
+    guard: &DeploymentGuard,
     app_id: &str,
     deployment_id: &str,
 ) -> Result<()> {
-    transition(deps, deployment_id, STAGE_BUILDING, "Build started").await?;
-    let image_tag = match build_image(deps, app_id, deployment_id).await {
-        Ok(tag) => tag,
-        Err(error) => {
-            return fail(deps, deployment_id, &format!("build failed: {error:#}")).await;
-        }
+    if !transition(deps, deployment_id, STAGE_BUILDING, "Build started").await? {
+        return Ok(());
+    }
+    let Some((context, image_tag)) = build_stage(deps, app_id, deployment_id).await? else {
+        return Ok(());
     };
+    if !transition(deps, deployment_id, STAGE_DEPLOYING, "Deploying to host").await? {
+        return Ok(());
+    }
     super::stages::log(
         deps,
         deployment_id,
@@ -41,32 +44,39 @@ pub(super) async fn run_pipeline(
         &format!("built image {image_tag}"),
     )
     .await?;
+    let deployed =
+        match deploy_image(deps, guard, app_id, deployment_id, &context, &image_tag).await {
+            Ok(deployed) => deployed,
+            Err(error) => {
+                return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
+            }
+        };
+    if !deployed {
+        return Ok(());
+    }
+    spawn_cloudflare_route_sync(deps, app_id);
+    Ok(())
+}
 
-    transition(deps, deployment_id, STAGE_DEPLOYING, "Deploying to host").await?;
+async fn build_stage(
+    deps: &ExecutorDeps,
+    app_id: &str,
+    deployment_id: &str,
+) -> Result<Option<(BuildContext, String)>> {
     let context = match load_build_context(deps, app_id, deployment_id).await {
         Ok(context) => context,
         Err(error) => {
-            return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
+            return fail(deps, deployment_id, &format!("build failed: {error:#}"))
+                .await
+                .map(|()| None);
         }
     };
-    if let Err(error) = deploy_image(
-        deps,
-        app_id,
-        deployment_id,
-        &image_tag,
-        context.container_port,
-        &context.env_json,
-        context.resources,
-    )
-    .await
-    {
-        return fail(deps, deployment_id, &format!("deploy failed: {error:#}")).await;
+    match build_image(deps, deployment_id, &context).await {
+        Ok(image_tag) => Ok(Some((context, image_tag))),
+        Err(error) => fail(deps, deployment_id, &format!("build failed: {error:#}"))
+            .await
+            .map(|()| None),
     }
-    transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await?;
-
-    // Publish the public subdomain when Cloudflare is configured.
-    spawn_cloudflare_route_sync(deps, app_id);
-    Ok(())
 }
 
 fn spawn_cloudflare_route_sync(deps: &ExecutorDeps, app_id: &str) {
@@ -105,8 +115,11 @@ fn spawn_cloudflare_route_sync(deps: &ExecutorDeps, app_id: &str) {
 
 /// Runs the build through the configured build runner and returns the image
 /// tag (`hakobi/{app}:v{version}`).
-async fn build_image(deps: &ExecutorDeps, app_id: &str, deployment_id: &str) -> Result<String> {
-    let context = load_build_context(deps, app_id, deployment_id).await?;
+async fn build_image(
+    deps: &ExecutorDeps,
+    deployment_id: &str,
+    context: &BuildContext,
+) -> Result<String> {
     let runner = deps
         .build_runner
         .as_ref()
@@ -147,7 +160,7 @@ async fn build_image(deps: &ExecutorDeps, app_id: &str, deployment_id: &str) -> 
             truncate_message(&detail)
         );
     }
-    Ok(context.image_tag)
+    Ok(context.image_tag.clone())
 }
 
 async fn clear_previous_container(
@@ -190,36 +203,39 @@ async fn clear_previous_container(
 /// Stops the old container, starts the built image, and verifies it runs.
 async fn deploy_image(
     deps: &ExecutorDeps,
+    guard: &DeploymentGuard,
     app_id: &str,
     deployment_id: &str,
+    context: &BuildContext,
     image_tag: &str,
-    container_port: u16,
-    env_json: &str,
-    resources: ResourceLimits,
-) -> Result<()> {
+) -> Result<bool> {
     validate_image_reference(image_tag)?;
-    let endpoint = load_deploy_endpoint(deps, app_id, deployment_id).await?;
+    if !deployment_is_active(deps, deployment_id).await? {
+        return Ok(false);
+    }
+    let endpoint = &context.deploy_endpoint;
     let container_name = container_name_for(app_id);
-    clear_previous_container(deps, deployment_id, &endpoint, &container_name).await?;
-    let env: std::collections::HashMap<String, String> =
-        serde_json::from_str(env_json).unwrap_or_default();
+    clear_previous_container(deps, deployment_id, endpoint, &container_name).await?;
+    let _cancellation = guard.lock_cancellation(deployment_id).await;
+    if !deployment_is_active(deps, deployment_id).await? {
+        return Ok(false);
+    }
+    let env: std::collections::HashMap<String, String> = serde_json::from_str(&context.env_json)
+        .context("app environment must be a JSON object with string values")?;
     let run = deps
         .backend
         .run_container(
-            &endpoint,
+            endpoint,
             image_tag,
             &container_name,
-            container_port,
+            context.container_port,
             &env,
-            resources,
+            context.resources,
         )
         .await
         .context("agent could not start the new container")?;
     let host_port = run.host_port;
-    let persisted_app_id = app_id.to_owned();
-    let _ = run_catalog_op(deps.catalog_path.clone(), move |catalog| {
-        catalog.set_app_host_port(&persisted_app_id, Some(host_port))
-    });
+    persist_host_port(deps, app_id, host_port);
     super::stages::log(
         deps,
         deployment_id,
@@ -230,7 +246,15 @@ async fn deploy_image(
         ),
     )
     .await?;
-    verify_running(deps, &endpoint, &container_name, image_tag).await
+    verify_running(deps, endpoint, &container_name, image_tag).await?;
+    transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await
+}
+
+fn persist_host_port(deps: &ExecutorDeps, app_id: &str, host_port: u16) {
+    let persisted_app_id = app_id.to_owned();
+    let _ = run_catalog_op(deps.catalog_path.clone(), move |catalog| {
+        catalog.set_app_host_port(&persisted_app_id, Some(host_port))
+    });
 }
 
 /// Polls the backend until the container reports `running` with the deployed
@@ -272,31 +296,51 @@ async fn fail(deps: &ExecutorDeps, deployment_id: &str, message: &str) -> Result
     let deployment_id = deployment_id.to_owned();
     let message = message.to_owned();
     run_catalog_op(path, move |catalog| {
-        catalog.update_deployment_status(&deployment_id, STAGE_FAILED, None)?;
-        catalog.set_app_status_for_deployment(&deployment_id, STAGE_FAILED)?;
-        catalog.set_app_runtime_status_for_deployment(&deployment_id)?;
-        catalog.add_deployment_log(&deployment_id, "error", &message)?;
+        if catalog.advance_deployment_status(&deployment_id, STAGE_FAILED, None)? {
+            catalog.set_app_status_for_deployment(&deployment_id, STAGE_FAILED)?;
+            catalog.set_app_runtime_status_for_deployment(&deployment_id)?;
+            catalog.add_deployment_log(&deployment_id, "error", &message)?;
+        }
         Ok(())
     })
 }
 
-/// Transitions a deployment to `status` with a log line.
+/// Transitions an active deployment to `status` with a log line. A false
+/// result means cancellation or supersession won the race and the pipeline
+/// must stop before performing any more external work.
 async fn transition(
     deps: &ExecutorDeps,
     deployment_id: &str,
     status: &str,
     message: &str,
-) -> Result<()> {
+) -> Result<bool> {
     let path = deps.catalog_path.clone();
     let deployment_id = deployment_id.to_owned();
     let status = status.to_owned();
     let message = message.to_owned();
     run_catalog_op(path, move |catalog| {
-        catalog.update_deployment_status(&deployment_id, &status, None)?;
+        if !catalog.advance_deployment_status(&deployment_id, &status, None)? {
+            return Ok(false);
+        }
         catalog.set_app_status_for_deployment(&deployment_id, &status)?;
         catalog.set_app_runtime_status_for_deployment(&deployment_id)?;
         catalog.add_deployment_log(&deployment_id, "info", &message)?;
-        Ok(())
+        Ok(true)
+    })
+}
+
+async fn deployment_is_active(deps: &ExecutorDeps, deployment_id: &str) -> Result<bool> {
+    let path = deps.catalog_path.clone();
+    let deployment_id = deployment_id.to_owned();
+    run_catalog_op(path, move |catalog| {
+        Ok(catalog
+            .get_deployment(&deployment_id)?
+            .is_some_and(|deployment| {
+                matches!(
+                    deployment.status.as_str(),
+                    "pending" | "building" | "deploying"
+                )
+            }))
     })
 }
 
@@ -325,6 +369,7 @@ async fn load_build_context(
         let build_type = app.build_type.clone();
         let is_compose = build_type == "compose";
         Ok(BuildContext {
+            deploy_endpoint: format!("agent://{}", app.host_id),
             container_port: app.container_port.unwrap_or(8080),
             resources: ResourceLimits {
                 cpu: app.cpu_limit,
@@ -343,26 +388,6 @@ async fn load_build_context(
             image_tag: super::stages::image_tag_for(&app.name, deployment.version),
             git_url,
         })
-    })
-}
-
-/// Resolves the `agent://{host_id}` endpoint for the app.s host.
-async fn load_deploy_endpoint(
-    deps: &ExecutorDeps,
-    app_id: &str,
-    deployment_id: &str,
-) -> Result<String> {
-    let path = deps.catalog_path.clone();
-    let app_id = app_id.to_owned();
-    let deployment_id = deployment_id.to_owned();
-    run_catalog_op(path, move |catalog| {
-        let app = catalog
-            .get_app(&app_id)?
-            .context("app disappeared mid-deployment")?;
-        catalog
-            .get_deployment(&deployment_id)?
-            .context("deployment record disappeared mid-deployment")?;
-        Ok(format!("agent://{}", app.host_id))
     })
 }
 

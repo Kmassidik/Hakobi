@@ -109,9 +109,9 @@ pub(crate) async fn app_create(
             &headers,
             &hosts,
             &values,
-            "/apps/new",
+            "/apps",
             "New app",
-            "Create app",
+            "Build application",
             Some(&message),
             StatusCode::BAD_REQUEST,
         );
@@ -123,9 +123,9 @@ pub(crate) async fn app_create(
             &headers,
             &hosts,
             &values,
-            "/apps/new",
+            "/apps",
             "New app",
-            "Create app",
+            "Build application",
             Some(&display_error(&error)),
             StatusCode::BAD_REQUEST,
         ),
@@ -147,11 +147,21 @@ fn start_initial_build(state: &AppState, app_id: &str) -> Response {
         Some("Initial application build"),
     );
     match started {
-        Ok(_) => redirect_with_notice(
+        Ok(Some(_)) => redirect_with_notice(
             &format!("/apps/{app_id}"),
             "Build started. Your app will remain private until you publish a subdomain.",
         ),
-        Err(error) => internal_error(error),
+        Ok(None) => redirect_with_notice(
+            &format!("/apps/{app_id}"),
+            "App created, but another deployment is already active. Use Deploy to retry the initial build.",
+        ),
+        Err(error) => {
+            tracing::error!(app_id = %app_id, error = %error, "initial build queue failed");
+            redirect_with_notice(
+                &format!("/apps/{app_id}"),
+                "App created, but the initial build could not be queued. Use Deploy on this page to retry.",
+            )
+        }
     }
 }
 
@@ -395,11 +405,13 @@ pub(crate) async fn app_delete(
     };
     // Best-effort cleanup: container, images, and Cloudflare route. The DB
     // delete is authoritative.
-    let app_name = remove_app_container(&state, &app).await;
+    let route = remove_app_container(&state, &app).await;
     remove_app_images(&state, &app, &image_tags).await;
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
     if result.is_ok() {
-        spawn_cloudflare_route_cleanup(&state, app_name);
+        if let Some(subdomain) = route {
+            spawn_cloudflare_route_cleanup(&state, subdomain);
+        }
     }
     match result {
         Ok(()) => redirect_with_notice("/apps", "App deleted."),
@@ -430,13 +442,13 @@ async fn app_image_tags(
     .await
 }
 
-async fn remove_app_container(state: &AppState, app: &hakobi::catalog::App) -> String {
+async fn remove_app_container(state: &AppState, app: &hakobi::catalog::App) -> Option<String> {
     let container = crate::web::deployment::container_name_for(&app.id);
     let _ = state
         .backend
         .remove_container(&format!("agent://{}", app.host_id), &container)
         .await;
-    app.subdomain.clone().unwrap_or_else(|| app.name.clone())
+    app.subdomain.clone()
 }
 
 async fn remove_app_images(state: &AppState, app: &hakobi::catalog::App, tags: &[String]) {
@@ -448,7 +460,7 @@ async fn remove_app_images(state: &AppState, app: &hakobi::catalog::App, tags: &
     }
 }
 
-fn spawn_cloudflare_route_cleanup(state: &AppState, app_name: String) {
+fn spawn_cloudflare_route_cleanup(state: &AppState, subdomain: String) {
     let cf_path = state.catalog_path.clone();
     tokio::spawn(async move {
         let settings = tokio::task::spawn_blocking(move || {
@@ -462,9 +474,9 @@ fn spawn_cloudflare_route_cleanup(state: &AppState, app_name: String) {
             Err(_) => return,
         };
         if let Err(error) =
-            crate::cloudflare::apps_route::remove_app_route_with(&settings, &app_name).await
+            crate::cloudflare::apps_route::remove_app_route_with(&settings, &subdomain).await
         {
-            tracing::warn!(error = %error, app = %app_name, "cloudflare route removal skipped");
+            tracing::warn!(error = %error, app = %subdomain, "cloudflare route removal skipped");
         }
     });
 }

@@ -31,9 +31,9 @@ pub(crate) fn docker_resource_panels(
     query: &HashMap<String, String>,
 ) -> Markup {
     html! {
-        @for (provider, _) in groups {
+        @for (provider, inventory) in groups {
             @if let Some(snapshot) = snapshots.get(&provider.id) {
-                (provider_resources(provider, snapshot, csrf_token, query))
+                (provider_resources(provider, inventory, snapshot, csrf_token, query))
             }
         }
         (delete_resource_dialog(csrf_token))
@@ -42,6 +42,7 @@ pub(crate) fn docker_resource_panels(
 
 fn provider_resources(
     provider: &ProviderConnection,
+    inventory: &Result<ContainerInventory, String>,
     snapshot: &Result<DockerSnapshot, String>,
     csrf_token: &str,
     query: &HashMap<String, String>,
@@ -49,7 +50,7 @@ fn provider_resources(
     html! {
         @match snapshot {
             Ok(snapshot) => {
-                (images_panel(provider, snapshot, csrf_token, query))
+                (images_panel(provider, inventory, snapshot, csrf_token, query))
                 (networks_panel(provider, snapshot, csrf_token, query))
                 (volumes_panel(provider, snapshot, csrf_token, query))
             }
@@ -69,6 +70,7 @@ fn panel_header(provider: &ProviderConnection, title: &str, count: usize) -> Mar
 
 fn images_panel(
     provider: &ProviderConnection,
+    inventory: &Result<ContainerInventory, String>,
     snapshot: &DockerSnapshot,
     csrf_token: &str,
     query: &HashMap<String, String>,
@@ -81,7 +83,9 @@ fn images_panel(
                 table class="w-full border-collapse text-left text-sm" {
                     (resource_header(&["Repository:Tag", "Image ID", "Size", "Actions"]))
                     tbody {
-                        @for image in page.items { (image_row(provider, image, csrf_token)) }
+                        @for image in page.items {
+                            (image_row(provider, image, image_in_use(image, inventory), csrf_token))
+                        }
                     }
                 }
             }
@@ -90,7 +94,12 @@ fn images_panel(
     }
 }
 
-fn image_row(provider: &ProviderConnection, image: &ImageRow, csrf_token: &str) -> Markup {
+fn image_row(
+    provider: &ProviderConnection,
+    image: &ImageRow,
+    in_use: bool,
+    csrf_token: &str,
+) -> Markup {
     let name = image.tags.first().map_or(image.id.as_str(), String::as_str);
     let tags = if image.tags.is_empty() {
         "<none>".to_owned()
@@ -102,9 +111,33 @@ fn image_row(provider: &ProviderConnection, image: &ImageRow, csrf_token: &str) 
             td class="px-4 py-3 font-mono text-xs font-semibold" { (tags) }
             td class="px-4 py-3 font-mono text-xs text-muted" { (image.id.chars().take(19).collect::<String>()) }
             td class="px-4 py-3 text-xs text-muted" { (format!("{:.1} MiB", image.size_bytes as f64 / 1_048_576.0)) }
-            td class="px-4 py-3 text-right" { (delete_button(provider, "/docker/images/delete", name, csrf_token)) }
+            td class="px-4 py-3 text-right" {
+                @if in_use {
+                    span class="text-xs text-muted" { "In use by a running container" }
+                } @else {
+                    (delete_button(provider, "/docker/images/delete", name, csrf_token))
+                }
+            }
         }
     }
+}
+
+fn image_in_use(image: &ImageRow, inventory: &Result<ContainerInventory, String>) -> bool {
+    let Ok(inventory) = inventory else {
+        return false;
+    };
+    inventory
+        .groups
+        .iter()
+        .flat_map(|group| &group.containers)
+        .any(|container| container.state == "running" && image_matches(container, image))
+}
+
+fn image_matches(container: &hakobi::providers::ContainerRow, image: &ImageRow) -> bool {
+    let id = image.id.strip_prefix("sha256:").unwrap_or(&image.id);
+    image.tags.contains(&container.image)
+        || container.image == image.id
+        || (container.image.len() >= 12 && id.starts_with(&container.image))
 }
 
 fn networks_panel(
@@ -237,5 +270,38 @@ fn delete_resource_dialog(csrf_token: &str) -> Markup {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hakobi::providers::ContainerRow;
+
+    fn container(state: &str) -> ContainerRow {
+        ContainerRow {
+            id: "abcdef123456".into(),
+            name: "demo-api".into(),
+            image: "alpine:3.20".into(),
+            state: state.into(),
+            status: String::new(),
+            health: None,
+            compose_project: None,
+            compose_service: None,
+            ports: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn only_running_containers_make_images_in_use() {
+        let image = ImageRow {
+            id: "sha256:abcdef1234567890".into(),
+            tags: vec!["alpine:3.20".into()],
+            size_bytes: 1,
+        };
+        let running = Ok(ContainerInventory::from_rows(vec![container("running")]));
+        let exited = Ok(ContainerInventory::from_rows(vec![container("exited")]));
+        assert!(image_in_use(&image, &running));
+        assert!(!image_in_use(&image, &exited));
     }
 }

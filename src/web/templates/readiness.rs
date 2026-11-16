@@ -1,8 +1,13 @@
 //! Host readiness section and readiness cards.
 
+use std::collections::BTreeMap;
+
 use maud::{html, Markup};
 
-use hakobi::install::{Readiness, ToolStatus};
+use hakobi::{
+    host_agent::InstallJob,
+    install::{Readiness, ToolStatus},
+};
 
 pub fn readiness_section(
     readiness: &Readiness,
@@ -23,6 +28,9 @@ pub fn readiness_section(
                 h2 id="readiness-title" class="m-0 text-[1.05rem] font-semibold tracking-[-0.02em]" { "Host readiness" }
                 p class="m-0 text-xs text-[#86868b]" { (note) }
             }
+            @if agent_online {
+                div id="host-install-results" hx-get="/host/install/status" hx-trigger="every 2s" hx-swap="outerHTML" aria-live="polite" {}
+            }
             div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5" {
                 (readiness_card("Docker", "/assets/art/3d/deploy.webp", "docker", &readiness.docker, csrf_token, agent_online, agent_configured))
                 (readiness_card("Compose", "/assets/art/3d/stack-compose.webp", "compose", &readiness.compose, csrf_token, agent_online, agent_configured))
@@ -31,6 +39,64 @@ pub fn readiness_section(
                 (readiness_card("Nixpacks", "/assets/art/3d/build-runner.webp", "nixpacks", &readiness.nixpacks, csrf_token, agent_online, agent_configured))
             }
         }
+    }
+}
+
+/// Polled install job notices; completed jobs remain visible on refresh.
+pub fn install_status_results(jobs: &BTreeMap<String, InstallJob>, error: Option<&str>) -> Markup {
+    let trigger = if jobs.values().any(|job| job.running) {
+        "every 2s"
+    } else {
+        "every 30s"
+    };
+    html! {
+        div id="host-install-results" hx-get="/host/install/status" hx-trigger=(trigger) hx-swap="outerHTML" aria-live="polite" {
+            @if let Some(message) = error {
+                p class="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert" { (message) }
+            }
+            @for (tool, job) in jobs {
+                (install_job_notice(tool, job))
+            }
+        }
+    }
+}
+
+fn install_job_notice(tool: &str, job: &InstallJob) -> Markup {
+    let label = install_tool_label(tool);
+    if job.running {
+        return html! {
+            p class="mb-3 rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900" role="status" {
+                (label) " installation is running on the host."
+            }
+        };
+    }
+    if job.success {
+        return html! {
+            p class="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900" role="status" {
+                (label) " installed successfully on the host."
+            }
+        };
+    }
+    let output = if job.output.is_empty() {
+        "No installer output was returned."
+    } else {
+        &job.output
+    };
+    html! {
+        p class="mb-3 whitespace-pre-wrap rounded-lg bg-red-50 px-3 py-2 text-sm text-red-900" role="alert" {
+            (label) " installation failed on the host. " (output)
+        }
+    }
+}
+
+fn install_tool_label(tool: &str) -> &str {
+    match tool {
+        "docker" => "Docker",
+        "compose" => "Compose",
+        "kubectl" => "kubectl",
+        "nix" => "Nix",
+        "nixpacks" => "Nixpacks",
+        _ => "Tool",
     }
 }
 
@@ -65,7 +131,7 @@ fn readiness_card(
                         "Missing"
                     }
                     @if can_install {
-                        form method="post" action=(format!("/host/install/{tool}")) class="mt-3" {
+                        form method="post" action=(format!("/host/install/{tool}")) hx-boost="true" class="mt-3" {
                             input type="hidden" name="csrf_token" value=(csrf_token);
                             button class="rounded-lg bg-brand px-3 py-1.5 text-[0.72rem] font-semibold text-white transition hover:bg-[#0f4130]" type="submit" {
                                 "Install on host"

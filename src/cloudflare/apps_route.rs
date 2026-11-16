@@ -49,6 +49,111 @@ fn subdomain_for(domain: &str, app_name: &str) -> String {
     format!("{app_name}.{domain}")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppRouteAvailability {
+    Available,
+    Adoptable,
+}
+
+struct RouteInspection {
+    hostname: String,
+    dns_exists: bool,
+    adoptable: bool,
+}
+
+async fn inspect_app_route(
+    client: &CloudflareClient,
+    settings: &CfSettings,
+    tunnel_id: uuid::Uuid,
+    app_name: &str,
+    host_port: u16,
+) -> anyhow::Result<RouteInspection> {
+    let hostname = subdomain_for(&settings.domain, app_name);
+    let records = client
+        .find_dns_records(&settings.zone_id, &hostname)
+        .await?;
+    let target = format!("{tunnel_id}.cfargotunnel.com");
+    anyhow::ensure!(
+        records.iter().all(|record| {
+            crate::cloudflare::is_hakobi_record(record)
+                && record.r#type.eq_ignore_ascii_case("CNAME")
+                && record
+                    .content
+                    .trim_end_matches('.')
+                    .eq_ignore_ascii_case(&target)
+                && record.proxied
+        }),
+        "subdomain is already in use by an unmanaged or wrong-target DNS record"
+    );
+    let rules = client
+        .get_tunnel_ingress(&settings.account_id, tunnel_id)
+        .await?;
+    let service = format!("http://127.0.0.1:{host_port}");
+    let mut route_exists = false;
+    for rule in rules
+        .iter()
+        .filter(|rule| rule.hostname.as_deref() == Some(hostname.as_str()))
+    {
+        route_exists = true;
+        anyhow::ensure!(
+            rule.service == service,
+            "subdomain is already in use by a route with a different target"
+        );
+    }
+    Ok(RouteInspection {
+        hostname,
+        dns_exists: !records.is_empty(),
+        adoptable: !records.is_empty() || route_exists,
+    })
+}
+
+pub async fn app_route_availability_with(
+    settings: &CfSettings,
+    app_name: &str,
+    host_port: u16,
+) -> anyhow::Result<AppRouteAvailability> {
+    let client = CloudflareClient::new(settings.api_token.clone())?;
+    let tunnel_id = settings
+        .tunnel_id
+        .parse()
+        .context("cf_tunnel_id is not a valid UUID")?;
+    let inspected = inspect_app_route(&client, settings, tunnel_id, app_name, host_port).await?;
+    Ok(if inspected.adoptable {
+        AppRouteAvailability::Adoptable
+    } else {
+        AppRouteAvailability::Available
+    })
+}
+
+/// Publishes a previously unassigned hostname, adopting only an interrupted
+/// Hakobi publication whose DNS and ingress targets match this app.
+pub async fn publish_app_route_with(
+    settings: &CfSettings,
+    app_name: &str,
+    host_port: u16,
+) -> anyhow::Result<String> {
+    let client = CloudflareClient::new(settings.api_token.clone())?;
+    let tunnel_id = settings
+        .tunnel_id
+        .parse()
+        .context("cf_tunnel_id is not a valid UUID")?;
+    let inspected = inspect_app_route(&client, settings, tunnel_id, app_name, host_port).await?;
+    client
+        .upsert_ingress_route(
+            &settings.account_id,
+            tunnel_id,
+            &inspected.hostname,
+            host_port,
+        )
+        .await?;
+    if !inspected.dns_exists {
+        client
+            .create_dns_record(&settings.zone_id, &inspected.hostname, tunnel_id)
+            .await?;
+    }
+    Ok(inspected.hostname)
+}
+
 /// Same as [`sync_app_route`] with pre-loaded settings (non-blocking caller).
 pub async fn sync_app_route_with(
     settings: &CfSettings,
@@ -99,7 +204,7 @@ pub async fn remove_app_route_with(settings: &CfSettings, app_name: &str) -> any
         .await?
     {
         client
-            .delete_dns_record(&settings.zone_id, &record.id)
+            .delete_hakobi_record(&settings.zone_id, &record)
             .await?;
     }
     Ok(())

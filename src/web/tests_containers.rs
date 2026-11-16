@@ -3,17 +3,25 @@ use axum::{
     http::{header::COOKIE, Request, StatusCode},
     Router,
 };
-use hakobi::catalog::Catalog;
+use hakobi::{catalog::Catalog, providers::DockerBackend};
+use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-use super::tests_support::{app, body_text, post_form, sign_in};
+use super::{
+    router_with_backend,
+    tests_support::{app, assert_error, body_text, config, location, post_form, sign_in},
+};
 
 fn create_provider(data: &TempDir) -> String {
+    create_provider_at(data, "unix:///var/run/docker.sock")
+}
+
+fn create_provider_at(data: &TempDir, endpoint: &str) -> String {
     let path = data.path().join("catalog.sqlite3");
     let mut catalog = Catalog::open(&path).unwrap();
     catalog
-        .create_provider_connection("local", "docker", "unix:///var/run/docker.sock", "")
+        .create_provider_connection("local", "docker", endpoint, "")
         .unwrap()
 }
 
@@ -139,13 +147,7 @@ async fn create_container(app: &Router, authenticated: &str, csrf: &str, create:
     )
     .await;
     assert_eq!(created.status(), StatusCode::SEE_OTHER);
-    let location = created
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
+    let location = location(&created).to_owned();
     assert!(location.starts_with("/containers?notice="));
     assert!(location.contains("18050"));
     assert!(location.contains("demo-api"));
@@ -166,7 +168,7 @@ async fn check_container_list(app: &Router, authenticated: &str, provider: &str,
     assert_eq!(listed.status(), StatusCode::OK);
     let body = body_text(listed, 256 * 1024).await;
     assert!(body.contains("is running on host port 18050."));
-    assert!(body.contains(&format!("/containers/{provider}/demo-api/start")));
+    assert!(!body.contains(&format!("/containers/{provider}/demo-api/start")));
     assert!(body.contains(&format!("/containers/{provider}/demo-api/stop")));
     assert!(body.contains(&format!("/containers/{provider}/demo-api/restart")));
     assert!(body.contains(&format!(
@@ -252,7 +254,7 @@ async fn check_action(
     )
     .await;
     assert_eq!(ok.status(), StatusCode::SEE_OTHER);
-    let location = ok.headers().get("location").unwrap().to_str().unwrap();
+    let location = location(&ok);
     assert!(location.contains(&format!("demo-api+{word}")));
 }
 
@@ -301,13 +303,7 @@ async fn delete_container(app: &Router, authenticated: &str, csrf: &str, provide
     )
     .await;
     assert_eq!(deleted.status(), StatusCode::SEE_OTHER);
-    assert!(deleted
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .contains("removed"));
+    assert!(location(&deleted).contains("removed"));
 }
 
 async fn check_disabled_provider(
@@ -362,12 +358,33 @@ async fn container_creation_and_lifecycle_actions_are_guarded() {
     reject_invalid_port(&app, &authenticated, &csrf, &provider).await;
     let location = create_container(&app, &authenticated, &csrf, &create).await;
     check_container_list(&app, &authenticated, &provider, &location).await;
-    for (action, word) in [
-        ("start", "started"),
-        ("stop", "stopped"),
-        ("restart", "restarted"),
-    ] {
+    for (action, word) in [("stop", "stopped"), ("restart", "restarted")] {
         check_action(&app, &authenticated, &csrf, &provider, action, word).await;
+    }
+    let start_running = post_form(
+        &app,
+        &format!("/containers/{provider}/demo-api/start"),
+        &authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await;
+    assert_error(&start_running, "running");
+    for action in ["start", "stop", "restart", "delete"] {
+        let confirmation = if action == "delete" {
+            "confirm_name=hakobi-z9pe&"
+        } else {
+            ""
+        };
+        let refused = post_form(
+            &app,
+            &format!("/containers/{provider}/hakobi-z9pe/{action}"),
+            &authenticated,
+            "null",
+            format!("{confirmation}csrf_token={csrf}"),
+        )
+        .await;
+        assert_error(&refused, "hakobi-z9pe");
     }
     reject_invalid_deletes(&app, &authenticated, &csrf, &provider).await;
     delete_container(&app, &authenticated, &csrf, &provider).await;
@@ -396,6 +413,73 @@ async fn docker_resources_have_guarded_create_and_delete_actions() {
             )
             .await;
             assert_eq!(response.status(), expected);
+            if expected == StatusCode::SEE_OTHER {
+                let location = location(&response);
+                assert!(location.starts_with(&format!("/containers?tab={resource}")));
+                assert!(!location.contains("status=error"));
+            }
         }
+        let invalid = post_form(
+            &app,
+            &format!("/docker/{resource}/create"),
+            &authenticated,
+            "null",
+            format!("provider_id={provider}&name=bad%2Fname&csrf_token={csrf}"),
+        )
+        .await;
+        assert!(location(&invalid).starts_with(&format!("/containers?tab={resource}")));
+        assert_error(&invalid, "Invalid+Docker+resource+name");
     }
+}
+
+#[tokio::test]
+async fn docker_failures_redirect_with_error_details_and_resource_tab() {
+    let data = tempfile::tempdir().unwrap();
+    let path = data.path().join("catalog.sqlite3");
+    let provider = create_provider_at(&data, "unix:///tmp/hakobi-missing-docker.sock");
+    let app = router_with_backend(config(), path, Arc::new(DockerBackend));
+    let (authenticated, csrf) = sign_in(&app).await;
+    let action = post_form(
+        &app,
+        &format!("/containers/{provider}/demo-api/stop"),
+        &authenticated,
+        "null",
+        format!("csrf_token={csrf}"),
+    )
+    .await;
+    assert_error(&action, "Could+not+check+demo-api");
+
+    let delete = post_form(
+        &app,
+        &format!("/containers/{provider}/demo-api/delete"),
+        &authenticated,
+        "null",
+        format!("confirm_name=demo-api&csrf_token={csrf}"),
+    )
+    .await;
+    assert_error(&delete, "Removing+demo-api+failed");
+
+    let resource = post_form(
+        &app,
+        "/docker/networks/create",
+        &authenticated,
+        "null",
+        format!("provider_id={provider}&name=qa-net&csrf_token={csrf}"),
+    )
+    .await;
+    assert!(location(&resource).starts_with("/containers?tab=networks"));
+    assert_error(&resource, "create+network");
+
+    let create = post_form(
+        &app,
+        "/containers/new",
+        &authenticated,
+        "null",
+        format!("provider_id={provider}&image=nginx%3Alatest&name=demo-api&container_port=8080&csrf_token={csrf}"),
+    )
+    .await;
+    assert_eq!(create.status(), StatusCode::BAD_GATEWAY);
+    let body = body_text(create, 128 * 1024).await;
+    assert!(body.contains("role=\"alert\""));
+    assert!(!body.contains("Internal error"));
 }

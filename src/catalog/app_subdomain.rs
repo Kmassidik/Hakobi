@@ -28,11 +28,19 @@ impl Catalog {
         let updated = self.connection.execute(
             "UPDATE apps \
              SET subdomain = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-             WHERE id = ?1",
+             WHERE id = ?1 AND (?2 IS NULL OR NOT EXISTS (\
+                 SELECT 1 FROM apps WHERE subdomain COLLATE NOCASE = ?2 AND id <> ?1\
+             ))",
             params![id, subdomain],
         )?;
         if updated == 0 {
-            bail!("app {id} not found");
+            if self.get_app(id)?.is_none() {
+                bail!("app {id} not found");
+            }
+            bail!(
+                "subdomain {} is already assigned to another app",
+                subdomain.unwrap_or_default()
+            );
         }
         Ok(())
     }

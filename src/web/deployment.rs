@@ -8,7 +8,7 @@ pub(crate) mod executor;
 pub(crate) mod stages;
 pub(crate) use stages::{container_name_for, image_tag_for};
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -48,6 +48,8 @@ pub(crate) struct ExecutorDeps {
 #[derive(Clone, Default)]
 pub struct DeploymentGuard {
     active: Arc<Mutex<HashSet<String>>>,
+    /// Serializes each deployment's cancellation with its container start.
+    cancellation: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 impl DeploymentGuard {
@@ -64,12 +66,35 @@ impl DeploymentGuard {
             .insert(app_id.to_owned())
     }
 
+    /// Prevents a container start from racing a successful cancellation.
+    pub(crate) async fn lock_cancellation(
+        &self,
+        deployment_id: &str,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = self
+            .cancellation
+            .lock()
+            .expect("cancellation mutex poisoned")
+            .entry(deployment_id.to_owned())
+            .or_default()
+            .clone();
+        lock.lock_owned().await
+    }
+
     /// Releases the claim after the executor finishes.
     pub fn release(&self, app_id: &str) {
         self.active
             .lock()
             .expect("deployment guard mutex poisoned")
             .remove(app_id);
+    }
+
+    fn finish(&self, app_id: &str, deployment_id: &str) {
+        self.release(app_id);
+        self.cancellation
+            .lock()
+            .expect("cancellation mutex poisoned")
+            .remove(deployment_id);
     }
 }
 
@@ -101,7 +126,7 @@ pub(crate) fn start_deployment(
     let commit_message = normalize_commit_field(commit_message);
     // `create_deployment` derives the next version inside one transaction;
     // the guard keeps this race-free per app.
-    let deployment_id = run_catalog_op(deps.catalog_path.clone(), move |catalog| {
+    let created = run_catalog_op(deps.catalog_path.clone(), move |catalog| {
         let id = catalog.create_deployment(
             &app,
             trigger.as_str(),
@@ -112,24 +137,37 @@ pub(crate) fn start_deployment(
             catalog.add_deployment_log(&id, "info", &message)?;
         }
         Ok(id)
-    })?;
+    });
+    let deployment_id = match created {
+        Ok(id) => id,
+        Err(error) => {
+            guard.release(app_id);
+            return Err(error);
+        }
+    };
 
-    let deps = deps.clone();
-    let guard = guard.clone();
-    let app = app_id.to_owned();
-    let pipeline_deployment = deployment_id.clone();
+    spawn_pipeline(
+        deps.clone(),
+        guard.clone(),
+        app_id.to_owned(),
+        deployment_id.clone(),
+    );
+    Ok(Some(deployment_id))
+}
+
+fn spawn_pipeline(deps: ExecutorDeps, guard: DeploymentGuard, app: String, deployment_id: String) {
     tokio::spawn(async move {
-        let outcome = executor::run_pipeline(&deps, &app, &pipeline_deployment).await;
-        guard.release(&app);
+        let run_guard = guard.clone();
+        let outcome = executor::run_pipeline(&deps, &run_guard, &app, &deployment_id).await;
+        guard.finish(&app, &deployment_id);
         if let Err(error) = outcome {
             tracing::error!(
                 error = %error,
-                deployment = %pipeline_deployment,
+                deployment = %deployment_id,
                 "deployment pipeline failed"
             );
         }
     });
-    Ok(Some(deployment_id))
 }
 
 /// Runs a blocking catalog operation off the async runtime.

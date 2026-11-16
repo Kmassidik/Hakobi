@@ -264,7 +264,17 @@ fn app_routes() -> Router<AppState> {
         )
         .route("/apps/{id}/delete", post(handlers::app_delete))
         .route("/apps/{id}/deploy", post(handlers::app_deploy))
+        .route(
+            "/apps/{deployment_id}/cancel",
+            post(handlers::app_deployment_cancel),
+        )
+        .route("/host/install/{tool}", post(handlers::host_install))
+        .route("/host/install/status", get(handlers::host_install_status))
         .route("/apps/{id}/publish", post(handlers::app_publish))
+        .route(
+            "/apps/{id}/subdomain",
+            get(handlers::app_subdomain_availability),
+        )
         .route("/apps/{id}/rollback", post(handlers::app_rollback))
         .route("/apps/{id}/deployments", get(handlers::app_deployments))
         .route("/apps/{id}/logs", get(handlers::app_logs))

@@ -14,14 +14,17 @@ mod docker_resources;
 mod github;
 mod github_repos;
 mod github_settings;
+mod install;
 mod partials;
 mod settings;
 pub(crate) use settings::{
     cloudflare_save, domain_create, domain_delete, domain_update, settings_page,
 };
 
-pub(crate) use app_deploy::{app_deploy, app_rollback};
-pub(crate) use app_publish::{app_publication_partial, app_publish, app_status_partial};
+pub(crate) use app_deploy::{app_deploy, app_deployment_cancel, app_rollback};
+pub(crate) use app_publish::{
+    app_publication_partial, app_publish, app_status_partial, app_subdomain_availability,
+};
 pub(crate) use app_runtime::{app_runtime_action, app_runtime_partial, app_usage};
 pub(crate) use apps::{
     app_create, app_delete, app_deployments, app_detail, app_edit_page, app_edit_submit, app_list,
@@ -49,6 +52,7 @@ pub(crate) use github_settings::{
     github_connect_callback, github_connect_start, github_disconnect, github_install_start,
     github_manifest_post_install, github_recheck_installation, github_settings_page,
 };
+pub(crate) use install::{host_install, host_install_status};
 pub(crate) use partials::{charts_partial, metrics_partial, readiness_partial, status};
 
 use std::{fmt::Write as _, sync::LazyLock};
@@ -204,9 +208,23 @@ pub(crate) fn login_key(headers: &HeaderMap) -> String {
 }
 
 pub(crate) fn redirect_with_notice(base: &str, message: &str) -> Response {
+    redirect_with_kind(base, message, None)
+}
+
+pub(crate) fn redirect_with_error(base: &str, message: &str) -> Response {
+    redirect_with_kind(base, message, Some("error"))
+}
+
+fn redirect_with_kind(base: &str, message: &str, kind: Option<&str>) -> Response {
     let encoded: String = url::form_urlencoded::byte_serialize(message.as_bytes()).collect();
     let separator = if base.contains('?') { '&' } else { '?' };
-    redirect_response(&format!("{base}{separator}notice={encoded}"), Vec::new())
+    let status = kind
+        .map(|value| format!("&status={value}"))
+        .unwrap_or_default();
+    redirect_response(
+        &format!("{base}{separator}notice={encoded}{status}"),
+        Vec::new(),
+    )
 }
 
 #[derive(RustEmbed)]
@@ -223,6 +241,7 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
         "assets/hakobi-github.js",
         "assets/hakobi-app-form.js",
         "assets/hakobi-actions.js",
+        "assets/hakobi-publish.js",
         "assets/htmx.min.js",
         "assets/vendor/fontawesome/css/all.min.css",
         "assets/vendor/fontawesome/webfonts/fa-solid-900.woff2",

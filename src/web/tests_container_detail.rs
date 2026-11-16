@@ -279,7 +279,7 @@ async fn check_detail_access_and_page(app: &Router, authenticated: &str, provide
 }
 
 fn check_detail_actions(body: &str, provider: &str) {
-    assert!(body.contains(&format!("/containers/{provider}/demo-api/start")));
+    assert!(!body.contains(&format!("/containers/{provider}/demo-api/start")));
     assert!(body.contains(&format!("/containers/{provider}/demo-api/stop")));
     assert!(body.contains(&format!("/containers/{provider}/demo-api/restart")));
     assert!(body.contains(&format!(

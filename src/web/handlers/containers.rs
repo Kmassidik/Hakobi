@@ -9,9 +9,12 @@ use serde::Deserialize;
 
 use super::{
     app_container_names, html_response, internal_error, load_providers, page_csrf, post_is_allowed,
-    redirect_response, truncate, CsrfForm,
+    truncate, CsrfForm,
 };
-use crate::web::{handlers::redirect_with_notice, templates, AppState};
+use crate::web::{
+    handlers::{redirect_with_error, redirect_with_notice},
+    templates, AppState,
+};
 use hakobi::{
     catalog::ProviderConnection,
     providers::{
@@ -109,11 +112,6 @@ impl ContainerAction {
             ContainerAction::Restart => format!("Container {name} restarted."),
         }
     }
-}
-
-fn containers_notice(message: &str) -> String {
-    let encoded: String = url::form_urlencoded::byte_serialize(message.as_bytes()).collect();
-    format!("/containers?notice={encoded}")
 }
 
 fn render_container_form(
@@ -297,7 +295,7 @@ async fn run_new_container(
                 "Container {} is running on host port {}.",
                 run.name, run.host_port
             );
-            redirect_response(&containers_notice(&notice), Vec::new())
+            redirect_with_notice("/containers", &notice)
         }
         Err(error) => {
             tracing::warn!(error = %error, "container run failed");
@@ -376,6 +374,12 @@ pub(crate) async fn container_delete(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
+    if templates::is_control_plane_container(&name) {
+        return redirect_with_error(
+            "/containers",
+            "The control-plane container hakobi-z9pe cannot be removed from the workbench.",
+        );
+    }
     if form.confirm_name != name {
         return (
             StatusCode::BAD_REQUEST,
@@ -403,7 +407,7 @@ pub(crate) async fn container_delete(
                 "Removing {name} failed: {}",
                 truncate(&error.to_string(), 500)
             );
-            redirect_response(&containers_notice(&notice), Vec::new())
+            redirect_with_error("/containers", &notice)
         }
     }
 }
@@ -425,36 +429,72 @@ async fn container_action(
     if validate_container_name(name).is_err() {
         return StatusCode::BAD_REQUEST.into_response();
     }
+    if templates::is_control_plane_container(name) {
+        let message = format!(
+            "The workbench cannot {} the control-plane container hakobi-z9pe.",
+            action.verb()
+        );
+        return redirect_with_error("/containers", &message);
+    }
     let provider = match enabled_docker_provider(state, provider_id).await {
         Ok(Some(provider)) => provider,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
     };
-    let result = match action {
-        ContainerAction::Start => {
-            state
-                .backend
-                .start_container(&provider.endpoint, name)
-                .await
-        }
-        ContainerAction::Stop => state.backend.stop_container(&provider.endpoint, name).await,
-        ContainerAction::Restart => {
-            state
-                .backend
-                .restart_container(&provider.endpoint, name)
-                .await
-        }
-    };
-    let notice = match result {
-        Ok(()) => action.success_notice(name),
+    if let Err(message) = check_action_state(state, &provider.endpoint, name, action).await {
+        return redirect_with_error("/containers", &message);
+    }
+    match execute_action(state, &provider.endpoint, name, action).await {
+        Ok(()) => redirect_with_notice("/containers", &action.success_notice(name)),
         Err(error) => {
             tracing::warn!(error = %error, action = action.verb(), "container action failed");
-            format!(
+            let message = format!(
                 "Could not {} {name}: {}",
                 action.verb(),
                 truncate(&error.to_string(), 500)
-            )
+            );
+            redirect_with_error("/containers", &message)
         }
-    };
-    redirect_response(&containers_notice(&notice), Vec::new())
+    }
+}
+
+async fn check_action_state(
+    state: &AppState,
+    endpoint: &str,
+    name: &str,
+    action: ContainerAction,
+) -> Result<(), String> {
+    let rows = state.backend.containers(endpoint).await.map_err(|error| {
+        format!(
+            "Could not check {name} before {}: {}",
+            action.verb(),
+            truncate(&error.to_string(), 500)
+        )
+    })?;
+    let container = rows
+        .iter()
+        .find(|container| container.name == name)
+        .ok_or_else(|| format!("Container {name} no longer exists on this provider."))?;
+    if templates::container_action_allowed(action.verb(), &container.state) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Cannot {} {name} while its state is {}.",
+            action.verb(),
+            container.state
+        ))
+    }
+}
+
+async fn execute_action(
+    state: &AppState,
+    endpoint: &str,
+    name: &str,
+    action: ContainerAction,
+) -> anyhow::Result<()> {
+    match action {
+        ContainerAction::Start => state.backend.start_container(endpoint, name).await,
+        ContainerAction::Stop => state.backend.stop_container(endpoint, name).await,
+        ContainerAction::Restart => state.backend.restart_container(endpoint, name).await,
+    }
 }

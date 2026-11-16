@@ -161,6 +161,11 @@ pub(crate) fn validate_app_inputs(
         return Err("Container port must be between 1 and 65535.".into());
     }
     resource_limits(values).map_err(|error| error.to_string())?;
+    let env: serde_json::Value = serde_json::from_str(&values.env_json)
+        .map_err(|_| "Environment must be a valid JSON object.".to_owned())?;
+    if !env.is_object() {
+        return Err("Environment must be a JSON object.".into());
+    }
     Ok(())
 }
 
@@ -178,8 +183,9 @@ pub(crate) async fn create_app_record(
     let github_auto_deploy = values.github_auto_deploy;
     let container_port = parse_port(&values.container_port);
     let (cpu_limit, memory_limit_bytes) = resource_limits(values)?;
+    let env_json = values.env_json.clone();
     with_catalog(state, move |catalog| {
-        catalog.create_app(
+        let app_id = catalog.create_app(
             &name,
             &host_id,
             &build_type,
@@ -191,7 +197,9 @@ pub(crate) async fn create_app_record(
             container_port,
             cpu_limit,
             memory_limit_bytes,
-        )
+        )?;
+        catalog.set_app_env_json(&app_id, &env_json)?;
+        Ok(app_id)
     })
     .await
 }
@@ -214,6 +222,14 @@ pub(crate) async fn update_app_record(
     let env_json = values.env_json.clone();
     let app_id = id.to_owned();
     with_catalog(state, move |catalog| {
+        let host_changed = catalog
+            .get_app(&app_id)?
+            .is_some_and(|app| app.host_id != host_id);
+        if host_changed && catalog.latest_in_flight_deployment(&app_id)?.is_some() {
+            anyhow::bail!(
+                "The host cannot change while a deployment is active. Cancel it or wait for it to finish."
+            );
+        }
         catalog.update_app(
             &app_id,
             &name,

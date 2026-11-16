@@ -10,6 +10,19 @@ use hakobi::providers::{ContainerInventory, ContainerRow};
 use super::{brand, page, pagination_controls, sidebar, CONTENT_WIDTH, EYEBROW, FIELD};
 use crate::web::pagination::{page_number, paginate};
 
+pub(crate) fn is_control_plane_container(name: &str) -> bool {
+    name == "hakobi-z9pe"
+}
+
+pub(crate) fn container_action_allowed(action: &str, state: &str) -> bool {
+    match action {
+        "start" => matches!(state, "created" | "exited"),
+        "stop" => matches!(state, "running" | "restarting" | "paused"),
+        "restart" => state == "running",
+        _ => false,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn containers(
     base_url: &str,
@@ -276,34 +289,44 @@ pub(crate) fn container_actions(
     container: &ContainerRow,
     csrf_token: &str,
 ) -> Markup {
-    let base = format!("/containers/{provider}/{}", container.name);
-    let container_name = container.name.as_str();
+    let name = container.name.as_str();
+    if is_control_plane_container(name) {
+        return html! { span class="text-xs text-muted" { "Control plane · protected" } };
+    }
+    let base = format!("/containers/{provider}/{name}");
     html! {
         div class="flex flex-wrap items-center gap-1.5" {
-            form method="post" action=(format!("{base}/start")) class="m-0" {
-                input type="hidden" name="csrf_token" value=(csrf_token);
-                button class="rounded-md border border-line bg-transparent px-2.5 py-1.5 text-[0.68rem] font-semibold text-ink" type="submit" title=(format!("Start {container_name}")) {
-                    i class="fa-solid fa-play mr-1" aria-hidden="true" {}
-                    "Start"
-                }
+            @if container_action_allowed("start", &container.state) {
+                (lifecycle_form(&base, name, csrf_token, "start", "Start", "fa-play"))
             }
-            form method="post" action=(format!("{base}/stop")) class="m-0" {
-                input type="hidden" name="csrf_token" value=(csrf_token);
-                button class="rounded-md border border-line bg-transparent px-2.5 py-1.5 text-[0.68rem] font-semibold text-ink" type="submit" title=(format!("Stop {container_name}")) {
-                    i class="fa-solid fa-stop mr-1" aria-hidden="true" {}
-                    "Stop"
-                }
+            @if container_action_allowed("stop", &container.state) {
+                (lifecycle_form(&base, name, csrf_token, "stop", "Stop", "fa-stop"))
             }
-            form method="post" action=(format!("{base}/restart")) class="m-0" {
-                input type="hidden" name="csrf_token" value=(csrf_token);
-                button class="rounded-md border border-line bg-transparent px-2.5 py-1.5 text-[0.68rem] font-semibold text-ink" type="submit" title=(format!("Restart {container_name}")) {
-                    i class="fa-solid fa-rotate-right mr-1" aria-hidden="true" {}
-                    "Restart"
-                }
+            @if container_action_allowed("restart", &container.state) {
+                (lifecycle_form(&base, name, csrf_token, "restart", "Restart", "fa-rotate-right"))
             }
-            button type="button" class="rounded-md border border-danger/40 bg-transparent px-2.5 py-1.5 text-[0.68rem] font-semibold text-danger" data-dialog-open="delete-container" data-delete-action=(format!("{base}/delete")) data-delete-name=(container_name) {
+            button type="button" class="rounded-md border border-danger/40 px-2.5 py-1.5 text-[0.68rem] font-semibold text-danger" data-dialog-open="delete-container" data-delete-action=(format!("{base}/delete")) data-delete-name=(name) {
                 i class="fa-solid fa-trash-can mr-1" aria-hidden="true" {}
                 "Delete"
+            }
+        }
+    }
+}
+
+fn lifecycle_form(
+    base: &str,
+    name: &str,
+    csrf_token: &str,
+    action: &str,
+    label: &str,
+    icon: &str,
+) -> Markup {
+    html! {
+        form method="post" action=(format!("{base}/{action}")) class="m-0" {
+            input type="hidden" name="csrf_token" value=(csrf_token);
+            button class="rounded-md border border-line bg-transparent px-2.5 py-1.5 text-[0.68rem] font-semibold text-ink" type="submit" title=(format!("{label} {name}")) {
+                i class=(format!("fa-solid {icon} mr-1")) aria-hidden="true" {}
+                (label)
             }
         }
     }

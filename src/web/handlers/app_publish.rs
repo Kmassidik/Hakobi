@@ -1,9 +1,10 @@
 //! Explicit post-build publication through Cloudflare Tunnel and the L7 edge.
 
 use axum::{
-    extract::{Form, Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Form, Path, Query, State},
+    http::{header::CACHE_CONTROL, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
+    Json,
 };
 use serde::Deserialize;
 
@@ -58,7 +59,15 @@ pub(crate) async fn app_publication_partial(
     let domain = apps_domain(&state).await;
     super::html_response(
         StatusCode::OK,
-        super::templates::app_publication_notice(&app, &csrf_token, domain.as_deref(), None),
+        super::templates::app_publication_notice(
+            &app,
+            &csrf_token,
+            domain.as_deref(),
+            None,
+            None,
+            false,
+            false,
+        ),
         Vec::new(),
     )
 }
@@ -71,6 +80,111 @@ pub(super) async fn apps_domain(state: &AppState) -> Option<String> {
     .ok()
     .flatten()
     .filter(|domain| !domain.is_empty())
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AvailabilityQuery {
+    #[serde(default)]
+    value: String,
+}
+
+pub(crate) async fn app_subdomain_availability(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(query): Query<AvailabilityQuery>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let app = match load_app(&state, &id).await {
+        Ok(Some(app)) => app,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error(error),
+    };
+    let Some(host_port) = app.host_port.filter(|_| app.display_status() == "running") else {
+        return availability_response(
+            "unavailable",
+            "The application must be running before a subdomain can be published.",
+        );
+    };
+    let value = query.value.trim().to_lowercase();
+    if let Err(error) = hakobi::catalog::validate_app_subdomain(&value) {
+        return availability_response("invalid", &error.to_string());
+    }
+    checked_availability(&state, &id, host_port, &value).await
+}
+
+fn availability_response(status: &str, message: &str) -> Response {
+    let mut response = Json(serde_json::json!({
+        "status": status,
+        "message": message,
+    }))
+    .into_response();
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
+async fn checked_availability(state: &AppState, id: &str, host_port: u16, value: &str) -> Response {
+    match catalog_subdomain_owner(state, id, value).await {
+        Ok(Some(_)) => {
+            return availability_response(
+                "unavailable",
+                "Another application already uses this subdomain.",
+            );
+        }
+        Ok(None) => {}
+        Err(_) => {
+            return availability_response(
+                "unavailable",
+                "Availability could not be verified. Try again.",
+            );
+        }
+    }
+    let settings = match publication_settings(state).await {
+        Ok(settings) => settings,
+        Err(_) => {
+            return availability_response(
+                "unavailable",
+                "Cloudflare publication settings are unavailable.",
+            );
+        }
+    };
+    route_availability_response(&settings, value, host_port).await
+}
+
+async fn route_availability_response(
+    settings: &crate::cloudflare::apps_route::CfSettings,
+    value: &str,
+    host_port: u16,
+) -> Response {
+    let hostname = format!("{value}.{}", settings.domain);
+    use crate::cloudflare::apps_route::AppRouteAvailability;
+    match crate::cloudflare::apps_route::app_route_availability_with(settings, value, host_port)
+        .await
+    {
+        Ok(AppRouteAvailability::Available) => {
+            availability_response("available", &format!("{hostname} is available."))
+        }
+        Ok(AppRouteAvailability::Adoptable) => availability_response(
+            "adoptable",
+            &format!(
+                "The existing Hakobi route for {hostname} matches this app and can be attached."
+            ),
+        ),
+        Err(error) if error.to_string().contains("subdomain is already in use") => {
+            availability_response(
+                "unavailable",
+                "This subdomain is already in use or points to a different target.",
+            )
+        }
+        Err(_) => availability_response(
+            "unavailable",
+            "Availability could not be verified. Try again.",
+        ),
+    }
 }
 
 #[derive(Deserialize)]
@@ -96,20 +210,31 @@ pub(crate) async fn app_publish(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
     };
+    let subdomain = form.subdomain.trim().to_lowercase();
+    let attempted = form.subdomain.as_str();
     let Some(host_port) = app.host_port.filter(|_| app.display_status() == "running") else {
         return publication_result(
             &state,
             &headers,
             &id,
+            Some(attempted),
             "The application must be running before it can be published.",
+            true,
         )
         .await;
     };
-    let subdomain = form.subdomain.trim().to_lowercase();
     if let Err(error) = hakobi::catalog::validate_app_subdomain(&subdomain) {
-        return publication_result(&state, &headers, &id, &error.to_string()).await;
+        return publication_result(
+            &state,
+            &headers,
+            &id,
+            Some(attempted),
+            &error.to_string(),
+            true,
+        )
+        .await;
     }
-    finish_publication(&state, &headers, &id, &subdomain, host_port).await
+    finish_publication(&state, &headers, &id, &subdomain, attempted, host_port).await
 }
 
 async fn finish_publication(
@@ -117,12 +242,17 @@ async fn finish_publication(
     headers: &HeaderMap,
     id: &str,
     subdomain: &str,
+    attempted: &str,
     host_port: u16,
 ) -> Response {
-    match publish_route(state, subdomain, host_port).await {
+    match publish_route(state, id, subdomain, host_port).await {
         Ok(hostname) => {
             if let Err(error) = save_subdomain(state, id, subdomain).await {
-                return internal_error(error);
+                let notice = format!(
+                    "The route is ready, but saving publication failed: {error:#}. Retry to recover."
+                );
+                return publication_result(state, headers, id, Some(attempted), &notice, true)
+                    .await;
             }
             let healthy = public_health(&hostname).await;
             let notice = if healthy {
@@ -132,14 +262,16 @@ async fn finish_publication(
                     "Published https://{hostname}; public health verification is still pending."
                 )
             };
-            publication_result(state, headers, id, &notice).await
+            publication_result(state, headers, id, None, &notice, false).await
         }
         Err(error) => {
             publication_result(
                 state,
                 headers,
                 id,
+                Some(attempted),
                 &format!("Route publication failed: {error:#}"),
+                true,
             )
             .await
         }
@@ -150,9 +282,12 @@ async fn publication_result(
     state: &AppState,
     headers: &HeaderMap,
     id: &str,
+    attempted: Option<&str>,
     notice: &str,
+    is_error: bool,
 ) -> Response {
-    if !headers.contains_key("hx-request") {
+    let boosted = headers.contains_key("hx-request");
+    if !boosted && !is_error {
         return redirect_with_notice(&format!("/apps/{id}"), notice);
     }
     let app = match load_app(state, id).await {
@@ -160,17 +295,25 @@ async fn publication_result(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
     };
-    let (csrf_token, _) = super::page_csrf(state, headers);
+    let (csrf_token, cookies) = super::page_csrf(state, headers);
     let domain = apps_domain(state).await;
+    let status = if is_error {
+        StatusCode::UNPROCESSABLE_ENTITY
+    } else {
+        StatusCode::OK
+    };
     super::html_response(
-        StatusCode::OK,
+        status,
         super::templates::app_publication_notice(
             &app,
             &csrf_token,
             domain.as_deref(),
             Some(notice),
+            attempted,
+            is_error,
+            !boosted,
         ),
-        Vec::new(),
+        if boosted { Vec::new() } else { cookies },
     )
 }
 
@@ -183,23 +326,57 @@ async fn save_subdomain(state: &AppState, id: &str, subdomain: &str) -> anyhow::
     .await
 }
 
+async fn publication_settings(
+    state: &AppState,
+) -> anyhow::Result<crate::cloudflare::apps_route::CfSettings> {
+    with_catalog(state, |catalog| {
+        crate::cloudflare::apps_route::load_settings(catalog)
+    })
+    .await
+}
+
 async fn publish_route(
     state: &AppState,
+    id: &str,
     subdomain: &str,
     host_port: u16,
 ) -> anyhow::Result<String> {
-    let settings = with_catalog(state, |catalog| {
-        crate::cloudflare::apps_route::load_settings(catalog)
+    ensure_catalog_available(state, id, subdomain).await?;
+    let settings = publication_settings(state).await?;
+    crate::cloudflare::apps_route::publish_app_route_with(&settings, subdomain, host_port).await
+}
+
+async fn ensure_catalog_available(
+    state: &AppState,
+    id: &str,
+    subdomain: &str,
+) -> anyhow::Result<()> {
+    let owner = catalog_subdomain_owner(state, id, subdomain).await?;
+    anyhow::ensure!(
+        owner.is_none(),
+        "subdomain is already assigned to another application"
+    );
+    Ok(())
+}
+
+async fn catalog_subdomain_owner(
+    state: &AppState,
+    id: &str,
+    subdomain: &str,
+) -> anyhow::Result<Option<String>> {
+    let app_id = id.to_owned();
+    let wanted = subdomain.to_owned();
+    with_catalog(state, move |catalog| {
+        let owner = catalog.list_apps()?.into_iter().find(|app| {
+            app.id != app_id
+                && app
+                    .subdomain
+                    .as_deref()
+                    .is_some_and(|current| current.eq_ignore_ascii_case(&wanted))
+        });
+        Ok(owner.map(|app| app.name))
     })
-    .await?;
-    let client = crate::cloudflare::CloudflareClient::new(settings.api_token.clone())?;
-    let hostname = format!("{subdomain}.{}", settings.domain);
-    let existing = client
-        .find_dns_records(&settings.zone_id, &hostname)
-        .await?;
-    anyhow::ensure!(existing.is_empty(), "subdomain is already in use");
-    drop(client);
-    crate::cloudflare::apps_route::sync_app_route_with(&settings, subdomain, host_port).await
+    .await
 }
 
 async fn public_health(hostname: &str) -> bool {

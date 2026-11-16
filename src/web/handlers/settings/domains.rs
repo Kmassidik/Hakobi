@@ -6,7 +6,10 @@ use axum::{
 };
 use hakobi::catalog::Catalog;
 
-use super::super::{authenticated, internal_error, post_is_allowed, redirect_with_notice};
+use super::super::{
+    authenticated, internal_error, post_is_allowed, redirect_with_error, redirect_with_notice,
+    with_catalog,
+};
 use super::DomainForm;
 use crate::{
     cloudflare::{apps_route::CfSettings, CloudflareClient},
@@ -153,24 +156,73 @@ async fn delete_dns_records(
     Ok((managed_any, notice))
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct DomainDeleteForm {
+    csrf_token: String,
+    hostname: String,
+    confirm_name: String,
+}
+
+async fn assigned_app(
+    state: &AppState,
+    domain: &str,
+    hostname: &str,
+) -> anyhow::Result<Option<String>> {
+    let domain = domain.to_owned();
+    let hostname = hostname.to_owned();
+    with_catalog(state, move |catalog| {
+        let owner = catalog.list_apps()?.into_iter().find(|app| {
+            app.subdomain.as_ref().is_some_and(|subdomain| {
+                format!("{subdomain}.{domain}").eq_ignore_ascii_case(&hostname)
+            })
+        });
+        Ok(owner.map(|app| app.name))
+    })
+    .await
+}
+
+async fn deletion_error(
+    state: &AppState,
+    domain: &str,
+    form: &DomainDeleteForm,
+) -> anyhow::Result<Option<Response>> {
+    let hostname = form.hostname.trim().to_lowercase();
+    if form.confirm_name != hostname {
+        return Ok(Some(redirect_with_error(
+            "/settings",
+            "Type the exact hostname to confirm deletion; no DNS or ingress changes were made.",
+        )));
+    }
+    match assigned_app(state, domain, &hostname).await? {
+        Some(app) => Ok(Some(redirect_with_error(
+            "/settings",
+            &format!("{hostname} is assigned to app {app}; unpublish that app first."),
+        ))),
+        None => Ok(None),
+    }
+}
+
 /// POST /settings/cloudflare/domains/delete — remove record + ingress rule.
 pub(crate) async fn domain_delete(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Form(form): Form<DomainForm>,
+    Form(form): Form<DomainDeleteForm>,
 ) -> Response {
     let (settings, client) = match domain_client(&state, &headers, &form.csrf_token).await {
         Ok(pair) => pair,
         Err(response) => return *response,
     };
+    let hostname = form.hostname.trim().to_lowercase();
+    match deletion_error(&state, &settings.domain, &form).await {
+        Ok(Some(response)) => return response,
+        Ok(None) => {}
+        Err(error) => return internal_error(error),
+    }
     let tunnel_id = match settings.tunnel_id.parse() {
         Ok(id) => id,
         Err(_) => return StatusCode::BAD_REQUEST.into_response(),
     };
-    let records = match client
-        .find_dns_records(&settings.zone_id, &form.hostname.trim().to_lowercase())
-        .await
-    {
+    let records = match client.find_dns_records(&settings.zone_id, &hostname).await {
         Ok(records) => records,
         Err(error) => return internal_error(error),
     };
@@ -180,14 +232,10 @@ pub(crate) async fn domain_delete(
         Err(error) => return internal_error(error),
     };
     if !managed_any {
-        return redirect_with_notice("/settings", &notice);
+        return redirect_with_error("/settings", &notice);
     }
     if let Err(error) = client
-        .remove_ingress_route(
-            &settings.account_id,
-            tunnel_id,
-            &form.hostname.trim().to_lowercase(),
-        )
+        .remove_ingress_route(&settings.account_id, tunnel_id, &hostname)
         .await
     {
         return internal_error(error);

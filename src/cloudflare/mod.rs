@@ -98,6 +98,13 @@ struct ZoneResponse {
     name: String,
 }
 
+pub fn is_hakobi_record(record: &DnsRecord) -> bool {
+    record
+        .comment
+        .as_deref()
+        .is_some_and(|comment| comment.starts_with("Managed by Hakobi"))
+}
+
 impl CloudflareClient {
     pub fn new(api_token: String) -> Result<Self> {
         let client = Client::builder()
@@ -316,11 +323,7 @@ impl CloudflareClient {
     /// Deletes only records Hakobi created (comment-tagged). Returns false
     /// when the record is not Hakobi-managed.
     pub async fn delete_hakobi_record(&self, zone_id: &str, record: &DnsRecord) -> Result<bool> {
-        let managed = record
-            .comment
-            .as_deref()
-            .is_some_and(|comment| comment.starts_with("Managed by Hakobi"));
-        if !managed {
+        if !is_hakobi_record(record) {
             return Ok(false);
         }
         self.delete_dns_record(zone_id, &record.id).await?;

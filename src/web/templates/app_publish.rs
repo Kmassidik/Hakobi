@@ -35,14 +35,18 @@ pub fn app_status_body(app: &App, latest: Option<&Deployment>) -> Markup {
 }
 
 pub fn app_publication(app: &App, csrf_token: &str, domain: Option<&str>) -> Markup {
-    app_publication_notice(app, csrf_token, domain, None)
+    app_publication_notice(app, csrf_token, domain, None, None, false, false)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn app_publication_notice(
     app: &App,
     csrf_token: &str,
     domain: Option<&str>,
     notice: Option<&str>,
+    attempted: Option<&str>,
+    is_error: bool,
+    full_page: bool,
 ) -> Markup {
     let publication_url = format!("/apps/{}/publication", app.id);
     let trigger = if app.display_status() == "running" {
@@ -50,38 +54,75 @@ pub fn app_publication_notice(
     } else {
         "every 5s"
     };
-    html! {
+    let content = html! {
         div id="app-publication" hx-get=(publication_url) hx-trigger=(trigger) hx-swap="outerHTML" {
-            @if let Some(message) = notice {
-                p class="mt-4 text-sm font-semibold text-brand" role="status" { (message) }
-            }
-            @if let Some(domain) = domain {
-                @if app.display_status() == "running" {
-                    @if let Some(subdomain) = &app.subdomain {
-                        section class="mt-5 border-y border-line py-5" {
-                            p class="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted" { "Public application" }
-                            a class="mt-2 inline-block font-display text-2xl text-brand no-underline" href=(format!("https://{subdomain}.{domain}")) {
-                                (subdomain) "." (domain) " ↗"
-                            }
+            (publication_panel(app, csrf_token, domain, notice, attempted, is_error))
+        }
+    };
+    if full_page {
+        super::page(
+            "Publish application · Hakobi",
+            html! { main class="mx-auto w-[90%] max-w-2xl py-12" {
+                a class="text-sm font-semibold text-brand" href=(format!("/apps/{}", app.id)) { "← Back to application" }
+                h1 class="mb-4 mt-6 font-display text-4xl font-normal" { (app.name) }
+                (content)
+            } },
+        )
+    } else {
+        content
+    }
+}
+
+fn publication_panel(
+    app: &App,
+    csrf_token: &str,
+    domain: Option<&str>,
+    notice: Option<&str>,
+    attempted: Option<&str>,
+    is_error: bool,
+) -> Markup {
+    html! {
+        @if let Some(message) = notice {
+            p id="publication-message" class=(if is_error { "mt-4 text-sm font-semibold text-danger" } else { "mt-4 text-sm font-semibold text-brand" }) role=(if is_error { "alert" } else { "status" }) { (message) }
+        }
+        @if let Some(domain) = domain {
+            @if app.display_status() == "running" {
+                @if let Some(subdomain) = &app.subdomain {
+                    section class="mt-5 border-y border-line py-5" {
+                        p class="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted" { "Public application" }
+                        a class="mt-2 inline-block font-display text-2xl text-brand no-underline" href=(format!("https://{subdomain}.{domain}")) {
+                            (subdomain) "." (domain) " ↗"
                         }
-                    } @else {
-                        section class="mt-5 border-y border-line py-5" {
-                            h2 class="m-0 font-display text-2xl font-normal" { "Your app is running privately." }
-                            p class="mb-4 mt-2 text-sm text-muted" { "Choose a subdomain to route it through the tunnel and Hakobi proxy." }
-                            form method="post" action=(format!("/apps/{}/publish", app.id)) hx-post=(format!("/apps/{}/publish", app.id)) hx-target="#app-publication" hx-swap="outerHTML" class="flex flex-wrap items-end gap-3" {
-                                input type="hidden" name="csrf_token" value=(csrf_token);
-                                label class="grid gap-1.5 text-sm font-semibold" { "Subdomain"
-                                    span class="flex items-center gap-2" {
-                                        input name="subdomain" value=(default_subdomain(&app.name)) pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" maxlength="63" required class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm";
-                                        span class="text-sm font-normal text-muted" { "." (domain) }
-                                    }
-                                }
-                                button type="submit" class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Publish application" }
-                            }
-                        }
+                    }
+                } @else {
+                    section class="mt-5 border-y border-line py-5" {
+                        h2 class="m-0 font-display text-2xl font-normal" { "Your app is running privately." }
+                        p class="mb-4 mt-2 text-sm text-muted" { "Choose a subdomain to route it through the tunnel and Hakobi proxy." }
+                        (publish_form(app, csrf_token, domain, attempted))
                     }
                 }
             }
+        }
+    }
+}
+
+fn publish_form(app: &App, csrf_token: &str, domain: &str, attempted: Option<&str>) -> Markup {
+    let draft = attempted
+        .map(str::to_owned)
+        .unwrap_or_else(|| default_subdomain(&app.name));
+    let url = format!("/apps/{}/publish", app.id);
+    let availability_url = format!("/apps/{}/subdomain", app.id);
+    html! {
+        form method="post" action=(url.clone()) hx-post=(url) hx-target="#app-publication" hx-swap="outerHTML" data-subdomain-availability-form="" data-availability-url=(availability_url) class="flex flex-wrap items-end gap-3" {
+            input type="hidden" name="csrf_token" value=(csrf_token);
+            label class="grid gap-1.5 text-sm font-semibold" { "Subdomain"
+                span class="flex items-center gap-2" {
+                    input name="subdomain" value=(draft) pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" maxlength="63" required data-subdomain-input="" aria-describedby="publication-message subdomain-availability" class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm";
+                    span class="text-sm font-normal text-muted" { "." (domain) }
+                }
+            }
+            button type="submit" data-subdomain-submit="" class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Publish application" }
+            p id="subdomain-availability" data-subdomain-availability-status="" role="status" aria-live="polite" class="m-0 min-h-5 w-full text-sm text-muted" {}
         }
     }
 }

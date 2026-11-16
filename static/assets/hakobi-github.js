@@ -135,12 +135,6 @@
       opt.textContent = repo.full_name + (repo.private ? " (private)" : "");
       picker.reposSel.appendChild(opt);
     });
-    picker.reposSel.addEventListener("change", function () {
-      if (picker.reposSel.value) {
-        suggestName(picker, picker.reposSel.value);
-        loadBranches(picker, picker.reposSel.value);
-      }
-    });
   }
 
   function loadRepositories(picker) {
@@ -170,39 +164,58 @@
       .catch(function () { setStatus(picker, "Could not reach GitHub."); });
   }
 
-  function init() {
-    var grid = document.querySelector("[data-gh-picker]");
-    if (!grid) return;
+  function preparePicker(grid) {
+    if (grid.dataset.ghPrepared) return;
+    grid.dataset.ghPrepared = "true";
+    var form = grid.closest("form") || document;
     var picker = {
       grid: grid,
       reposSel: grid.querySelector("[data-gh-repos]"),
       branchSel: grid.querySelector("[data-gh-branches]"),
       appsBox: grid.querySelector("[data-gh-apps]"),
       status: document.querySelector("[data-gh-status]"),
-      envInput: document.querySelector("[name=env_json]"),
-      envStatus: document.querySelector("[data-gh-env-status]"),
+      envInput: form.querySelector("[name=env_json]"),
+      envStatus: form.querySelector("[data-gh-env-status]"),
       envDirty: false,
       envRequest: 0,
-      nameInput: document.querySelector("[name=name]"),
+      nameInput: form.querySelector("[name=name]"),
       nameDirty: false,
       portDirty: false,
     };
     if (!picker.reposSel) return;
+    picker.reposSel.addEventListener("change", function () {
+      if (picker.reposSel.value) {
+        suggestName(picker, picker.reposSel.value);
+        loadBranches(picker, picker.reposSel.value);
+      }
+    });
     if (picker.nameInput) {
       picker.nameDirty = !!picker.nameInput.value;
       picker.nameInput.addEventListener("input", function () { picker.nameDirty = true; });
     }
-    picker.envInput.addEventListener("input", function () { picker.envDirty = true; });
-    var portInput = document.querySelector("[name=container_port]");
+    if (picker.envInput) {
+      picker.envInput.addEventListener("input", function () { picker.envDirty = true; });
+    }
+    var portInput = form.querySelector("[name=container_port]");
     if (portInput) {
       portInput.addEventListener("input", function () { picker.portDirty = true; });
     }
     loadRepositories(picker);
   }
 
+  function init(root) {
+    var scope = root || document;
+    if (scope.matches && scope.matches("[data-gh-picker]")) preparePicker(scope);
+    scope.querySelectorAll("[data-gh-picker]").forEach(preparePicker);
+  }
+
+  document.addEventListener("htmx:afterSwap", function (event) {
+    init(event.target);
+  });
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+    document.addEventListener("DOMContentLoaded", function () { init(document); });
   } else {
-    init();
+    init(document);
   }
 }

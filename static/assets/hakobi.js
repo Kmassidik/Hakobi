@@ -170,12 +170,13 @@
     });
   });
 
-  const requestedDockerTab = new URLSearchParams(window.location.search).get("tab");
-  if (requestedDockerTab) {
-    const requestedButton = Array.from(document.querySelectorAll("[data-docker-tab]"))
-      .find((button) => button.getAttribute("data-docker-tab") === requestedDockerTab);
-    if (requestedButton) requestedButton.click();
-  }
+  const syncDockerTab = (url) => {
+    const requested = url.searchParams.get("tab");
+    if (!requested) return;
+    const button = Array.from(document.querySelectorAll("[data-docker-tab]"))
+      .find((candidate) => candidate.getAttribute("data-docker-tab") === requested);
+    if (button) button.click();
+  };
 
   const updateStamp = () => {
     document.querySelectorAll("[data-updated]").forEach((element) => {
@@ -187,8 +188,15 @@
       });
     });
   };
-  document.addEventListener("htmx:afterSwap", updateStamp);
+  document.addEventListener("htmx:afterSwap", (event) => {
+    updateStamp();
+    const target = event.detail.target || event.target;
+    if (!(target instanceof Element) || !target.matches("main")) return;
+    const responseUrl = event.detail.xhr && event.detail.xhr.responseURL;
+    syncDockerTab(new URL(responseUrl || window.location.href, window.location.href));
+  });
   updateStamp();
+  syncDockerTab(new URL(window.location.href));
 
   const installWatch = document.querySelector('[data-install-watch="true"]');
   if (installWatch) {

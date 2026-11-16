@@ -2,7 +2,11 @@
 
 use maud::{html, Markup, PreEscaped};
 
-use super::{brand, page, sidebar, CONTENT_WIDTH, EYEBROW, FIELD};
+use super::{
+    brand,
+    containers::{container_action_allowed, is_control_plane_container},
+    page, sidebar, CONTENT_WIDTH, EYEBROW, FIELD,
+};
 use hakobi::providers::{DockerContainerUsage, DockerInspect, DockerLogs};
 
 /// How the container detail page receives its data.
@@ -37,19 +41,7 @@ pub fn container_detail(
         html! {
             div class="min-h-screen lg:pl-60" {
                 (sidebar("containers", base_url, username, csrf_token))
-                header class="lg:hidden border-b border-line bg-paper/95" {
-                    div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
-                        (brand("Hakobi dashboard"))
-                        div class="flex items-center gap-4" {
-                            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/containers" { "Containers" }
-                            span class="text-sm text-muted max-sm:hidden" { (username) }
-                            form method="post" action="/logout" class="m-0" {
-                                input type="hidden" name="csrf_token" value=(csrf_token);
-                                button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink" type="submit" { "Sign out" }
-                            }
-                        }
-                    }
-                }
+                (container_detail_mobile_header(username, csrf_token))
                 main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
                     a class="text-[0.75rem] font-semibold text-muted no-underline hover:text-ink" href="/containers" { "← All containers" }
                     @if let Some(data) = detail {
@@ -58,11 +50,13 @@ pub fn container_detail(
                         @if display_name != name {
                             p class="mb-0 mt-2 break-all font-mono text-xs text-muted" { "Docker name: " (name) }
                         }
-                        (detail_header_actions(&data.provider_id, name, csrf_token))
+                        (detail_header_actions(&data.provider_id, name, &data.detail.state, csrf_token))
                         (detail_metadata(&data.detail))
                         (stats_slot(&data.provider_id, name, stats))
                         (logs_slot(&data.provider_id, name, logs))
-                        (detail_delete_dialog(csrf_token, &data.provider_id, name))
+                        @if !is_control_plane_container(name) {
+                            (detail_delete_dialog(csrf_token, &data.provider_id, name))
+                        }
                     } @else {
                         (container_detail_error(display_name))
                     }
@@ -70,6 +64,24 @@ pub fn container_detail(
             }
         },
     )
+}
+
+fn container_detail_mobile_header(username: &str, csrf_token: &str) -> Markup {
+    html! {
+        header class="lg:hidden border-b border-line bg-paper/95" {
+            div class=(format!("{CONTENT_WIDTH} flex h-[5.5rem] items-center justify-between gap-4")) {
+                (brand("Hakobi dashboard"))
+                div class="flex items-center gap-4" {
+                    a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/containers" { "Containers" }
+                    span class="text-sm text-muted max-sm:hidden" { (username) }
+                    form method="post" action="/logout" class="m-0" {
+                        input type="hidden" name="csrf_token" value=(csrf_token);
+                        button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink" type="submit" { "Sign out" }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn container_detail_error(display_name: &str) -> Markup {
@@ -88,21 +100,30 @@ fn detail_error_text() -> &'static str {
 }
 
 /// Action bar: lifecycle buttons plus the delete confirmation trigger.
-fn detail_header_actions(provider_id: &str, name: &str, csrf_token: &str) -> Markup {
+fn detail_header_actions(provider_id: &str, name: &str, state: &str, csrf_token: &str) -> Markup {
+    if is_control_plane_container(name) {
+        return html! { p class="mt-5 text-sm text-muted" { "Control plane · protected from workbench actions" } };
+    }
     let base = format!("/containers/{provider_id}/{name}");
     html! {
         div class="mt-5 flex flex-wrap items-center gap-2" {
-            form method="post" action=(format!("{base}/start")) class="m-0" {
-                input type="hidden" name="csrf_token" value=(csrf_token);
-                button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink" type="submit" { "Start" }
+            @if container_action_allowed("start", state) {
+                form method="post" action=(format!("{base}/start")) class="m-0" {
+                    input type="hidden" name="csrf_token" value=(csrf_token);
+                    button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink" type="submit" { "Start" }
+                }
             }
-            form method="post" action=(format!("{base}/stop")) class="m-0" {
-                input type="hidden" name="csrf_token" value=(csrf_token);
-                button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink" type="submit" { "Stop" }
+            @if container_action_allowed("stop", state) {
+                form method="post" action=(format!("{base}/stop")) class="m-0" {
+                    input type="hidden" name="csrf_token" value=(csrf_token);
+                    button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink" type="submit" { "Stop" }
+                }
             }
-            form method="post" action=(format!("{base}/restart")) class="m-0" {
-                input type="hidden" name="csrf_token" value=(csrf_token);
-                button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink" type="submit" { "Restart" }
+            @if container_action_allowed("restart", state) {
+                form method="post" action=(format!("{base}/restart")) class="m-0" {
+                    input type="hidden" name="csrf_token" value=(csrf_token);
+                    button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-ink" type="submit" { "Restart" }
+                }
             }
             button type="button" class="rounded-lg border border-danger/40 bg-transparent px-3.5 py-2 text-[0.78rem] font-semibold text-danger" data-dialog-open="delete-container" data-delete-action=(format!("{base}/delete")) data-delete-name=(name) {
                 "Delete…"
@@ -388,6 +409,25 @@ fn detail_delete_dialog(csrf_token: &str, provider_id: &str, name: &str) -> Mark
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lifecycle_actions_follow_state_and_protect_control_plane() {
+        let running = detail_header_actions("local", "demo-api", "running", "csrf").into_string();
+        assert!(!running.contains("/start"));
+        assert!(running.contains("/stop"));
+        assert!(running.contains("/restart"));
+
+        let exited = detail_header_actions("local", "demo-api", "exited", "csrf").into_string();
+        assert!(exited.contains("/start"));
+        assert!(!exited.contains("/stop"));
+        assert!(!exited.contains("/restart"));
+
+        let protected =
+            detail_header_actions("local", "hakobi-z9pe", "running", "csrf").into_string();
+        assert!(!protected.contains("<form"));
+        assert!(!protected.contains("Delete"));
+        assert!(protected.contains("protected"));
+    }
 
     #[test]
     fn log_lines_are_escaped_and_newline_joined() {

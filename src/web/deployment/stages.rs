@@ -14,6 +14,8 @@ pub(super) const STAGE_FAILED: &str = "failed";
 
 /// Everything the build stage needs, resolved in one catalog pass.
 pub(super) struct BuildContext {
+    /// Frozen deployment target; edits cannot retarget an active pipeline.
+    pub deploy_endpoint: String,
     pub build_type: String,
     pub git_url: String,
     pub branch: String,
@@ -54,7 +56,7 @@ pub(super) async fn record_build_output(
     let deployment_id = deployment_id.to_owned();
     let output = output.to_owned();
     run_catalog_op(path, move |catalog| {
-        catalog.update_deployment_status(&deployment_id, STAGE_BUILDING, Some(&output))?;
+        catalog.advance_deployment_status(&deployment_id, STAGE_BUILDING, Some(&output))?;
         Ok(())
     })
 }

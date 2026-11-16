@@ -6,8 +6,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use super::{internal_error, post_is_allowed, redirect_with_notice, AppState};
+use super::{
+    internal_error, post_is_allowed, redirect_with_error, redirect_with_notice, truncate, AppState,
+};
 use crate::web::handlers::containers::enabled_docker_provider;
+use hakobi::providers::{validate_container_name, validate_image_reference};
 
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct ResourceForm {
@@ -30,6 +33,24 @@ enum ResourceAction {
 impl ResourceAction {
     fn is_create(self) -> bool {
         matches!(self, Self::NetworkCreate | Self::VolumeCreate)
+    }
+
+    fn tab(self) -> &'static str {
+        match self {
+            Self::ImageDelete => "images",
+            Self::NetworkCreate | Self::NetworkDelete => "networks",
+            Self::VolumeCreate | Self::VolumeDelete => "volumes",
+        }
+    }
+
+    fn operation(self) -> &'static str {
+        match self {
+            Self::ImageDelete => "remove image",
+            Self::NetworkCreate => "create network",
+            Self::NetworkDelete => "remove network",
+            Self::VolumeCreate => "create volume",
+            Self::VolumeDelete => "remove volume",
+        }
     }
 
     fn notice(self, name: &str) -> String {
@@ -95,7 +116,9 @@ async fn perform(
     if !post_is_allowed(&state, &headers, &form.csrf_token) {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if !action.is_create() && form.name != form.confirm_name {
+    let base = format!("/containers?tab={}", action.tab());
+    let name = form.name.trim();
+    if !action.is_create() && name != form.confirm_name {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let provider = match enabled_docker_provider(&state, &form.provider_id).await {
@@ -103,17 +126,23 @@ async fn perform(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
     };
-    let name = form.name.trim();
-    let result = execute(&state, &provider.endpoint, name, action).await;
-    if let Err(error) = result {
-        return internal_error(error);
+    if let Err(error) = validate_name(name, action) {
+        return redirect_with_error(&base, &format!("Invalid Docker resource name: {error}"));
     }
-    let tab = match action {
-        ResourceAction::ImageDelete => "images",
-        ResourceAction::NetworkCreate | ResourceAction::NetworkDelete => "networks",
-        ResourceAction::VolumeCreate | ResourceAction::VolumeDelete => "volumes",
-    };
-    redirect_with_notice(&format!("/containers?tab={tab}"), &action.notice(name))
+    if let Err(error) = execute(&state, &provider.endpoint, name, action).await {
+        tracing::warn!(error = %error, "Docker resource action failed");
+        let detail = truncate(&error.to_string(), 500);
+        let message = format!("Could not {} {name}: {detail}", action.operation());
+        return redirect_with_error(&base, &message);
+    }
+    redirect_with_notice(&base, &action.notice(name))
+}
+
+fn validate_name(name: &str, action: ResourceAction) -> anyhow::Result<()> {
+    match action {
+        ResourceAction::ImageDelete => validate_image_reference(name),
+        _ => validate_container_name(name),
+    }
 }
 
 async fn execute(

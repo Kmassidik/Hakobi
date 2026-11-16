@@ -1,6 +1,6 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
-use hakobi::host_agent::{AgentEndpoint, AgentErrorBody};
+use hakobi::host_agent::{AgentEndpoint, AgentErrorBody, InstallJob};
 use hakobi::install::Readiness;
 
 #[derive(Clone)]
@@ -32,15 +32,44 @@ impl HostAgent {
             .timeout(Duration::from_secs(5))
             .send()
             .await?;
-        let status = response.status();
-        if !status.is_success() {
-            let message = response
-                .json::<AgentErrorBody>()
-                .await
-                .map(|error| error.error)
-                .unwrap_or_else(|_| format!("host agent returned {status}"));
-            anyhow::bail!("{message}");
-        }
+        let response = agent_response(response).await?;
         Ok(response.json::<Readiness>().await?)
     }
+
+    pub(super) async fn install(&self, tool: &str) -> anyhow::Result<()> {
+        let response = self
+            .client
+            .post(format!("{}/v1/install/{tool}", self.endpoint.url()))
+            .bearer_auth(self.endpoint.token())
+            .timeout(Duration::from_secs(15))
+            .send()
+            .await?;
+        agent_response(response).await?;
+        Ok(())
+    }
+
+    pub(super) async fn install_status(&self) -> anyhow::Result<BTreeMap<String, InstallJob>> {
+        let response = self
+            .client
+            .get(format!("{}/v1/install/status", self.endpoint.url()))
+            .bearer_auth(self.endpoint.token())
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await?;
+        let response = agent_response(response).await?;
+        Ok(response.json::<BTreeMap<String, InstallJob>>().await?)
+    }
+}
+
+async fn agent_response(response: reqwest::Response) -> anyhow::Result<reqwest::Response> {
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let message = response
+        .json::<AgentErrorBody>()
+        .await
+        .map(|error| error.error)
+        .unwrap_or_else(|_| format!("host agent returned {status}"));
+    anyhow::bail!("{message}")
 }

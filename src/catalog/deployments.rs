@@ -142,8 +142,8 @@ impl Catalog {
 
     /// Updates a deployment's status and records its output.
     ///
-    /// Setting a terminal status (`running`, `failed`, `rolled_back`) also
-    /// stamps `completed_at`.
+    /// Setting a terminal status (`running`, `failed`, `cancelled`,
+    /// `rolled_back`) also stamps `completed_at`.
     pub fn update_deployment_status(
         &mut self,
         id: &str,
@@ -151,7 +151,7 @@ impl Catalog {
         output: Option<&str>,
     ) -> Result<()> {
         validate_deployment_status(status)?;
-        let completed_now = matches!(status, "running" | "failed" | "rolled_back");
+        let completed_now = matches!(status, "running" | "failed" | "cancelled" | "rolled_back");
         let updated = self.connection.execute(
             "UPDATE deployments \
              SET status = ?2, \
@@ -168,7 +168,30 @@ impl Catalog {
         Ok(())
     }
 
-    /// Lists deployments for an app, newest version first.
+    /// Advances an active deployment without reviving a cancelled or
+    /// superseded record. Returns false when another action already finished
+    /// it, allowing the executor to stop before its next external side effect.
+    pub fn advance_deployment_status(
+        &mut self,
+        id: &str,
+        status: &str,
+        output: Option<&str>,
+    ) -> Result<bool> {
+        validate_deployment_status(status)?;
+        let completed_now = matches!(status, "running" | "failed" | "cancelled" | "rolled_back");
+        let updated = self.connection.execute(
+            "UPDATE deployments \
+             SET status = ?2, \
+                 build_output = COALESCE(?3, build_output), \
+                 deploy_output = COALESCE(?3, deploy_output), \
+                 completed_at = CASE WHEN ?4 THEN \
+                     strftime('%Y-%m-%dT%H:%M:%fZ', 'now') ELSE completed_at END \
+             WHERE id = ?1 AND status IN ('pending', 'building', 'deploying')",
+            params![id, status, output, completed_now],
+        )?;
+        Ok(updated != 0)
+    }
+
     /// Cancels every non-terminal deployment for one app
     /// (newest push wins; the superseded builds stop mattering).
     pub fn cancel_in_flight_deployments(&mut self, app_id: &str) -> Result<u32> {
@@ -309,5 +332,47 @@ impl Catalog {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancelled_deployment_cannot_advance() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut catalog = Catalog::open(directory.path().join("catalog.sqlite3")).unwrap();
+        let host = catalog
+            .create_host_agent("host", "https://host.example.com", "tok_host_01")
+            .unwrap();
+        let app = catalog
+            .create_app(
+                "web",
+                &host,
+                "dockerfile",
+                Some("acme/web"),
+                Some("main"),
+                None,
+                Some("Dockerfile"),
+                false,
+                Some(8080),
+                None,
+                None,
+            )
+            .unwrap();
+        let deployment = catalog
+            .create_deployment(&app, "manual", None, None)
+            .unwrap();
+
+        assert!(catalog
+            .advance_deployment_status(&deployment, "cancelled", None)
+            .unwrap());
+        assert!(!catalog
+            .advance_deployment_status(&deployment, "running", None)
+            .unwrap());
+        let record = catalog.get_deployment(&deployment).unwrap().unwrap();
+        assert_eq!(record.status, "cancelled");
+        assert!(record.completed_at.is_some());
     }
 }

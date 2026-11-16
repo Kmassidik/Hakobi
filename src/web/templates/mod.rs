@@ -19,6 +19,7 @@ pub(crate) use container_detail::{
     container_detail, container_logs_error, container_logs_section, container_stats_error,
     container_stats_section, ContainerDetailData,
 };
+pub(crate) use containers::{container_action_allowed, is_control_plane_container};
 pub use containers::{container_form, containers, ContainerFormValues};
 pub(crate) use dashboard::mobile_header;
 pub use dashboard::{
@@ -26,7 +27,7 @@ pub use dashboard::{
 };
 pub(crate) use docker_resources::{docker_resource_panels, docker_tabs, SnapshotResults};
 pub(crate) use pagination::pagination_controls;
-pub use readiness::readiness_section;
+pub use readiness::{install_status_results, readiness_section};
 
 use maud::{html, Markup, DOCTYPE};
 
@@ -59,6 +60,7 @@ pub(crate) fn page(title: &str, content: Markup) -> Markup {
                 script src=(super::handlers::asset_url("hakobi-github.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-app-form.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-actions.js")) defer {}
+                script src=(super::handlers::asset_url("hakobi-publish.js")) defer {}
             }
             body class=(PAGE_BODY) {
                 (content)
