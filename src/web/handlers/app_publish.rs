@@ -96,7 +96,7 @@ pub(crate) async fn app_publish(
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
     };
-    let Some(host_port) = app.host_port.filter(|_| app.status == "running") else {
+    let Some(host_port) = app.host_port.filter(|_| app.display_status() == "running") else {
         return publication_result(
             &state,
             &headers,
