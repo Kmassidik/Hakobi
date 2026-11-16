@@ -123,6 +123,7 @@
   }
 
   function populateRepositories(picker, repos) {
+    var current = picker.reposSel.value;
     picker.reposSel.innerHTML = "";
     var placeholder = document.createElement("option");
     placeholder.value = "";
@@ -135,6 +136,9 @@
       opt.textContent = repo.full_name + (repo.private ? " (private)" : "");
       picker.reposSel.appendChild(opt);
     });
+    if (current && repos.some(function (repo) { return repo.full_name === current; })) {
+      picker.reposSel.value = current;
+    }
   }
 
   function loadRepositories(picker) {
