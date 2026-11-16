@@ -98,10 +98,11 @@ fn app_form_fields(
 ) -> Markup {
     let guided = action == "/apps";
     html! {
-        form method="post" action=(action) data-app-stepper[guided] class="mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-4 sm:p-6" {
+        form method="post" action=(action) data-app-stepper[guided] class=(if guided { "mt-10 grid w-full max-w-[52rem] grid-cols-1 gap-8" } else { "mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" }) {
             input type="hidden" name="csrf_token" value=(csrf_token);
             @if guided { (stepper_navigation()) }
             section data-app-step="1" class="grid grid-cols-1 gap-5" {
+                (step_heading("Choose where your application comes from.", "Connect a repository and select the buildable app to deploy."))
                 (github_source_fields(values))
             }
             section data-app-step="2" class="grid grid-cols-1 gap-5" {
@@ -121,9 +122,9 @@ fn app_form_fields(
             }
             @if guided {
                 p data-step-error role="alert" class="m-0 text-sm text-danger" {}
-                div hidden class="flex items-center justify-between gap-3 border-t border-line pt-4" data-step-navigation {
-                    button type="button" data-step-back class="rounded-lg border border-line bg-transparent px-4 py-2.5 text-sm font-semibold text-ink" { "Back" }
-                    button type="button" data-step-next class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Continue" }
+                div hidden class="flex items-center justify-between gap-3" data-step-navigation {
+                    button type="button" data-step-back class="bg-transparent px-0 py-2 text-sm font-semibold text-muted hover:text-ink" { "← Back" }
+                    button type="button" data-step-next class="bg-transparent px-0 py-2 text-sm font-bold text-brand-bright hover:text-ink" { "Continue →" }
                 }
             }
         }
@@ -132,11 +133,11 @@ fn app_form_fields(
 
 fn stepper_navigation() -> Markup {
     html! {
-        ol hidden data-step-progress class="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4" aria-label="App creation progress" {
+        ol hidden data-step-progress class="m-0 flex list-none overflow-x-auto border-b border-line p-0" aria-label="App creation progress" {
             @for (number, label) in [(1, "Source"), (2, "Identity"), (3, "Build"), (4, "Review")] {
-                li {
-                    button type="button" data-step-target=(number) class="w-full rounded-lg border border-line bg-transparent px-2 py-2.5 text-xs font-semibold text-muted" {
-                        span class="mr-1.5 text-brand-bright" { (number) }
+                li class="min-w-0 flex-1" {
+                    button type="button" data-step-target=(number) class="w-full whitespace-nowrap border-b-2 border-transparent px-1 pb-3 pt-0 text-left text-sm font-semibold text-muted transition-colors" {
+                        span class="mr-2 font-mono text-xs font-normal" { (format!("{number:02}")) }
                         (label)
                     }
                 }
@@ -156,13 +157,9 @@ fn step_heading(title: &str, description: &str) -> Markup {
 
 fn github_source_fields(values: &AppFormValues) -> Markup {
     html! {
-        p class=(format!("{EYEBROW} mb-1 mt-0 text-brand-bright")) { "GitHub source" }
-        p class="m-0 text-sm leading-relaxed text-muted" {
-            "Bind this app to a repository. On push, Hakobi rebuilds and redeploys automatically."
-        }
-        div id="gh-source-picker" data-gh-picker class="mt-4 grid grid-cols-1 gap-4" {
+        div id="gh-source-picker" data-gh-picker class="grid grid-cols-1 gap-5" {
             label class="grid gap-1.5" {
-                span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Repository" }
+                span class="text-sm font-semibold text-ink" { "Repository" }
                 select name="github_repo" data-gh-repos class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
                     option value="" { "Loading repositories…" }
                     @if let Some(current) = Some(values.github_repo.clone()).filter(|value| !value.is_empty()) {
@@ -171,7 +168,7 @@ fn github_source_fields(values: &AppFormValues) -> Markup {
                 }
             }
             label class="grid gap-1.5" {
-                span class="text-[0.7rem] font-bold uppercase tracking-[0.08em] text-[#86868b]" { "Branch" }
+                span class="text-sm font-semibold text-ink" { "Branch" }
                 select name="github_branch" data-gh-branches class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
                     @if let Some(current) = Some(values.github_branch.clone()).filter(|value| !value.is_empty()) {
                         option value=(current) selected { (current) }
@@ -251,7 +248,7 @@ fn build_settings_fields(values: &AppFormValues) -> Markup {
 
 fn deployment_policy_field(values: &AppFormValues) -> Markup {
     html! {
-        label class="flex items-center gap-3 rounded-lg border border-line px-4 py-3 text-sm font-semibold" {
+        label class="flex items-center gap-3 py-2 text-sm font-semibold" {
             input name="github_auto_deploy" type="checkbox" value="1" checked[values.github_auto_deploy] class="size-4";
             span { "Automatically deploy when the tracked branch changes" }
         }
@@ -260,7 +257,7 @@ fn deployment_policy_field(values: &AppFormValues) -> Markup {
 
 fn review_summary() -> Markup {
     html! {
-        div class="rounded-lg border border-line bg-paper/60 p-4" {
+        div class="border-y border-line py-5" {
             h3 class="m-0 text-sm font-bold" { "Review" }
             dl class="mb-0 mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs" data-app-review {
                 dt class="text-muted" { "Repository" } dd class="m-0 break-all font-mono" data-review="repo" {}

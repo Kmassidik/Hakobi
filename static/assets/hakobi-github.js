@@ -48,7 +48,7 @@
   function renderApps(picker, apps) {
     apps.forEach(function (app, i) {
       var label = document.createElement("label");
-      label.className = "flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm";
+      label.className = "flex items-center gap-3 border-b border-line px-1 py-2.5 text-sm last:border-b-0";
       var input = document.createElement("input");
       input.type = "radio";
       input.name = "github_app_path";
