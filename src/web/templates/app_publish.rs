@@ -14,12 +14,7 @@ pub(super) fn app_status_class(status: &str) -> &'static str {
 }
 
 /// Status strip shared by the detail page and the five-second HTMX partial.
-pub fn app_status_body(
-    app: &App,
-    latest: Option<&Deployment>,
-    csrf_token: &str,
-    apps_domain: Option<&str>,
-) -> Markup {
+pub fn app_status_body(app: &App, latest: Option<&Deployment>) -> Markup {
     html! {
         section id="app-status" hx-get=(format!("/apps/{}/status", app.id)) hx-trigger="every 5s" hx-swap="outerHTML" {
             div class="mt-6 flex flex-wrap items-center gap-3 rounded-[0.85rem] border border-line bg-surface/45 px-5 py-4" {
@@ -35,7 +30,6 @@ pub fn app_status_body(
                     None => span class="text-sm text-muted" { "No deployments yet." },
                 }
             }
-            (app_publication(app, csrf_token, apps_domain))
         }
     }
 }
@@ -50,8 +44,14 @@ pub fn app_publication_notice(
     domain: Option<&str>,
     notice: Option<&str>,
 ) -> Markup {
+    let publication_url = format!("/apps/{}/publication", app.id);
+    let trigger = if app.display_status() == "running" {
+        "none"
+    } else {
+        "every 5s"
+    };
     html! {
-        div id="app-publication" {
+        div id="app-publication" hx-get=(publication_url) hx-trigger=(trigger) hx-swap="outerHTML" {
             @if let Some(message) = notice {
                 p class="mt-4 text-sm font-semibold text-brand" role="status" { (message) }
             }

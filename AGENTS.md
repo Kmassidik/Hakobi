@@ -11,6 +11,24 @@ GitHub App registration and installation are separate states. Push-to-build,
 manual deploy, rollback, app deletion, per-app subdomains, DNS/ingress cleanup,
 and guarded domain CRUD must remain working. Use parameterized SQL only.
 
+## DOM interaction contract
+
+- Every mutation must expose idle, pending, success, and error states. Disable
+  the active submitter, set `aria-busy`, prevent duplicate submissions, and
+  restore the original label and disabled state after completion.
+- Same-page actions use boosted SSR/HTMX fragments rather than full browser
+  reloads. Preserve normal POST/CSRF behavior without JavaScript. Full navigation
+  is reserved for authentication, external OAuth, and explicit page navigation.
+- Use the shared action behavior in `static/assets/hakobi-actions.js`; do not
+  invent per-button loading or notification implementations.
+- Use safe text-based toast/status feedback for action results. Never use
+  `alert()`, raw JSON error pages, or silent failures for user-facing actions.
+- Polling fragments must not contain editable forms or replace focused input.
+  Stop polling once the actionable state is reached.
+- Verify mouse and keyboard submission, double-click prevention, pending state,
+  success, server validation, network/server errors, and browser back behavior
+  in a real production browser.
+
 ## Runtime invariants
 
 - Production console: `https://console.glicc.id`, loopback port 3000.

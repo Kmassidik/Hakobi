@@ -193,7 +193,10 @@
 
   const installWatch = document.querySelector('[data-install-watch="true"]');
   if (installWatch) {
-    window.setTimeout(() => window.location.reload(), 4000);
+    window.setTimeout(() => {
+      const readiness = document.getElementById("overview-readiness");
+      if (readiness && window.htmx) window.htmx.trigger(readiness, "refresh");
+    }, 4000);
   }
 
   const passwordToggle = document.querySelector("[data-password-toggle]");

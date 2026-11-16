@@ -21,7 +21,7 @@ pub(crate) use settings::{
 };
 
 pub(crate) use app_deploy::{app_deploy, app_rollback};
-pub(crate) use app_publish::{app_publish, app_status_partial};
+pub(crate) use app_publish::{app_publication_partial, app_publish, app_status_partial};
 pub(crate) use app_runtime::{app_runtime_action, app_usage};
 pub(crate) use apps::{
     app_create, app_delete, app_deployments, app_detail, app_edit_page, app_edit_submit, app_list,
@@ -221,6 +221,7 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
         "assets/hakobi-metrics.js",
         "assets/hakobi-github.js",
         "assets/hakobi-app-form.js",
+        "assets/hakobi-actions.js",
         "assets/htmx.min.js",
         "assets/vendor/fontawesome/css/all.min.css",
         "assets/vendor/fontawesome/webfonts/fa-solid-900.woff2",

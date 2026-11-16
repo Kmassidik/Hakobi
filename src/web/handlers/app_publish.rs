@@ -34,16 +34,31 @@ pub(crate) async fn app_status_partial(
         Ok(latest) => latest,
         Err(error) => return internal_error(error),
     };
-    let (csrf_token, _) = super::page_csrf(&state, &headers);
-    let apps_domain = apps_domain(&state).await;
     super::html_response(
         StatusCode::OK,
-        super::templates::app_status_body(
-            &app,
-            latest.as_ref(),
-            &csrf_token,
-            apps_domain.as_deref(),
-        ),
+        super::templates::app_status_body(&app, latest.as_ref()),
+        Vec::new(),
+    )
+}
+
+pub(crate) async fn app_publication_partial(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return super::partials::partial_unauthorized();
+    }
+    let app = match load_app(&state, &id).await {
+        Ok(Some(app)) => app,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error(error),
+    };
+    let (csrf_token, _) = super::page_csrf(&state, &headers);
+    let domain = apps_domain(&state).await;
+    super::html_response(
+        StatusCode::OK,
+        super::templates::app_publication_notice(&app, &csrf_token, domain.as_deref(), None),
         Vec::new(),
     )
 }

@@ -208,7 +208,8 @@ fn app_detail_main(
                 }
             }
             (super::app_form::delete_app_dialog(&app.id, csrf_token))
-            (super::app_publish::app_status_body(app, latest, csrf_token, apps_domain))
+            (super::app_publish::app_status_body(app, latest))
+            (super::app_publish::app_publication(app, csrf_token, apps_domain))
             (app_detail_cards(base_url, csrf_token, app, previous))
             (super::app_usage_section(app))
             section id="app-deployments" class="mt-10" {
