@@ -7,7 +7,7 @@ use hakobi::catalog::App;
 pub(crate) fn app_runtime_card(app: &App, csrf_token: &str) -> Markup {
     let status = app.display_status();
     html! {
-        article class="rounded-[0.85rem] border border-line bg-surface/45 p-5" {
+        article id="app-runtime" hx-get=(format!("/apps/{}/runtime", app.id)) hx-trigger="every 5s" hx-swap="outerHTML" class="rounded-[0.85rem] border border-line bg-surface/45 p-5" {
             h2 class="m-0 mb-3 text-[0.95rem] font-bold" { "Runtime" }
             p class="m-0 mb-3 text-sm text-muted" { "Container state: " span class="font-semibold text-ink" { (status) } }
             div class="flex flex-wrap gap-2" {

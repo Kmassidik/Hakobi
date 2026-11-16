@@ -56,6 +56,27 @@ impl RuntimeAction {
     }
 }
 
+pub(crate) async fn app_runtime_partial(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Response {
+    if !super::authenticated(&state, &headers).await {
+        return super::partials::partial_unauthorized();
+    }
+    let app = match super::app_deploy::load_app(&state, &id).await {
+        Ok(Some(app)) => app,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error(error),
+    };
+    let (csrf_token, _) = super::page_csrf(&state, &headers);
+    super::html_response(
+        StatusCode::OK,
+        super::templates::app_runtime_card(&app, &csrf_token),
+        Vec::new(),
+    )
+}
+
 pub(crate) async fn app_runtime_action(
     State(state): State<AppState>,
     headers: HeaderMap,

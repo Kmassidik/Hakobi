@@ -22,7 +22,7 @@ pub(crate) use settings::{
 
 pub(crate) use app_deploy::{app_deploy, app_rollback};
 pub(crate) use app_publish::{app_publication_partial, app_publish, app_status_partial};
-pub(crate) use app_runtime::{app_runtime_action, app_usage};
+pub(crate) use app_runtime::{app_runtime_action, app_runtime_partial, app_usage};
 pub(crate) use apps::{
     app_create, app_delete, app_deployments, app_detail, app_edit_page, app_edit_submit, app_list,
     app_logs, app_new,

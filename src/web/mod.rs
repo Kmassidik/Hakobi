@@ -274,6 +274,7 @@ fn app_routes() -> Router<AppState> {
             get(handlers::app_publication_partial),
         )
         .route("/apps/{id}/usage", get(handlers::app_usage))
+        .route("/apps/{id}/runtime", get(handlers::app_runtime_partial))
         .route(
             "/apps/{id}/runtime/{action}",
             post(handlers::app_runtime_action),
