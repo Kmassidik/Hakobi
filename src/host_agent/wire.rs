@@ -100,6 +100,8 @@ pub struct DockerVolumeRow {
     pub driver: String,
     #[serde(default)]
     pub mountpoint: String,
+    #[serde(default)]
+    pub app_id: Option<String>,
 }
 
 /// One network reported by the host snapshot.
@@ -111,6 +113,8 @@ pub struct DockerNetworkRow {
     pub driver: String,
     #[serde(default)]
     pub scope: String,
+    #[serde(default)]
+    pub app_id: Option<String>,
 }
 
 /// Response of `GET /v1/docker/snapshot`.
@@ -130,6 +134,8 @@ pub struct DockerSnapshotResponse {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DockerResourceRequest {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<String>,
 }
 
 /// Body of `POST /v1/docker/images/remove`.

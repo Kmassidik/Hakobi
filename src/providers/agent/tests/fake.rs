@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    http::{header::AUTHORIZATION, HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -100,11 +100,13 @@ async fn fake_snapshot(State(agent): State<FakeAgent>, headers: HeaderMap) -> Re
             name: "hakobi-data".into(),
             driver: "local".into(),
             mountpoint: "/var/lib/docker/volumes/hakobi-data/_data".into(),
+            app_id: Some("123e4567-e89b-42d3-a456-426614174000".into()),
         }],
         networks: vec![DockerNetworkRow {
             name: "bridge".into(),
             driver: "bridge".into(),
             scope: "local".into(),
+            app_id: None,
         }],
     })
     .into_response()
@@ -272,16 +274,21 @@ async fn fake_remove_image(
 async fn fake_resource(
     State(agent): State<FakeAgent>,
     headers: HeaderMap,
+    uri: Uri,
     Json(request): Json<DockerResourceRequest>,
 ) -> Response {
     if !agent.authorized(&headers) {
         return FakeAgent::unauthorized_response();
     }
-    if request.name != "hakobi-resource" {
+    let expected_app_id = uri
+        .path()
+        .ends_with("/create")
+        .then_some("123e4567-e89b-42d3-a456-426614174000");
+    if request.name != "hakobi-resource" || request.app_id.as_deref() != expected_app_id {
         return (
             StatusCode::BAD_REQUEST,
             Json(AgentErrorBody {
-                error: "unexpected resource name".into(),
+                error: "unexpected resource request".into(),
             }),
         )
             .into_response();

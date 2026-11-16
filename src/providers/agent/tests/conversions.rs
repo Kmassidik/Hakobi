@@ -1,5 +1,5 @@
-use crate::host_agent::DockerContainerRow;
-use crate::providers::docker::{ContainerPort, ContainerRow};
+use crate::host_agent::{DockerContainerRow, DockerNetworkRow, DockerVolumeRow};
+use crate::providers::docker::{ContainerPort, ContainerRow, NetworkRow, VolumeRow};
 
 #[test]
 fn conversion_keeps_container_identity() {
@@ -24,4 +24,26 @@ fn conversion_keeps_container_identity() {
     assert_eq!(round_trip.name, row.name);
     assert_eq!(round_trip.ports.len(), 1);
     assert_eq!(round_trip.ports[0].container_port, 80);
+}
+
+#[test]
+fn conversion_keeps_resource_ownership() {
+    let app_id = Some("123e4567-e89b-42d3-a456-426614174000".to_owned());
+    let volume = VolumeRow {
+        name: "data".into(),
+        driver: "local".into(),
+        mountpoint: "/var/lib/docker/volumes/data/_data".into(),
+        app_id: app_id.clone(),
+    };
+    let volume = VolumeRow::from(DockerVolumeRow::from(volume));
+    assert_eq!(volume.app_id, app_id);
+
+    let network = NetworkRow {
+        name: "app-net".into(),
+        driver: "bridge".into(),
+        scope: "local".into(),
+        app_id: app_id.clone(),
+    };
+    let network = NetworkRow::from(DockerNetworkRow::from(network));
+    assert_eq!(network.app_id, app_id);
 }

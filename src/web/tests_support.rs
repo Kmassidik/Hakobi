@@ -99,11 +99,13 @@ impl ContainerBackend for FakeBackend {
                 name: "hakobi-data".into(),
                 driver: "local".into(),
                 mountpoint: "/var/lib/docker/volumes/hakobi-data/_data".into(),
+                app_id: None,
             }],
             networks: vec![NetworkRow {
                 name: "bridge".into(),
                 driver: "bridge".into(),
                 scope: "local".into(),
+                app_id: None,
             }],
         })
     }
@@ -136,7 +138,12 @@ impl ContainerBackend for FakeBackend {
         Ok(())
     }
 
-    async fn create_network(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+    async fn create_network(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -144,7 +151,12 @@ impl ContainerBackend for FakeBackend {
         Ok(())
     }
 
-    async fn create_volume(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+    async fn create_volume(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -253,7 +265,12 @@ impl ContainerBackend for PipelineBackend {
         Ok(())
     }
 
-    async fn create_network(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+    async fn create_network(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -261,7 +278,12 @@ impl ContainerBackend for PipelineBackend {
         Ok(())
     }
 
-    async fn create_volume(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+    async fn create_volume(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 

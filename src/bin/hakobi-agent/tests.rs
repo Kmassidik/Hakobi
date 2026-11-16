@@ -200,6 +200,24 @@ async fn docker_resource_requests_are_validated_before_touching_docker() {
 }
 
 #[tokio::test]
+async fn docker_create_requests_reject_invalid_app_ids_before_docker() {
+    for path in ["/v1/docker/networks/create", "/v1/docker/volumes/create"] {
+        for app_id in ["not-a-uuid", ""] {
+            let body = format!(r#"{{"name":"hakobi-resource","app_id":"{app_id}"}}"#);
+            let response = app(state())
+                .oneshot(json_request(path, TEST_TOKEN, &body))
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "{path} {app_id}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn container_detail_routes_validate_names_before_docker() {
     for path in [
         "/v1/docker/containers/bad%20name/inspect",

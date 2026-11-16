@@ -1,6 +1,7 @@
 //! Shared plumbing for HTTP handlers: auth checks, CSRF, catalog access,
 //! response helpers, and embedded assets.
 
+mod app_cleanup;
 pub(crate) mod app_deploy;
 pub(crate) mod app_form;
 mod app_publish;
@@ -134,6 +135,26 @@ pub(crate) async fn app_container_names(
             .collect())
     })
     .await
+}
+
+pub(crate) async fn container_catalog(
+    state: &AppState,
+) -> anyhow::Result<(
+    Vec<hakobi::catalog::ProviderConnection>,
+    Vec<hakobi::catalog::App>,
+)> {
+    with_catalog(state, |catalog| {
+        Ok((catalog.list_provider_connections()?, catalog.list_apps()?))
+    })
+    .await
+}
+
+pub(crate) fn app_names_from_apps(
+    apps: &[hakobi::catalog::App],
+) -> std::collections::HashMap<String, String> {
+    apps.iter()
+        .map(|app| (format!("hakobi-{}", app.id), app.name.clone()))
+        .collect()
 }
 
 pub(crate) async fn with_catalog<T, F>(state: &AppState, operation: F) -> anyhow::Result<T>

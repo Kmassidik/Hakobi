@@ -276,7 +276,11 @@ pub(crate) fn delete_app_dialog(app_id: &str, csrf_token: &str) -> Markup {
                 input type="hidden" name="csrf_token" value=(csrf_token);
                 h2 id="delete-app-title" class="m-0 font-display text-[1.5rem] font-normal" { "Delete app?" }
                 p class="mt-3 text-sm leading-relaxed text-muted" {
-                    "This permanently removes " strong class="text-ink" data-confirm-name { "this app" } ", its container, deployment images, deployments, and logs. Attached volumes are preserved."
+                    "This permanently removes " strong class="text-ink" data-confirm-name { "this app" } ", its container, deployment images, deployments, and logs. App-owned networks are always deleted. App-owned volumes and their data are preserved unless you explicitly choose data deletion below."
+                }
+                label class="mt-4 flex items-start gap-2 text-sm font-semibold text-danger" {
+                    input type="checkbox" name="delete_data" value="on" class="mt-1";
+                    span { "Permanently delete app-owned volumes and all data" }
                 }
                 label class="mt-4 flex flex-col gap-2 text-[0.8rem] font-bold" {
                     "Type the app name to confirm"

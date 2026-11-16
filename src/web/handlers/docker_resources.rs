@@ -18,6 +18,8 @@ pub(crate) struct ResourceForm {
     name: String,
     #[serde(default)]
     confirm_name: String,
+    #[serde(default)]
+    app_id: Option<String>,
     csrf_token: String,
 }
 
@@ -129,13 +131,55 @@ async fn perform(
     if let Err(error) = validate_name(name, action) {
         return redirect_with_error(&base, &format!("Invalid Docker resource name: {error}"));
     }
-    if let Err(error) = execute(&state, &provider.endpoint, name, action).await {
+    let app_id = form
+        .app_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty());
+    if let Err(response) = validate_owner(&state, &provider, app_id, action, &base).await {
+        return *response;
+    }
+    if let Err(error) = execute(&state, &provider.endpoint, name, app_id, action).await {
         tracing::warn!(error = %error, "Docker resource action failed");
         let detail = truncate(&error.to_string(), 500);
         let message = format!("Could not {} {name}: {detail}", action.operation());
         return redirect_with_error(&base, &message);
     }
     redirect_with_notice(&base, &action.notice(name))
+}
+
+async fn validate_owner(
+    state: &AppState,
+    provider: &hakobi::catalog::ProviderConnection,
+    app_id: Option<&str>,
+    action: ResourceAction,
+    base: &str,
+) -> Result<(), Box<Response>> {
+    if !action.is_create() {
+        return Ok(());
+    }
+    let Some(app_id) = app_id else {
+        return Ok(());
+    };
+    let id = app_id.to_owned();
+    let host_id = provider
+        .endpoint
+        .strip_prefix("agent://")
+        .map(str::to_owned);
+    let valid = super::with_catalog(state, move |catalog| {
+        Ok(catalog
+            .get_app(&id)?
+            .is_some_and(|app| host_id.as_deref() == Some(app.host_id.as_str())))
+    })
+    .await;
+    match valid {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(Box::new(redirect_with_error(
+            base,
+            "Owner app must exist on the selected provider host.",
+        ))),
+        Err(error) => Err(Box::new(internal_error(error))),
+    }
 }
 
 fn validate_name(name: &str, action: ResourceAction) -> anyhow::Result<()> {
@@ -149,13 +193,14 @@ async fn execute(
     state: &AppState,
     endpoint: &str,
     name: &str,
+    app_id: Option<&str>,
     action: ResourceAction,
 ) -> anyhow::Result<()> {
     match action {
         ResourceAction::ImageDelete => state.backend.remove_image(endpoint, name).await,
-        ResourceAction::NetworkCreate => state.backend.create_network(endpoint, name).await,
+        ResourceAction::NetworkCreate => state.backend.create_network(endpoint, name, app_id).await,
         ResourceAction::NetworkDelete => state.backend.remove_network(endpoint, name).await,
-        ResourceAction::VolumeCreate => state.backend.create_volume(endpoint, name).await,
+        ResourceAction::VolumeCreate => state.backend.create_volume(endpoint, name, app_id).await,
         ResourceAction::VolumeDelete => state.backend.remove_volume(endpoint, name).await,
     }
 }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use maud::{html, Markup};
 
-use hakobi::catalog::ProviderConnection;
+use hakobi::catalog::{App, ProviderConnection};
 use hakobi::providers::{ContainerInventory, ContainerRow};
 
 use super::{brand, page, pagination_controls, sidebar, CONTENT_WIDTH, EYEBROW, FIELD};
@@ -31,6 +31,7 @@ pub fn containers(
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
     snapshots: &super::SnapshotResults,
     app_names: &HashMap<String, String>,
+    apps: &[App],
     query: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
@@ -40,7 +41,7 @@ pub fn containers(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("containers", base_url, username, csrf_token))
                 (containers_mobile_header(username, csrf_token))
-                (containers_main(base_url, csrf_token, groups, snapshots, app_names, query, notice))
+                (containers_main(base_url, csrf_token, groups, snapshots, app_names, apps, query, notice))
             }
         },
     )
@@ -65,12 +66,14 @@ fn containers_mobile_header(username: &str, csrf_token: &str) -> Markup {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn containers_main(
     base_url: &str,
     csrf_token: &str,
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
     snapshots: &super::SnapshotResults,
     app_names: &HashMap<String, String>,
+    apps: &[App],
     query: &HashMap<String, String>,
     notice: Option<&str>,
 ) -> Markup {
@@ -95,7 +98,7 @@ fn containers_main(
             }
             (super::docker_tabs())
             (container_provider_groups(groups, app_names, csrf_token, query))
-            (super::docker_resource_panels(groups, snapshots, csrf_token, query))
+            (super::docker_resource_panels(groups, snapshots, apps, csrf_token, query))
             p class="mt-8 text-xs text-muted" { "Dashboard endpoint: " (base_url) }
         }
     }

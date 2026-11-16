@@ -1,3 +1,6 @@
+/// Docker label identifying the Hakobi app that owns a resource.
+pub const APP_OWNER_LABEL: &str = "id.hakobi.app";
+
 /// Optional hard limits applied when a container is created.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ResourceLimits {
@@ -97,6 +100,7 @@ pub struct VolumeRow {
     pub name: String,
     pub driver: String,
     pub mountpoint: String,
+    pub app_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +108,7 @@ pub struct NetworkRow {
     pub name: String,
     pub driver: String,
     pub scope: String,
+    pub app_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

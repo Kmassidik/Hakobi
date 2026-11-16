@@ -121,6 +121,7 @@ impl From<DockerVolumeRow> for VolumeRow {
             name: volume.name,
             driver: volume.driver,
             mountpoint: volume.mountpoint,
+            app_id: volume.app_id,
         }
     }
 }
@@ -131,6 +132,7 @@ impl From<VolumeRow> for DockerVolumeRow {
             name: volume.name,
             driver: volume.driver,
             mountpoint: volume.mountpoint,
+            app_id: volume.app_id,
         }
     }
 }
@@ -141,6 +143,7 @@ impl From<DockerNetworkRow> for NetworkRow {
             name: network.name,
             driver: network.driver,
             scope: network.scope,
+            app_id: network.app_id,
         }
     }
 }
@@ -151,6 +154,7 @@ impl From<NetworkRow> for DockerNetworkRow {
             name: network.name,
             driver: network.driver,
             scope: network.scope,
+            app_id: network.app_id,
         }
     }
 }

@@ -96,16 +96,39 @@ fn snapshots_round_trip_through_json() {
             name: "hakobi-data".into(),
             driver: "local".into(),
             mountpoint: "/var/lib/docker/volumes/hakobi-data/_data".into(),
+            app_id: Some("123e4567-e89b-42d3-a456-426614174000".into()),
         }],
         networks: vec![DockerNetworkRow {
             name: "bridge".into(),
             driver: "bridge".into(),
             scope: "local".into(),
+            app_id: None,
         }],
     };
     let encoded = serde_json::to_string(&snapshot).unwrap();
     let decoded: DockerSnapshotResponse = serde_json::from_str(&encoded).unwrap();
     assert_eq!(decoded, snapshot);
+}
+
+#[test]
+fn resource_requests_preserve_optional_app_ownership() {
+    let legacy: DockerResourceRequest = serde_json::from_str(r#"{"name":"data"}"#).unwrap();
+    assert_eq!(legacy.app_id, None);
+    assert_eq!(
+        serde_json::to_string(&legacy).unwrap(),
+        r#"{"name":"data"}"#
+    );
+
+    let owned = DockerResourceRequest {
+        name: "data".into(),
+        app_id: Some("123e4567-e89b-42d3-a456-426614174000".into()),
+    };
+    let encoded = serde_json::to_string(&owned).unwrap();
+    assert!(encoded.contains("app_id"));
+    assert_eq!(
+        serde_json::from_str::<DockerResourceRequest>(&encoded).unwrap(),
+        owned
+    );
 }
 
 #[test]

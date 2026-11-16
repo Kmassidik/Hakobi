@@ -163,6 +163,9 @@ async fn check_app_detail(app: &Router, authenticated: &str, app_id: &str) {
     assert!(body.contains(&format!("/apps/{app_id}/delete")));
     assert!(body.contains("delete-app"));
     assert!(body.contains("data-confirm-input"));
+    assert!(body.contains("name=\"delete_data\""));
+    assert!(body.contains("Permanently delete app-owned volumes and all data"));
+    assert!(body.contains("App-owned networks are always deleted"));
     assert!(body.contains("Runtime"));
     assert!(body.contains("/runtime/start"));
     assert!(body.contains("data-app-usage"));

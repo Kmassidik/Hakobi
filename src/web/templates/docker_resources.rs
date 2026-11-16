@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use maud::{html, Markup};
 
 use hakobi::{
-    catalog::ProviderConnection,
+    catalog::{App, ProviderConnection},
     providers::{ContainerInventory, DockerSnapshot, ImageRow, NetworkRow, VolumeRow},
 };
 
@@ -27,13 +27,14 @@ pub(crate) fn docker_tabs() -> Markup {
 pub(crate) fn docker_resource_panels(
     groups: &[(ProviderConnection, Result<ContainerInventory, String>)],
     snapshots: &SnapshotResults,
+    apps: &[App],
     csrf_token: &str,
     query: &HashMap<String, String>,
 ) -> Markup {
     html! {
         @for (provider, inventory) in groups {
             @if let Some(snapshot) = snapshots.get(&provider.id) {
-                (provider_resources(provider, inventory, snapshot, csrf_token, query))
+                (provider_resources(provider, inventory, snapshot, apps, csrf_token, query))
             }
         }
         (delete_resource_dialog(csrf_token))
@@ -44,6 +45,7 @@ fn provider_resources(
     provider: &ProviderConnection,
     inventory: &Result<ContainerInventory, String>,
     snapshot: &Result<DockerSnapshot, String>,
+    apps: &[App],
     csrf_token: &str,
     query: &HashMap<String, String>,
 ) -> Markup {
@@ -51,8 +53,8 @@ fn provider_resources(
         @match snapshot {
             Ok(snapshot) => {
                 (images_panel(provider, inventory, snapshot, csrf_token, query))
-                (networks_panel(provider, snapshot, csrf_token, query))
-                (volumes_panel(provider, snapshot, csrf_token, query))
+                (networks_panel(provider, snapshot, apps, csrf_token, query))
+                (volumes_panel(provider, snapshot, apps, csrf_token, query))
             }
             Err(error) => p class="mt-6 text-sm text-danger" { "Docker resources unavailable: " (error) }
         }
@@ -143,6 +145,7 @@ fn image_matches(container: &hakobi::providers::ContainerRow, image: &ImageRow) 
 fn networks_panel(
     provider: &ProviderConnection,
     snapshot: &DockerSnapshot,
+    apps: &[App],
     csrf_token: &str,
     query: &HashMap<String, String>,
 ) -> Markup {
@@ -150,12 +153,12 @@ fn networks_panel(
     html! {
         section data-docker-panel="networks" hidden class="mt-6" {
             (panel_header(provider, "Networks", page.total))
-            (create_form(provider, "/docker/networks/create", "network-name", csrf_token))
+            (create_form(provider, apps, "/docker/networks/create", "network-name", csrf_token))
             div class="mt-4 overflow-x-auto rounded-[0.85rem] border border-line" {
                 table class="w-full border-collapse text-left text-sm" {
                     (resource_header(&["Name", "Driver", "Scope", "Actions"]))
                     tbody {
-                        @for network in page.items { (network_row(provider, network, csrf_token)) }
+                        @for network in page.items { (network_row(provider, network, apps, csrf_token)) }
                     }
                 }
             }
@@ -164,11 +167,19 @@ fn networks_panel(
     }
 }
 
-fn network_row(provider: &ProviderConnection, network: &NetworkRow, csrf_token: &str) -> Markup {
+fn network_row(
+    provider: &ProviderConnection,
+    network: &NetworkRow,
+    apps: &[App],
+    csrf_token: &str,
+) -> Markup {
     let built_in = matches!(network.name.as_str(), "bridge" | "host" | "none");
     html! {
         tr class="border-t border-line" {
-            td class="px-4 py-3 font-mono text-xs font-semibold" { (network.name) }
+            td class="px-4 py-3 font-mono text-xs font-semibold" {
+                (network.name)
+                (owner_badge(network.app_id.as_deref(), apps))
+            }
             td class="px-4 py-3 text-xs text-muted" { (network.driver) }
             td class="px-4 py-3 text-xs text-muted" { (network.scope) }
             td class="px-4 py-3 text-right" {
@@ -183,6 +194,7 @@ fn network_row(provider: &ProviderConnection, network: &NetworkRow, csrf_token: 
 fn volumes_panel(
     provider: &ProviderConnection,
     snapshot: &DockerSnapshot,
+    apps: &[App],
     csrf_token: &str,
     query: &HashMap<String, String>,
 ) -> Markup {
@@ -190,12 +202,12 @@ fn volumes_panel(
     html! {
         section data-docker-panel="volumes" hidden class="mt-6" {
             (panel_header(provider, "Volumes", page.total))
-            (create_form(provider, "/docker/volumes/create", "volume-name", csrf_token))
+            (create_form(provider, apps, "/docker/volumes/create", "volume-name", csrf_token))
             div class="mt-4 overflow-x-auto rounded-[0.85rem] border border-line" {
                 table class="w-full border-collapse text-left text-sm" {
                     (resource_header(&["Name", "Driver", "Mountpoint", "Actions"]))
                     tbody {
-                        @for volume in page.items { (volume_row(provider, volume, csrf_token)) }
+                        @for volume in page.items { (volume_row(provider, volume, apps, csrf_token)) }
                     }
                 }
             }
@@ -204,13 +216,32 @@ fn volumes_panel(
     }
 }
 
-fn volume_row(provider: &ProviderConnection, volume: &VolumeRow, csrf_token: &str) -> Markup {
+fn volume_row(
+    provider: &ProviderConnection,
+    volume: &VolumeRow,
+    apps: &[App],
+    csrf_token: &str,
+) -> Markup {
     html! {
         tr class="border-t border-line" {
-            td class="px-4 py-3 font-mono text-xs font-semibold" { (volume.name) }
+            td class="px-4 py-3 font-mono text-xs font-semibold" {
+                (volume.name)
+                (owner_badge(volume.app_id.as_deref(), apps))
+            }
             td class="px-4 py-3 text-xs text-muted" { (volume.driver) }
             td class="max-w-[24rem] break-all px-4 py-3 font-mono text-[0.68rem] text-muted" { (volume.mountpoint) }
             td class="px-4 py-3 text-right" { (delete_button(provider, "/docker/volumes/delete", &volume.name, csrf_token)) }
+        }
+    }
+}
+
+fn owner_badge(app_id: Option<&str>, apps: &[App]) -> Markup {
+    let owner = app_id.and_then(|id| apps.iter().find(|app| app.id == id));
+    html! {
+        @if let Some(app) = owner {
+            span class="ml-2 rounded bg-surface px-1.5 py-0.5 font-sans text-[0.65rem] text-muted" data-resource-owner=(app.name) {
+                (app.name)
+            }
         }
     }
 }
@@ -225,15 +256,22 @@ fn resource_header(labels: &[&str]) -> Markup {
 
 fn create_form(
     provider: &ProviderConnection,
+    apps: &[App],
     action: &str,
     placeholder: &str,
     csrf_token: &str,
 ) -> Markup {
     html! {
-        form method="post" action=(action) class="flex flex-wrap gap-2" {
+        form method="post" action=(action) class="flex flex-wrap items-center gap-2" {
             input type="hidden" name="csrf_token" value=(csrf_token);
             input type="hidden" name="provider_id" value=(provider.id);
-            input class=(format!("{FIELD} max-w-xs") ) name="name" placeholder=(placeholder) required autocomplete="off";
+            input class=(format!("{FIELD} max-w-xs")) name="name" placeholder=(placeholder) required autocomplete="off";
+            select class="max-w-xs rounded-[0.6rem] border border-line bg-surface px-3 py-3.5 text-xs text-ink" name="app_id" aria-label="Owner app (optional)" {
+                option value="" selected { "Unowned" }
+                @for app in apps.iter().filter(|app| crate::web::app_belongs_to_provider(provider, app)) {
+                    option value=(app.id) { (app.name) }
+                }
+            }
             button class="rounded-lg bg-brand px-3.5 py-2 text-[0.78rem] font-semibold text-white" type="submit" { "Create" }
         }
     }

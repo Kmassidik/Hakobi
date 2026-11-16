@@ -40,7 +40,11 @@ and runs containers; deployments publish `app.container_port` on loopback. Optio
 CPU-core and MiB limits are stored as bytes and enforced through Docker `HostConfig`
 for both Dockerfile and Nixpacks builds; blank fields remain unlimited. Runtime
 actions use the app's managed container and persist stopped/paused state apart
-from deployment state. Usage charts accumulate up to 60 real samples over five
+from deployment state. Deletion removes networks labeled `id.hakobi.app` with
+the exact app UUID. Matching volumes are preserved unless the user separately
+confirms permanent app-data deletion. Unlabeled, shared, external, and other-app
+resources are never selected by cleanup.
+Usage charts accumulate up to 60 real samples over five
 minutes in the browser; failed polls never insert zero samples.
 Gap: commit statuses and PR check runs remain separate CP9 work.
 
@@ -50,7 +54,10 @@ perform guarded lifecycle actions.
 Code reality: `/containers` is a Docker workbench with Containers, Images,
 Networks, and Volumes tabs backed by real provider snapshots. It includes
 guarded image/network/volume creation and deletion, exact-name confirmation,
-and built-in network protection. `/containers/{provider}/{name}` retains live
+and built-in network protection. Network and volume creation can optionally
+assign an app on the same host, persisted as an `id.hakobi.app` Docker label.
+The workbench displays that ownership without making unlabeled resources
+eligible for app cleanup. `/containers/{provider}/{name}` retains live
 stats/log polling. Hakobi-managed containers display the app name, with the
 real `hakobi-<app-id>` Docker name retained as secondary metadata and in routes.
 Server-side pagination caps Docker resources at 25 rows per page, Apps at 20,

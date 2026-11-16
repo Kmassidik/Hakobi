@@ -44,6 +44,10 @@ and guarded domain CRUD must remain working. Use parameterized SQL only.
   workload, the LLM frontend, or the LLM API when changing the general edge.
 - `ufw` is disabled by explicit user choice; do not enable it without asking.
 - Secrets remain encrypted in the catalog vault and out of logs/rendering.
+- App-owned Docker resources use the exact `id.hakobi.app=<app UUID>` label.
+  App deletion removes owned networks; owned volumes require separate data
+  confirmation. Never delete unlabeled/shared resources or run global prune
+  as part of app deletion.
 - Honest readiness only: no fabricated samples, success states, or silent
   error suppression. Polling uses last-good data where already implemented.
 

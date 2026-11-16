@@ -14,6 +14,7 @@ pub use docker::{
     validate_container_name, validate_image_reference, ContainerBackend, ContainerGroup,
     ContainerInventory, ContainerPort, ContainerRow, DockerBackend, DockerSnapshot, HostInfo,
     ImageRow, NetworkRow, ResourceLimits, RunResult, ServiceGroup, StackGroup, VolumeRow,
+    APP_OWNER_LABEL,
 };
 pub use kubernetes::{
     ConnectionInfo, DeploymentRow, KubernetesProvider, NamespaceRow, PodRow, ServicePort,

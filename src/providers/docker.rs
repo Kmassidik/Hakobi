@@ -9,5 +9,5 @@ pub use crate::providers::docker_exec::RunResult;
 pub use backend::{ContainerBackend, DockerBackend};
 pub use models::{
     ContainerGroup, ContainerInventory, ContainerPort, ContainerRow, DockerSnapshot, HostInfo,
-    ImageRow, NetworkRow, ResourceLimits, ServiceGroup, StackGroup, VolumeRow,
+    ImageRow, NetworkRow, ResourceLimits, ServiceGroup, StackGroup, VolumeRow, APP_OWNER_LABEL,
 };

@@ -43,6 +43,8 @@
     if (submit) {
       submit.disabled = true;
     }
+    const deleteData = dialog.querySelector("[name=\"delete_data\"]");
+    if (deleteData) deleteData.checked = false;
     dialog.setAttribute("data-expected-name", expected);
     const resourceName = dialog.querySelector("[data-resource-name]");
     const provider = dialog.querySelector("[data-resource-provider]");

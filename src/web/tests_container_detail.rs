@@ -185,7 +185,12 @@ impl ContainerBackend for DetailBackend {
         Ok(())
     }
 
-    async fn create_network(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+    async fn create_network(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -193,7 +198,12 @@ impl ContainerBackend for DetailBackend {
         Ok(())
     }
 
-    async fn create_volume(&self, _endpoint: &str, _name: &str) -> anyhow::Result<()> {
+    async fn create_volume(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 

@@ -237,13 +237,14 @@ impl ContainerBackend for AgentBackend {
         .await
     }
 
-    async fn create_network(&self, endpoint: &str, name: &str) -> Result<()> {
+    async fn create_network(&self, endpoint: &str, name: &str, app_id: Option<&str>) -> Result<()> {
         ensure_local_endpoint(endpoint)?;
         validate_container_name(name)?;
         self.post_json_unit(
             "/v1/docker/networks/create",
             &DockerResourceRequest {
                 name: name.to_owned(),
+                app_id: app_id.map(str::to_owned),
             },
             MUTATION_TIMEOUT,
         )
@@ -260,19 +261,21 @@ impl ContainerBackend for AgentBackend {
             "/v1/docker/networks/delete",
             &DockerResourceRequest {
                 name: name.to_owned(),
+                app_id: None,
             },
             MUTATION_TIMEOUT,
         )
         .await
     }
 
-    async fn create_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+    async fn create_volume(&self, endpoint: &str, name: &str, app_id: Option<&str>) -> Result<()> {
         ensure_local_endpoint(endpoint)?;
         validate_container_name(name)?;
         self.post_json_unit(
             "/v1/docker/volumes/create",
             &DockerResourceRequest {
                 name: name.to_owned(),
+                app_id: app_id.map(str::to_owned),
             },
             MUTATION_TIMEOUT,
         )
@@ -286,6 +289,7 @@ impl ContainerBackend for AgentBackend {
             "/v1/docker/volumes/delete",
             &DockerResourceRequest {
                 name: name.to_owned(),
+                app_id: None,
             },
             MUTATION_TIMEOUT,
         )

@@ -8,8 +8,8 @@ use axum::{
 use serde::Deserialize;
 
 use super::{
-    app_container_names, html_response, internal_error, load_providers, page_csrf, post_is_allowed,
-    truncate, CsrfForm,
+    app_names_from_apps, container_catalog, html_response, internal_error, load_providers,
+    page_csrf, post_is_allowed, truncate, CsrfForm,
 };
 use crate::web::{
     handlers::{redirect_with_error, redirect_with_notice},
@@ -32,14 +32,11 @@ pub(crate) async fn containers(
         return axum::response::Redirect::to("/login").into_response();
     }
     let query = crate::web::pagination::parse_query(raw_query.as_deref());
-    let providers = match load_providers(&state).await {
-        Ok(providers) => providers,
+    let (providers, apps) = match container_catalog(&state).await {
+        Ok(catalog) => catalog,
         Err(error) => return internal_error(error),
     };
-    let app_names = match app_container_names(&state).await {
-        Ok(names) => names,
-        Err(error) => return internal_error(error),
-    };
+    let app_names = app_names_from_apps(&apps);
     let (csrf_token, cookies) = page_csrf(&state, &headers);
     let mut snapshots = std::collections::HashMap::new();
     let mut groups: Vec<(ProviderConnection, Result<ContainerInventory, String>)> = Vec::new();
@@ -67,6 +64,7 @@ pub(crate) async fn containers(
             &groups,
             &snapshots,
             &app_names,
+            &apps,
             &query,
             query.get("notice").map(String::as_str),
         ),

@@ -376,6 +376,8 @@ pub(crate) async fn app_edit_submit(
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct DeleteAppForm {
     confirm_name: String,
+    #[serde(default)]
+    delete_data: Option<String>,
     csrf_token: String,
 }
 
@@ -403,9 +405,12 @@ pub(crate) async fn app_delete(
         Ok(tags) => tags,
         Err(error) => return internal_error(error),
     };
-    // Best-effort cleanup: container, images, and Cloudflare route. The DB
-    // delete is authoritative.
+    let delete_data = form.delete_data.as_deref() == Some("on");
+    let resources = super::app_cleanup::snapshot_owned_resources(&state, &app, delete_data).await;
+    // Best-effort cleanup: container, owned resources, images, and Cloudflare
+    // route. The DB delete is authoritative.
     let route = remove_app_container(&state, &app).await;
+    super::app_cleanup::remove_owned_resources(&state, &app, resources).await;
     remove_app_images(&state, &app, &image_tags).await;
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
     if result.is_ok() {

@@ -53,7 +53,12 @@ impl ContainerBackend for StubBackend {
         bail!("{} remove image", self.0)
     }
 
-    async fn create_network(&self, _endpoint: &str, _name: &str) -> Result<()> {
+    async fn create_network(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> Result<()> {
         bail!("{} create network", self.0)
     }
 
@@ -61,7 +66,12 @@ impl ContainerBackend for StubBackend {
         bail!("{} remove network", self.0)
     }
 
-    async fn create_volume(&self, _endpoint: &str, _name: &str) -> Result<()> {
+    async fn create_volume(
+        &self,
+        _endpoint: &str,
+        _name: &str,
+        _app_id: Option<&str>,
+    ) -> Result<()> {
         bail!("{} create volume", self.0)
     }
 

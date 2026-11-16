@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{bail, Context, Result};
 use async_trait::async_trait;
 use bollard::query_parameters::{
@@ -11,7 +13,7 @@ use super::super::validate::{connect, connect_with_timeout};
 use super::{validate_container_name, validate_image_reference};
 use super::{
     ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow, NetworkRow, ResourceLimits,
-    VolumeRow,
+    VolumeRow, APP_OWNER_LABEL,
 };
 use crate::providers::docker_exec::{remove_container as remove_docker_container, run_image};
 
@@ -19,6 +21,10 @@ pub use crate::providers::docker_exec::RunResult;
 
 /// Upper bound of log lines the detail page and agent ever return.
 pub(crate) const MAX_LOG_LINES: usize = 500;
+
+fn owner_labels(app_id: Option<&str>) -> Option<HashMap<String, String>> {
+    app_id.map(|app_id| HashMap::from([(APP_OWNER_LABEL.to_owned(), app_id.to_owned())]))
+}
 
 #[async_trait]
 pub trait ContainerBackend: Send + Sync {
@@ -40,11 +46,11 @@ pub trait ContainerBackend: Send + Sync {
     /// Removes an image without forcing deletion or pruning other images.
     async fn remove_image(&self, endpoint: &str, image: &str) -> Result<()>;
     /// Creates a user-defined Docker network with the default driver.
-    async fn create_network(&self, endpoint: &str, name: &str) -> Result<()>;
+    async fn create_network(&self, endpoint: &str, name: &str, app_id: Option<&str>) -> Result<()>;
     /// Removes a user-defined Docker network. Built-in networks are protected.
     async fn remove_network(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Creates a Docker volume with the default driver.
-    async fn create_volume(&self, endpoint: &str, name: &str) -> Result<()>;
+    async fn create_volume(&self, endpoint: &str, name: &str, app_id: Option<&str>) -> Result<()>;
     /// Removes a Docker volume without forcing deletion.
     async fn remove_volume(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Creates and starts a container from an image already present locally.
@@ -254,11 +260,12 @@ impl ContainerBackend for DockerBackend {
         Ok(())
     }
 
-    async fn create_network(&self, endpoint: &str, name: &str) -> Result<()> {
+    async fn create_network(&self, endpoint: &str, name: &str, app_id: Option<&str>) -> Result<()> {
         validate_container_name(name)?;
         connect(endpoint)?
             .create_network(bollard::models::NetworkCreateRequest {
                 name: name.to_owned(),
+                labels: owner_labels(app_id),
                 ..Default::default()
             })
             .await
@@ -277,11 +284,12 @@ impl ContainerBackend for DockerBackend {
             .with_context(|| format!("remove network `{name}`"))
     }
 
-    async fn create_volume(&self, endpoint: &str, name: &str) -> Result<()> {
+    async fn create_volume(&self, endpoint: &str, name: &str, app_id: Option<&str>) -> Result<()> {
         validate_container_name(name)?;
         connect(endpoint)?
             .create_volume(bollard::models::VolumeCreateRequest {
                 name: Some(name.to_owned()),
+                labels: owner_labels(app_id),
                 ..Default::default()
             })
             .await
@@ -379,6 +387,7 @@ async fn list_volumes(docker: &bollard::Docker) -> Result<Vec<VolumeRow>> {
             name: volume.name,
             driver: volume.driver,
             mountpoint: volume.mountpoint,
+            app_id: volume.labels.get(APP_OWNER_LABEL).cloned(),
         })
         .collect())
 }
@@ -392,6 +401,11 @@ async fn list_networks(docker: &bollard::Docker) -> Result<Vec<NetworkRow>> {
             name: network.name.unwrap_or_else(|| "unnamed".into()),
             driver: network.driver.unwrap_or_else(|| "unknown".into()),
             scope: network.scope.unwrap_or_else(|| "unknown".into()),
+            app_id: network
+                .labels
+                .as_ref()
+                .and_then(|labels| labels.get(APP_OWNER_LABEL))
+                .cloned(),
         })
         .collect())
 }
@@ -406,5 +420,21 @@ fn host_info(info: bollard::models::SystemInfo) -> HostInfo {
         operating_system: info.operating_system.unwrap_or_else(|| "unknown".into()),
         architecture: info.architecture.unwrap_or_else(|| "unknown".into()),
         cpus: info.ncpu.unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::{owner_labels, APP_OWNER_LABEL};
+
+    #[test]
+    fn labels_are_added_only_for_owned_resources() {
+        assert_eq!(owner_labels(None), None);
+        let labels = owner_labels(Some("123e4567-e89b-42d3-a456-426614174000")).unwrap();
+        assert_eq!(
+            labels.get(APP_OWNER_LABEL).map(String::as_str),
+            Some("123e4567-e89b-42d3-a456-426614174000")
+        );
+        assert_eq!(labels.len(), 1);
     }
 }

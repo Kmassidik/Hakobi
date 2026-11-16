@@ -21,6 +21,8 @@ mod tests_deployment;
 #[cfg(test)]
 mod tests_metrics;
 #[cfg(test)]
+mod tests_owned_resources;
+#[cfg(test)]
 mod tests_pipeline_support;
 #[cfg(test)]
 mod tests_settings;
@@ -60,6 +62,13 @@ use hakobi::{
     github::RepositoryCache,
     providers::{ContainerBackend, RoutingBackend},
 };
+
+pub(crate) fn app_belongs_to_provider(
+    provider: &hakobi::catalog::ProviderConnection,
+    app: &hakobi::catalog::App,
+) -> bool {
+    provider.endpoint.strip_prefix("agent://") == Some(app.host_id.as_str())
+}
 
 #[derive(Clone)]
 pub(super) struct AppState {

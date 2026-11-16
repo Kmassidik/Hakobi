@@ -31,7 +31,12 @@ async fn agent_backend_reads_the_typed_agent_api() {
     assert_eq!(snapshot.host.cpus, 16);
     assert_eq!(snapshot.images.len(), 1);
     assert_eq!(snapshot.volumes.len(), 1);
+    assert_eq!(
+        snapshot.volumes[0].app_id.as_deref(),
+        Some("123e4567-e89b-42d3-a456-426614174000")
+    );
     assert_eq!(snapshot.networks.len(), 1);
+    assert_eq!(snapshot.networks[0].app_id, None);
 }
 
 #[tokio::test]
@@ -174,7 +179,11 @@ async fn agent_backend_creates_and_deletes_networks_and_volumes() {
     let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
 
     backend
-        .create_network(host_agent::LOCAL_ENDPOINT, "hakobi-resource")
+        .create_network(
+            host_agent::LOCAL_ENDPOINT,
+            "hakobi-resource",
+            Some("123e4567-e89b-42d3-a456-426614174000"),
+        )
         .await
         .unwrap();
     backend
@@ -182,7 +191,11 @@ async fn agent_backend_creates_and_deletes_networks_and_volumes() {
         .await
         .unwrap();
     backend
-        .create_volume(host_agent::LOCAL_ENDPOINT, "hakobi-resource")
+        .create_volume(
+            host_agent::LOCAL_ENDPOINT,
+            "hakobi-resource",
+            Some("123e4567-e89b-42d3-a456-426614174000"),
+        )
         .await
         .unwrap();
     backend
