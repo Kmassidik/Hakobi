@@ -125,7 +125,12 @@
         var notice = responseNotice(xhr);
         if (event.detail.successful && xhr.status < 400) {
           notify(notice || "Action completed.", "success");
-          if (xhr.responseURL) window.history.pushState({}, "", xhr.responseURL);
+          if (xhr.responseURL) {
+            window.history.pushState({}, "", xhr.responseURL);
+            var tab = new URL(xhr.responseURL).searchParams.get("tab");
+            var tabButton = tab && document.querySelector('[data-docker-tab="' + tab + '"]');
+            if (tabButton) tabButton.click();
+          }
         } else {
           notify(notice || errorMessage(xhr), "error");
         }

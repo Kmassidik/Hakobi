@@ -30,6 +30,7 @@
       form.setAttribute("action", action);
       if (form.dataset.ssrBoost === "true") {
         form.setAttribute("hx-post", action);
+        if (window.htmx) window.htmx.process(form);
       }
     }
     if (name) {
