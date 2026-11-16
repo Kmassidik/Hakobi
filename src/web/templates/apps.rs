@@ -1,21 +1,12 @@
 //! CP9 app templates: list page, detail page, create/edit form, status and
 //! logs partials, and the shared deployment-table rows.
 
+use super::app_publish::app_status_class;
 use super::{brand, page, pagination_controls, sidebar, CONTENT_WIDTH, EYEBROW};
 use crate::web::pagination::Page;
 use hakobi::catalog::{App, Deployment, DeploymentLog};
 use maud::{html, Markup};
 use std::collections::HashMap;
-
-fn app_status_class(status: &str) -> &'static str {
-    match status {
-        "running" => "bg-emerald-500/10 text-emerald-700",
-        "building" | "deploying" => "bg-sky-500/10 text-sky-700",
-        "failed" => "bg-red-500/10 text-red-700",
-        "paused" => "bg-amber-500/10 text-amber-700",
-        _ => "bg-slate-500/10 text-slate-600",
-    }
-}
 
 fn deployment_status_class(status: &str) -> &'static str {
     match status {
@@ -171,6 +162,7 @@ pub fn app_detail(
     query: &HashMap<String, String>,
     latest: Option<&Deployment>,
     previous: Option<&Deployment>,
+    apps_domain: Option<&str>,
 ) -> Markup {
     page(
         "App · Hakobi",
@@ -178,12 +170,13 @@ pub fn app_detail(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("apps", base_url, username, csrf_token))
                 (apps_mobile_header(username, csrf_token, "/apps", "Apps"))
-                (app_detail_main(base_url, csrf_token, app, deployments_page, query, latest, previous))
+                (app_detail_main(base_url, csrf_token, app, deployments_page, query, latest, previous, apps_domain))
             }
         },
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn app_detail_main(
     base_url: &str,
     csrf_token: &str,
@@ -192,6 +185,7 @@ fn app_detail_main(
     query: &HashMap<String, String>,
     latest: Option<&Deployment>,
     previous: Option<&Deployment>,
+    apps_domain: Option<&str>,
 ) -> Markup {
     let base = format!("/apps/{}", app.id);
     html! {
@@ -214,7 +208,7 @@ fn app_detail_main(
                 }
             }
             (super::app_form::delete_app_dialog(&app.id, csrf_token))
-            (app_status_body(app, latest))
+            (super::app_publish::app_status_body(app, latest, csrf_token, apps_domain))
             (app_detail_cards(base_url, csrf_token, app, previous))
             (super::app_usage_section(app))
             section id="app-deployments" class="mt-10" {
@@ -389,27 +383,6 @@ fn deployment_row(app: &App, deployment: &Deployment, csrf_token: &str) -> Marku
                             button class="rounded-lg border border-danger/40 bg-transparent px-2.5 py-1.5 text-[0.68rem] font-semibold text-danger" type="submit" { "Cancel" }
                         }
                     }
-                }
-            }
-        }
-    }
-}
-
-/// Status strip shared by the detail page and the 5s HTMX partial.
-pub fn app_status_body(app: &App, latest: Option<&Deployment>) -> Markup {
-    html! {
-        section id="app-status" hx-get=(format!("/apps/{}/status", app.id)) hx-trigger="every 5s" hx-swap="outerHTML" {
-            div class="mt-6 flex flex-wrap items-center gap-3 rounded-[0.85rem] border border-line bg-surface/45 px-5 py-4" {
-                span class=(format!("rounded-full px-3 py-1 text-xs font-semibold {}", app_status_class(app.display_status()))) {
-                    (app.display_status())
-                }
-                @match latest {
-                    Some(deployment) => span class="text-sm text-muted" {
-                        "Latest deployment: v" (deployment.version) " · "
-                        span class="font-semibold" { (deployment.status) }
-                        " · " (deployment.trigger_type)
-                    },
-                    None => span class="text-sm text-muted" { "No deployments yet." },
                 }
             }
         }

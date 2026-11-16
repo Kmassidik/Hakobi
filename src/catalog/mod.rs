@@ -3,6 +3,7 @@
 //! The catalog is a SQLite database. Its schema is versioned with
 //! `PRAGMA user_version`; opening an up-to-date database is a no-op.
 
+mod app_subdomain;
 mod apps;
 mod audit;
 mod deployments;
@@ -16,6 +17,7 @@ mod vault;
 /// Upper bound for [`Catalog::list_recent_deployments`].
 pub const DEPLOYMENT_PAGE_LIMIT: u32 = 100;
 
+pub use app_subdomain::validate_app_subdomain;
 pub use apps::{
     validate_app_name, validate_app_status, validate_deployment_status, validate_log_level,
     validate_resource_limits, App,

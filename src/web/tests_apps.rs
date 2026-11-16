@@ -48,9 +48,11 @@ async fn check_new_app_form(app: &Router, authenticated: &str) {
     assert!(body.contains("name=\"host_id\""));
     assert!(body.contains("name=\"csrf_token\""));
     assert!(body.contains("name=\"github_repo\""));
-    assert!(body.contains("data-app-stepper"));
-    assert!(body.contains("data-app-step=\"4\""));
-    assert!(body.contains("data-app-review"));
+    assert!(body.contains("data-app-form"));
+    assert!(body.contains("data-resource-recommended"));
+    assert!(body.contains("value=\"8080\""));
+    assert!(body.contains("value=\"512\""));
+    assert!(!body.contains("data-app-stepper"));
     assert!(body.contains("env-http-host"));
 }
 
@@ -132,11 +134,13 @@ async fn create_app(
         .unwrap()
         .to_str()
         .unwrap()
-        .contains("App+created"));
+        .contains("Build+started"));
 
     let catalog = Catalog::open(path).unwrap();
     let apps = catalog.list_apps().unwrap();
     assert_eq!(apps.len(), 1);
+    assert!(apps[0].subdomain.is_none());
+    assert_eq!(catalog.list_deployments(&apps[0].id).unwrap().len(), 1);
     assert_eq!(apps[0].cpu_limit, Some(1.5));
     assert_eq!(apps[0].memory_limit_bytes, Some(512 * 1024 * 1024));
     apps[0].id.clone()

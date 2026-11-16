@@ -7,11 +7,20 @@
     if (picker.status) picker.status.textContent = text;
   }
 
+  function suggestName(picker, source) {
+    if (!picker.nameInput || picker.nameDirty) return;
+    var part = source.split("/").filter(Boolean).pop() || "";
+    picker.nameInput.value = part.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
+  }
+
   function sync(picker) {
     var checked = picker.appsBox.querySelector("input:checked");
     if (!checked) return;
+    suggestName(picker, checked.value || picker.reposSel.value);
     var dockerfileInput = document.querySelector("[name=github_dockerfile]");
     if (dockerfileInput) dockerfileInput.value = checked.dataset.dockerfile;
+    var contextInput = document.querySelector("[name=github_path]");
+    if (contextInput) contextInput.value = checked.value;
     loadEnvironment(picker, checked.value);
   }
 
@@ -94,11 +103,12 @@
     try {
       var res = await fetch("/api/github/branches?repo=" + encodeURIComponent(repo));
       var data = await res.json();
+      var preferred = picker.reposSel.selectedOptions[0]?.dataset.defaultBranch || "main";
       (data.branches || []).forEach(function (name) {
         var opt = document.createElement("option");
         opt.value = name;
         opt.textContent = name;
-        if (name === "main") opt.selected = true;
+        if (name === preferred) opt.selected = true;
         picker.branchSel.appendChild(opt);
       });
       if (!picker.branchSel.value && picker.branchSel.options.length) picker.branchSel.selectedIndex = 0;
@@ -117,11 +127,15 @@
     repos.forEach(function (repo) {
       var opt = document.createElement("option");
       opt.value = repo.full_name;
+      opt.dataset.defaultBranch = repo.default_branch;
       opt.textContent = repo.full_name + (repo.private ? " (private)" : "");
       picker.reposSel.appendChild(opt);
     });
     picker.reposSel.addEventListener("change", function () {
-      if (picker.reposSel.value) loadBranches(picker, picker.reposSel.value);
+      if (picker.reposSel.value) {
+        suggestName(picker, picker.reposSel.value);
+        loadBranches(picker, picker.reposSel.value);
+      }
     });
   }
 
@@ -165,8 +179,14 @@
       envStatus: document.querySelector("[data-gh-env-status]"),
       envDirty: false,
       envRequest: 0,
+      nameInput: document.querySelector("[name=name]"),
+      nameDirty: false,
     };
     if (!picker.reposSel) return;
+    if (picker.nameInput) {
+      picker.nameDirty = !!picker.nameInput.value;
+      picker.nameInput.addEventListener("input", function () { picker.nameDirty = true; });
+    }
     picker.envInput.addEventListener("input", function () { picker.envDirty = true; });
     loadRepositories(picker);
   }

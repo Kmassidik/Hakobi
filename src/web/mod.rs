@@ -264,6 +264,7 @@ fn app_routes() -> Router<AppState> {
         )
         .route("/apps/{id}/delete", post(handlers::app_delete))
         .route("/apps/{id}/deploy", post(handlers::app_deploy))
+        .route("/apps/{id}/publish", post(handlers::app_publish))
         .route("/apps/{id}/rollback", post(handlers::app_rollback))
         .route("/apps/{id}/deployments", get(handlers::app_deployments))
         .route("/apps/{id}/logs", get(handlers::app_logs))

@@ -8,6 +8,3 @@
   display: none !important;
 }
 
-[data-step-target][aria-current="step"] {
-  border-bottom-color: var(--color-brand);
-}

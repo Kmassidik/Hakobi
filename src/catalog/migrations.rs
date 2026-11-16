@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, Transaction};
 
 /// Schema version written to `PRAGMA user_version`.
-pub(super) const SCHEMA_VERSION: i64 = 15;
+pub(super) const SCHEMA_VERSION: i64 = 16;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS provider_connections (
@@ -65,6 +65,7 @@ END;
 CREATE TABLE IF NOT EXISTS apps (
     id                 TEXT PRIMARY KEY NOT NULL,
     name               TEXT NOT NULL UNIQUE,
+    subdomain          TEXT,
     host_id            TEXT REFERENCES host_agents (id),
     build_type         TEXT NOT NULL DEFAULT 'dockerfile' CHECK (build_type IN ('dockerfile', 'nixpacks')),
     -- GitHub source (CP9)
@@ -218,6 +219,11 @@ fn migrate_apps(transaction: &Transaction<'_>, current: i64) -> Result<()> {
                 [],
             )
             .context("add apps.runtime_status")?;
+    }
+    if (1..16).contains(&current) {
+        transaction
+            .execute("ALTER TABLE apps ADD COLUMN subdomain TEXT", [])
+            .context("add apps.subdomain")?;
     }
     Ok(())
 }

@@ -14,6 +14,7 @@ use super::Catalog;
 pub struct App {
     pub id: String,
     pub name: String,
+    pub subdomain: Option<String>,
     pub host_id: String,
     pub build_type: String,
     pub github_repo: Option<String>,
@@ -138,13 +139,14 @@ fn read_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<App> {
         cpu_limit: row.get(17)?,
         memory_limit_bytes: row.get::<_, Option<i64>>(18)?.map(|value| value as u64),
         runtime_status: row.get(19)?,
+        subdomain: row.get(20)?,
     })
 }
 
 const APP_COLUMNS: &str = "id, name, host_id, build_type, github_repo, \
      github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, host_port, \
      env_json, status, webhook_secret, webhook_enabled, created_at, updated_at, \
-     cpu_limit, memory_limit_bytes, runtime_status";
+     cpu_limit, memory_limit_bytes, runtime_status, subdomain";
 
 impl Catalog {
     /// Replaces the app's container environment variables (JSON object).

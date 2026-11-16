@@ -64,9 +64,13 @@ Gap: none.
 User intent: GitHub App repository selection, push-to-build, auto-deploy,
 rollback, and deletion. Registration, installation, and user connection must
 be honest distinct states. Monorepos and single repositories both work.
-New-app creation uses a four-step Source, Identity, Build, and Review flow with
-per-step client validation; the same server validation and POST contract remain
-authoritative, and editing retains the complete form.
+New-app creation uses one fully visible form with detected source defaults,
+port 8080, and recommended 1-core/512-MiB limits (custom values remain visible).
+Creating an app immediately queues its first build and container start. Apps
+remain private until a running app is explicitly assigned a subdomain; only
+then are managed DNS and tunnel ingress created and public health checked.
+Future deployments update that stored route. Public traffic still enters only
+through the existing tunnel/L7 edge; raw application host ports stay private.
 Code reality: Manifest registration, installation webhooks/callback/recheck,
 installation tokens, push matching, and a repository picker. Repository lists
 use a shared five-minute cache and durable last-good snapshots; stale snapshots

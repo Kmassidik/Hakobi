@@ -96,52 +96,28 @@ fn app_form_fields(
     submit_label: &str,
     csrf_token: &str,
 ) -> Markup {
-    let guided = action == "/apps";
+    let creating = action == "/apps";
     html! {
-        form method="post" action=(action) data-app-stepper[guided] class=(if guided { "mt-10 grid w-full max-w-[52rem] grid-cols-1 gap-8" } else { "mt-8 grid max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-6" }) {
+        form method="post" action=(action) data-app-form[creating] class="mt-10 grid w-full max-w-[52rem] grid-cols-1 gap-8" {
             input type="hidden" name="csrf_token" value=(csrf_token);
-            @if guided { (stepper_navigation()) }
-            section data-app-step="1" class="grid grid-cols-1 gap-5" {
-                (step_heading("Choose where your application comes from.", "Connect a repository and select the buildable app to deploy."))
+            section class="grid grid-cols-1 gap-5" {
+                (step_heading("Source", "Choose a repository and application. Hakobi fills in what it can detect."))
                 (github_source_fields(values))
             }
-            section data-app-step="2" class="grid grid-cols-1 gap-5" {
-                (step_heading("Name your app", "Choose a recognizable name and where it should run."))
+            section class="grid grid-cols-1 gap-5 border-t border-line pt-8" {
+                (step_heading("Application", "Name the app and choose its host."))
                 (app_identity_fields(hosts, values))
             }
-            section data-app-step="3" class="grid grid-cols-1 gap-5" {
-                (step_heading("Configure the build", "Set the runtime, port, build paths, and environment."))
+            section class="grid grid-cols-1 gap-5 border-t border-line pt-8" {
+                (step_heading("Build", "All settings stay visible and editable."))
                 (build_settings_fields(values))
             }
-            section data-app-step="4" class="grid grid-cols-1 gap-5" {
-                (step_heading("Resources and review", "Optional limits, deployment policy, and a final check."))
+            section class="grid grid-cols-1 gap-5 border-t border-line pt-8" {
+                (step_heading("Resources", "Use the recommended allocation or choose custom limits."))
                 (resource_limit_fields(values))
                 (deployment_policy_field(values))
-                (review_summary())
-                (step_actions(submit_label))
             }
-            @if guided {
-                p data-step-error role="alert" class="m-0 text-sm text-danger" {}
-                div hidden class="flex items-center justify-between gap-3" data-step-navigation {
-                    button type="button" data-step-back class="bg-transparent px-0 py-2 text-sm font-semibold text-muted hover:text-ink" { "← Back" }
-                    button type="button" data-step-next class="bg-transparent px-0 py-2 text-sm font-bold text-brand-bright hover:text-ink" { "Continue →" }
-                }
-            }
-        }
-    }
-}
-
-fn stepper_navigation() -> Markup {
-    html! {
-        ol hidden data-step-progress class="m-0 flex list-none overflow-x-auto border-b border-line p-0" aria-label="App creation progress" {
-            @for (number, label) in [(1, "Source"), (2, "Identity"), (3, "Build"), (4, "Review")] {
-                li class="min-w-0 flex-1" {
-                    button type="button" data-step-target=(number) class="w-full whitespace-nowrap border-b-2 border-transparent px-1 pb-3 pt-0 text-left text-sm font-semibold text-muted transition-colors" {
-                        span class="mr-2 font-mono text-xs font-normal" { (format!("{number:02}")) }
-                        (label)
-                    }
-                }
-            }
+            (step_actions(submit_label))
         }
     }
 }
@@ -255,21 +231,6 @@ fn deployment_policy_field(values: &AppFormValues) -> Markup {
     }
 }
 
-fn review_summary() -> Markup {
-    html! {
-        div class="border-y border-line py-5" {
-            h3 class="m-0 text-sm font-bold" { "Review" }
-            dl class="mb-0 mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs" data-app-review {
-                dt class="text-muted" { "Repository" } dd class="m-0 break-all font-mono" data-review="repo" {}
-                dt class="text-muted" { "App" } dd class="m-0 break-all font-mono" data-review="name" {}
-                dt class="text-muted" { "Build" } dd class="m-0 break-all font-mono" data-review="build" {}
-                dt class="text-muted" { "Port" } dd class="m-0 font-mono" data-review="port" {}
-                dt class="text-muted" { "Environment" } dd class="m-0 font-mono" data-review="environment" {}
-            }
-        }
-    }
-}
-
 fn step_actions(submit_label: &str) -> Markup {
     html! {
         div class="flex flex-wrap items-center gap-3" data-step-submit {
@@ -281,18 +242,28 @@ fn step_actions(submit_label: &str) -> Markup {
 
 fn resource_limit_fields(values: &AppFormValues) -> Markup {
     html! {
-        fieldset class="m-0 grid grid-cols-1 gap-4 border-0 border-t border-line p-0 pt-5 md:grid-cols-2" {
-            legend class="mb-1 px-0 text-[0.8rem] font-bold" { "Runtime resource limits" }
+        fieldset class="m-0 grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2" data-resource-settings {
+            legend class="mb-1 px-0 text-[0.8rem] font-bold" { "Runtime allocation" }
             p class="col-span-full m-0 text-xs font-normal leading-relaxed text-muted" {
-                "Optional hard limits for the running container. Leave blank for unlimited. Changes apply on the next deploy and work for Dockerfile and Nixpacks apps."
+                "Recommended starts with 1 CPU core and 512 MiB. Custom keeps both values under your control."
+            }
+            div class="col-span-full flex gap-6 text-sm font-semibold" {
+                label class="flex items-center gap-2" {
+                    input type="radio" name="resource_mode" value="recommended" data-resource-recommended checked[(values.cpu_limit == "1" && values.memory_limit_mb == "512")];
+                    "Recommended"
+                }
+                label class="flex items-center gap-2" {
+                    input type="radio" name="resource_mode" value="custom" data-resource-custom checked[!(values.cpu_limit == "1" && values.memory_limit_mb == "512")];
+                    "Custom"
+                }
             }
             label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
                 "CPU limit (cores)"
-                input class=(FIELD) name="cpu_limit" type="number" value=(values.cpu_limit) min="0.01" max="256" step="0.01" placeholder="Unlimited";
+                input class=(FIELD) name="cpu_limit" type="number" value=(values.cpu_limit) min="0.01" max="256" step="0.01" required data-resource-cpu;
             }
             label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
                 "Memory limit (MiB)"
-                input class=(FIELD) name="memory_limit_mb" type="number" value=(values.memory_limit_mb) min="16" max="1048576" step="1" placeholder="Unlimited";
+                input class=(FIELD) name="memory_limit_mb" type="number" value=(values.memory_limit_mb) min="16" max="1048576" step="1" required data-resource-memory;
             }
         }
     }

@@ -69,9 +69,9 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
         github_path: String::new(),
         github_dockerfile: "Dockerfile".into(),
         github_auto_deploy: true,
-        container_port: String::new(),
-        cpu_limit: String::new(),
-        memory_limit_mb: String::new(),
+        container_port: "8080".into(),
+        cpu_limit: "1".into(),
+        memory_limit_mb: "512".into(),
         env_json: "{}".into(),
     };
     render_app_form(
@@ -81,7 +81,7 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
         &values,
         "/apps",
         "New app",
-        "Create app",
+        "Build application",
         None,
         StatusCode::OK,
     )
@@ -117,7 +117,7 @@ pub(crate) async fn app_create(
         );
     }
     match create_app_record(&state, &values).await {
-        Ok(_) => redirect_with_notice("/apps", "App created."),
+        Ok(app_id) => start_initial_build(&state, &app_id),
         Err(error) => render_app_form(
             &state,
             &headers,
@@ -129,6 +129,29 @@ pub(crate) async fn app_create(
             Some(&display_error(&error)),
             StatusCode::BAD_REQUEST,
         ),
+    }
+}
+
+fn start_initial_build(state: &AppState, app_id: &str) -> Response {
+    let deps = crate::web::deployment::ExecutorDeps {
+        catalog_path: (*state.catalog_path).clone(),
+        build_runner: state.build_runner.clone(),
+        backend: state.backend.clone(),
+    };
+    let started = crate::web::deployment::start_deployment(
+        &deps,
+        &state.deployments,
+        app_id,
+        crate::web::deployment::Trigger::Manual,
+        None,
+        Some("Initial application build"),
+    );
+    match started {
+        Ok(_) => redirect_with_notice(
+            &format!("/apps/{app_id}"),
+            "Build started. Your app will remain private until you publish a subdomain.",
+        ),
+        Err(error) => internal_error(error),
     }
 }
 
@@ -157,6 +180,7 @@ pub(crate) async fn app_detail(
     let query = parse_query(raw_query.as_deref());
     let deployments_page = paginate(&deployments, page_number(&query, "deployments_page"), 10);
     let (csrf_token, cookies) = page_csrf(&state, &headers);
+    let apps_domain = super::app_publish::apps_domain(&state).await;
     html_response(
         StatusCode::OK,
         templates::app_detail(
@@ -168,37 +192,9 @@ pub(crate) async fn app_detail(
             &query,
             latest.as_ref(),
             previous.as_ref(),
+            apps_domain.as_deref(),
         ),
         cookies,
-    )
-}
-
-pub(crate) async fn app_status_partial(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> Response {
-    if !super::authenticated(&state, &headers).await {
-        return super::partials::partial_unauthorized();
-    }
-    let app = match load_app(&state, &id).await {
-        Ok(Some(app)) => app,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(error) => return internal_error(error),
-    };
-    let app_id = app.id.clone();
-    let latest = match with_catalog(&state, move |catalog| {
-        catalog.get_latest_deployment(&app_id)
-    })
-    .await
-    {
-        Ok(latest) => latest,
-        Err(error) => return internal_error(error),
-    };
-    html_response(
-        StatusCode::OK,
-        templates::app_status_body(&app, latest.as_ref()),
-        Vec::new(),
     )
 }
 
@@ -440,7 +436,7 @@ async fn remove_app_container(state: &AppState, app: &hakobi::catalog::App) -> S
         .backend
         .remove_container(&format!("agent://{}", app.host_id), &container)
         .await;
-    app.name.clone()
+    app.subdomain.clone().unwrap_or_else(|| app.name.clone())
 }
 
 async fn remove_app_images(state: &AppState, app: &hakobi::catalog::App, tags: &[String]) {

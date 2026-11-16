@@ -72,12 +72,12 @@ pub(super) async fn run_pipeline(
 fn spawn_cloudflare_route_sync(deps: &ExecutorDeps, app_id: &str) {
     let path = deps.catalog_path.clone();
     let owned_app_id = app_id.to_owned();
-    let app_name = run_catalog_op(path.clone(), move |catalog| {
+    let app_route = run_catalog_op(path.clone(), move |catalog| {
         Ok(catalog
             .get_app(&owned_app_id)?
-            .map(|app| (app.name, app.host_port)))
+            .map(|app| (app.subdomain, app.host_port)))
     });
-    if let Ok(Some((app_name, Some(host_port)))) = app_name {
+    if let Ok(Some((Some(subdomain), Some(host_port)))) = app_route {
         tokio::spawn(async move {
             let cf_path = path.clone();
             let settings = tokio::task::spawn_blocking(move || {
@@ -89,15 +89,15 @@ fn spawn_cloudflare_route_sync(deps: &ExecutorDeps, app_id: &str) {
             let settings = match settings {
                 Ok(settings) => settings,
                 Err(error) => {
-                    tracing::warn!(error = %error, app = %app_name, "cloudflare settings unavailable");
+                    tracing::warn!(error = %error, app = %subdomain, "cloudflare settings unavailable");
                     return;
                 }
             };
             if let Err(error) =
-                crate::cloudflare::apps_route::sync_app_route_with(&settings, &app_name, host_port)
+                crate::cloudflare::apps_route::sync_app_route_with(&settings, &subdomain, host_port)
                     .await
             {
-                tracing::warn!(error = %error, app = %app_name, "cloudflare route sync skipped");
+                tracing::warn!(error = %error, app = %subdomain, "cloudflare route sync skipped");
             }
         });
     }

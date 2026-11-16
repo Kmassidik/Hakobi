@@ -171,7 +171,7 @@ fn catalog_persists_apps_across_reopen() {
     let app_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 15);
+        assert_eq!(catalog.schema_version().expect("schema version"), 16);
         let host_id = catalog
             .create_host_agent("apps-host", "https://apps.example.com", "tok_apps_0123456")
             .expect("create host");
@@ -201,12 +201,47 @@ fn catalog_persists_apps_across_reopen() {
         assert!(apps[0].github_auto_deploy);
         assert_eq!(apps[0].container_port, Some(3000));
         assert_eq!(apps[0].status, "idle");
+        assert!(apps[0].subdomain.is_none());
         assert!(!apps[0].created_at.is_empty());
     }
 
     let catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 15);
+    assert_eq!(catalog.schema_version().expect("schema version"), 16);
     assert_eq!(catalog.list_apps().expect("list apps").len(), 1);
+}
+
+#[test]
+fn app_subdomain_survives_reopen_and_validates_dns_labels() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("catalog.sqlite3");
+    let mut catalog = Catalog::open(&path).unwrap();
+    let host_id = catalog
+        .create_host_agent("apps-host", "https://apps.example.com", "tok_apps_0123456")
+        .unwrap();
+    let app_id = catalog
+        .create_app(
+            "web",
+            &host_id,
+            "dockerfile",
+            None,
+            None,
+            None,
+            None,
+            true,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    assert!(catalog.set_app_subdomain(&app_id, Some("Invalid")).is_err());
+    catalog
+        .set_app_subdomain(&app_id, Some("web-public"))
+        .unwrap();
+    drop(catalog);
+
+    let catalog = Catalog::open(&path).unwrap();
+    let app = catalog.get_app(&app_id).unwrap().unwrap();
+    assert_eq!(app.subdomain.as_deref(), Some("web-public"));
 }
 
 #[test]
@@ -223,7 +258,7 @@ fn schema_v12_apps_gain_unlimited_resource_columns() {
     drop(connection);
 
     let catalog = Catalog::open(&path).expect("migrate catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 15);
+    assert_eq!(catalog.schema_version().expect("schema version"), 16);
     drop(catalog);
     let connection = rusqlite::Connection::open(&path).expect("reopen database");
     let mut statement = connection.prepare("PRAGMA table_info(apps)").unwrap();
@@ -235,6 +270,7 @@ fn schema_v12_apps_gain_unlimited_resource_columns() {
     assert!(columns.contains(&"cpu_limit".into()));
     assert!(columns.contains(&"memory_limit_bytes".into()));
     assert!(columns.contains(&"runtime_status".into()));
+    assert!(columns.contains(&"subdomain".into()));
     let image_tag_columns: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('deployments') WHERE name = 'image_tag'",
@@ -252,7 +288,7 @@ fn apps_crud_round_trip() {
 
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 15);
+        assert_eq!(catalog.schema_version().expect("schema version"), 16);
         let (app_id, host_id) = create_and_load_crud_app(&mut catalog);
 
         catalog
