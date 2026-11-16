@@ -55,7 +55,6 @@
     });
     form.querySelectorAll("[data-step-target]").forEach(function (button) {
       var current = Number(button.dataset.stepTarget) === step;
-      button.classList.toggle("border-brand", current);
       button.classList.toggle("text-ink", current);
       button.classList.toggle("text-muted", !current);
       if (current) button.setAttribute("aria-current", "step");
