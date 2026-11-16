@@ -82,18 +82,31 @@ pub(crate) async fn app_publish(
         Err(error) => return internal_error(error),
     };
     let Some(host_port) = app.host_port.filter(|_| app.status == "running") else {
-        return redirect_with_notice(
-            &format!("/apps/{id}"),
+        return publication_result(
+            &state,
+            &headers,
+            &id,
             "The application must be running before it can be published.",
-        );
+        )
+        .await;
     };
     let subdomain = form.subdomain.trim().to_lowercase();
     if let Err(error) = hakobi::catalog::validate_app_subdomain(&subdomain) {
-        return redirect_with_notice(&format!("/apps/{id}"), &error.to_string());
+        return publication_result(&state, &headers, &id, &error.to_string()).await;
     }
-    match publish_route(&state, &subdomain, host_port).await {
+    finish_publication(&state, &headers, &id, &subdomain, host_port).await
+}
+
+async fn finish_publication(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+    subdomain: &str,
+    host_port: u16,
+) -> Response {
+    match publish_route(state, subdomain, host_port).await {
         Ok(hostname) => {
-            if let Err(error) = save_subdomain(&state, &id, &subdomain).await {
+            if let Err(error) = save_subdomain(state, id, subdomain).await {
                 return internal_error(error);
             }
             let healthy = public_health(&hostname).await;
@@ -104,13 +117,46 @@ pub(crate) async fn app_publish(
                     "Published https://{hostname}; public health verification is still pending."
                 )
             };
-            redirect_with_notice(&format!("/apps/{id}"), &notice)
+            publication_result(state, headers, id, &notice).await
         }
-        Err(error) => redirect_with_notice(
-            &format!("/apps/{id}"),
-            &format!("Route publication failed: {error:#}"),
-        ),
+        Err(error) => {
+            publication_result(
+                state,
+                headers,
+                id,
+                &format!("Route publication failed: {error:#}"),
+            )
+            .await
+        }
     }
+}
+
+async fn publication_result(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+    notice: &str,
+) -> Response {
+    if !headers.contains_key("hx-request") {
+        return redirect_with_notice(&format!("/apps/{id}"), notice);
+    }
+    let app = match load_app(state, id).await {
+        Ok(Some(app)) => app,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(error) => return internal_error(error),
+    };
+    let (csrf_token, _) = super::page_csrf(state, headers);
+    let domain = apps_domain(state).await;
+    super::html_response(
+        StatusCode::OK,
+        super::templates::app_publication_notice(
+            &app,
+            &csrf_token,
+            domain.as_deref(),
+            Some(notice),
+        ),
+        Vec::new(),
+    )
 }
 
 async fn save_subdomain(state: &AppState, id: &str, subdomain: &str) -> anyhow::Result<()> {

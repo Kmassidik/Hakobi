@@ -12,7 +12,7 @@ mod pagination;
 mod readiness;
 
 pub(crate) use app_form::{app_form, AppFormValues};
-pub(crate) use app_publish::app_status_body;
+pub(crate) use app_publish::{app_publication_notice, app_status_body};
 pub(crate) use app_runtime::{app_runtime_card, app_usage_section};
 pub(crate) use apps::{app_deployments, app_detail, app_logs, apps};
 pub(crate) use container_detail::{

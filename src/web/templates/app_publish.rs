@@ -41,31 +41,44 @@ pub fn app_status_body(
 }
 
 pub fn app_publication(app: &App, csrf_token: &str, domain: Option<&str>) -> Markup {
-    let Some(domain) = domain else {
-        return html! {};
-    };
+    app_publication_notice(app, csrf_token, domain, None)
+}
+
+pub fn app_publication_notice(
+    app: &App,
+    csrf_token: &str,
+    domain: Option<&str>,
+    notice: Option<&str>,
+) -> Markup {
     html! {
-        @if app.display_status() == "running" {
-            @if let Some(subdomain) = &app.subdomain {
-                section class="mt-5 border-y border-line py-5" {
-                    p class="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted" { "Public application" }
-                    a class="mt-2 inline-block font-display text-2xl text-brand no-underline" href=(format!("https://{subdomain}.{domain}")) {
-                        (subdomain) "." (domain) " ↗"
-                    }
-                }
-            } @else {
-                section class="mt-5 border-y border-line py-5" {
-                    h2 class="m-0 font-display text-2xl font-normal" { "Your app is running privately." }
-                    p class="mb-4 mt-2 text-sm text-muted" { "Choose a subdomain to route it through the tunnel and Hakobi proxy." }
-                    form method="post" action=(format!("/apps/{}/publish", app.id)) class="flex flex-wrap items-end gap-3" {
-                        input type="hidden" name="csrf_token" value=(csrf_token);
-                        label class="grid gap-1.5 text-sm font-semibold" { "Subdomain"
-                            span class="flex items-center gap-2" {
-                                input name="subdomain" value=(default_subdomain(&app.name)) pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" maxlength="63" required class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm";
-                                span class="text-sm font-normal text-muted" { "." (domain) }
+        div id="app-publication" {
+            @if let Some(message) = notice {
+                p class="mt-4 text-sm font-semibold text-brand" role="status" { (message) }
+            }
+            @if let Some(domain) = domain {
+                @if app.display_status() == "running" {
+                    @if let Some(subdomain) = &app.subdomain {
+                        section class="mt-5 border-y border-line py-5" {
+                            p class="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-muted" { "Public application" }
+                            a class="mt-2 inline-block font-display text-2xl text-brand no-underline" href=(format!("https://{subdomain}.{domain}")) {
+                                (subdomain) "." (domain) " ↗"
                             }
                         }
-                        button type="submit" class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Publish application" }
+                    } @else {
+                        section class="mt-5 border-y border-line py-5" {
+                            h2 class="m-0 font-display text-2xl font-normal" { "Your app is running privately." }
+                            p class="mb-4 mt-2 text-sm text-muted" { "Choose a subdomain to route it through the tunnel and Hakobi proxy." }
+                            form method="post" action=(format!("/apps/{}/publish", app.id)) hx-post=(format!("/apps/{}/publish", app.id)) hx-target="#app-publication" hx-swap="outerHTML" class="flex flex-wrap items-end gap-3" {
+                                input type="hidden" name="csrf_token" value=(csrf_token);
+                                label class="grid gap-1.5 text-sm font-semibold" { "Subdomain"
+                                    span class="flex items-center gap-2" {
+                                        input name="subdomain" value=(default_subdomain(&app.name)) pattern="[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?" maxlength="63" required class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm";
+                                        span class="text-sm font-normal text-muted" { "." (domain) }
+                                    }
+                                }
+                                button type="submit" class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Publish application" }
+                            }
+                        }
                     }
                 }
             }
