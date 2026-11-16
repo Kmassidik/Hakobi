@@ -49,11 +49,30 @@ async fn check_new_app_form(app: &Router, authenticated: &str) {
     assert!(body.contains("name=\"csrf_token\""));
     assert!(body.contains("name=\"github_repo\""));
     assert!(body.contains("data-app-form"));
+    assert!(body.contains("data-app-stepper"));
     assert!(body.contains("data-resource-recommended"));
     assert!(body.contains("value=\"8080\""));
     assert!(body.contains("value=\"512\""));
-    assert!(!body.contains("data-app-stepper"));
     assert!(body.contains("env-http-host"));
+    for step in 1..=4 {
+        assert!(body.contains(&format!("data-app-step=\"{step}\"")));
+        assert!(body.contains(&format!("data-step-target=\"{step}\"")));
+    }
+    assert!(body.contains("data-step-progress"));
+    assert!(body.contains("data-step-navigation"));
+    assert!(body.contains("data-step-back"));
+    assert!(body.contains("data-step-next"));
+    for field in ["repo", "name", "build", "port", "environment"] {
+        assert!(body.contains(&format!("data-review=\"{field}\"")));
+    }
+    assert!(body.contains("name=\"env_json\" data-env-json"));
+    assert!(body.contains("data-env-editor hidden"));
+    assert!(body.contains("data-env-row-template"));
+    assert!(body.contains("data-env-type"));
+    assert!(body.contains("data-env-key"));
+    assert!(body.contains("data-env-value"));
+    assert!(body.contains("data-env-remove"));
+    assert!(body.contains("data-env-add"));
 }
 
 async fn reject_invalid_apps(app: &Router, authenticated: &str, csrf: &str, host_id: &str) {
@@ -182,6 +201,13 @@ async fn check_edit_form(app: &Router, authenticated: &str, app_id: &str) {
     assert!(body.contains("name=\"memory_limit_mb\""));
     assert!(body.contains("value=\"512\""));
     assert!(body.contains("Edit app"));
+    assert!(body.contains("data-app-form"));
+    assert!(!body.contains("data-app-stepper"));
+    assert!(!body.contains("data-step-progress"));
+    assert!(!body.contains("data-step-navigation"));
+    for step in 1..=4 {
+        assert!(body.contains(&format!("data-app-step=\"{step}\"")));
+    }
 }
 
 async fn update_app(

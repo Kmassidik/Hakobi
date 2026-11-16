@@ -48,10 +48,12 @@
       }
       var current = picker.envInput.value.trim();
       if (picker.envDirty || (current && current !== "{}")) {
-        picker.envStatus.textContent = "Found " + keys.length + " example keys; kept your existing JSON.";
+        picker.envStatus.textContent = "Found " + keys.length + " example keys; kept your existing variables.";
         return;
       }
       picker.envInput.value = JSON.stringify(data.env, null, 2);
+      var form = picker.envInput.closest("form");
+      if (form) form.dispatchEvent(new CustomEvent("hakobi:env-import"));
       picker.envStatus.textContent = "Found " + keys.length + " variable names. Add values before deploying.";
     } catch (e) {
       picker.envStatus.textContent = "Could not inspect example environment files; enter variables manually.";

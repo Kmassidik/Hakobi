@@ -96,28 +96,52 @@ fn app_form_fields(
     submit_label: &str,
     csrf_token: &str,
 ) -> Markup {
-    let creating = action == "/apps";
+    let guided = action == "/apps";
     html! {
-        form method="post" action=(action) data-app-form[creating] class="mt-10 grid w-full max-w-[52rem] grid-cols-1 gap-8" {
+        form method="post" action=(action) data-app-form data-app-stepper[guided] class="mt-8 grid w-full max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-4 sm:p-6" {
             input type="hidden" name="csrf_token" value=(csrf_token);
-            section class="grid grid-cols-1 gap-5" {
+            @if guided { (stepper_navigation()) }
+            section data-app-step="1" class="grid grid-cols-1 gap-5" {
                 (step_heading("Source", "Choose a repository and application. Hakobi fills in what it can detect."))
                 (github_source_fields(values))
             }
-            section class="grid grid-cols-1 gap-5 border-t border-line pt-8" {
-                (step_heading("Application", "Name the app and choose its host."))
+            section data-app-step="2" class="grid grid-cols-1 gap-5" {
+                (step_heading("Name your app", "Choose a recognizable name and where it should run."))
                 (app_identity_fields(hosts, values))
             }
-            section class="grid grid-cols-1 gap-5 border-t border-line pt-8" {
-                (step_heading("Build", "All settings stay visible and editable."))
+            section data-app-step="3" class="grid grid-cols-1 gap-5" {
+                (step_heading("Configure the build", "Set the runtime, port, build paths, and environment."))
                 (build_settings_fields(values))
             }
-            section class="grid grid-cols-1 gap-5 border-t border-line pt-8" {
-                (step_heading("Resources", "Use the recommended allocation or choose custom limits."))
+            section data-app-step="4" class="grid grid-cols-1 gap-5" {
+                (step_heading("Resources and review", "Choose recommended or custom resources, set deployment policy, and review the app."))
                 (resource_limit_fields(values))
                 (deployment_policy_field(values))
+                @if guided { (review_summary()) }
+                (step_actions(submit_label))
             }
-            (step_actions(submit_label))
+            @if guided {
+                p data-step-error role="alert" class="m-0 text-sm text-danger" {}
+                div hidden class="flex items-center justify-between gap-3 border-t border-line pt-4" data-step-navigation {
+                    button type="button" data-step-back class="rounded-lg border border-line bg-transparent px-4 py-2.5 text-sm font-semibold text-ink" { "Back" }
+                    button type="button" data-step-next class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Continue" }
+                }
+            }
+        }
+    }
+}
+
+fn stepper_navigation() -> Markup {
+    html! {
+        ol hidden data-step-progress class="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4" aria-label="App creation progress" {
+            @for (number, label) in [(1, "Source"), (2, "Identity"), (3, "Build"), (4, "Review")] {
+                li {
+                    button type="button" data-step-target=(number) class="w-full rounded-lg border border-line bg-transparent px-2 py-2.5 text-xs font-semibold text-muted" {
+                        span class="mr-1.5 text-brand-bright" { (number) }
+                        (label)
+                    }
+                }
+            }
         }
     }
 }
@@ -125,7 +149,7 @@ fn app_form_fields(
 fn step_heading(title: &str, description: &str) -> Markup {
     html! {
         div {
-            h2 class="m-0 font-display text-2xl font-normal" { (title) }
+            h2 tabindex="-1" class="m-0 font-display text-2xl font-normal outline-none" { (title) }
             p class="mb-0 mt-2 text-sm leading-relaxed text-muted" { (description) }
         }
     }
@@ -200,14 +224,8 @@ fn build_settings_fields(values: &AppFormValues) -> Markup {
                 "Container port"
                 input class=(FIELD) name="container_port" type="number" value=(values.container_port) min="1" max="65535" placeholder="8080";
             }
-            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-                "Environment variables (JSON, optional)"
-                textarea class=(FIELD) name="env_json" rows="3" placeholder="{}" autocomplete="off" { (values.env_json) }
-                span data-gh-env-status class="text-xs font-normal leading-relaxed text-muted" {
-                    "After scanning, keys from .env.example or .env.sample appear here with blank values."
-                }
-            }
         }
+        (environment_fields(values))
         label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
             "Context path"
             p class="m-0 text-xs font-normal leading-relaxed text-muted" {
@@ -222,11 +240,80 @@ fn build_settings_fields(values: &AppFormValues) -> Markup {
     }
 }
 
+fn environment_fields(values: &AppFormValues) -> Markup {
+    html! {
+        div class="grid gap-4 border-t border-line pt-5" {
+            label class="grid gap-2 text-[0.8rem] font-bold" {
+                "Environment variables (JSON, optional)"
+                textarea class=(FIELD) name="env_json" data-env-json rows="4" placeholder="{}" autocomplete="off" { (values.env_json) }
+            }
+            div data-env-editor hidden class="grid gap-4" {
+                div {
+                    h3 class="m-0 text-sm font-bold" { "Variables" }
+                    p class="mb-0 mt-1 text-xs font-normal leading-relaxed text-muted" {
+                        "Add plain-text environment variables for the container."
+                    }
+                }
+                div data-env-rows class="grid gap-4" {}
+                template data-env-row-template { (environment_row()) }
+                p data-env-error role="alert" class="m-0 text-xs font-normal text-danger" {}
+                div class="border-t border-line pt-4" {
+                    button type="button" data-env-add class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink hover:bg-paper" {
+                        "+ Add variable"
+                    }
+                }
+            }
+            span data-gh-env-status class="text-xs font-normal leading-relaxed text-muted" {
+                "After scanning, keys from .env.example or .env.sample appear here with blank values."
+            }
+        }
+    }
+}
+
+fn environment_row() -> Markup {
+    html! {
+        div data-env-row class="grid grid-cols-1 gap-3 sm:grid-cols-[7.5rem_minmax(0,1fr)_minmax(0,1.5fr)_2.75rem] sm:items-end" {
+            label class="grid gap-1.5 text-xs font-semibold text-muted" {
+                "Type"
+                select data-env-type class=(FIELD) aria-label="Variable type" {
+                    option value="variable" { "Variable" }
+                }
+            }
+            label class="grid gap-1.5 text-xs font-semibold text-muted" {
+                "Variable name"
+                input data-env-key class=(FIELD) type="text" placeholder="Name" autocomplete="off";
+            }
+            label class="grid gap-1.5 text-xs font-semibold text-muted" {
+                "Value"
+                input data-env-value class=(FIELD) type="text" placeholder="Value" autocomplete="off";
+            }
+            button type="button" data-env-remove class="flex h-11 w-full items-center justify-center rounded-lg border border-danger/40 bg-transparent text-danger hover:bg-danger/5 sm:w-11" aria-label="Remove variable" title="Remove variable" {
+                i class="fa-solid fa-trash-can" aria-hidden="true" {}
+            }
+        }
+    }
+}
+
 fn deployment_policy_field(values: &AppFormValues) -> Markup {
     html! {
         label class="flex items-center gap-3 py-2 text-sm font-semibold" {
             input name="github_auto_deploy" type="checkbox" value="1" checked[values.github_auto_deploy] class="size-4";
             span { "Automatically deploy when the tracked branch changes" }
+        }
+    }
+}
+
+fn review_summary() -> Markup {
+    html! {
+        div class="rounded-lg border border-line bg-paper/60 p-4" {
+            h3 class="m-0 text-sm font-bold" { "Review" }
+            dl class="mb-0 mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs" data-app-review {
+                dt class="text-muted" { "Repository" } dd class="m-0 break-all font-mono" data-review="repo" {}
+                dt class="text-muted" { "App" } dd class="m-0 break-all font-mono" data-review="name" {}
+                dt class="text-muted" { "Build" } dd class="m-0 break-all font-mono" data-review="build" {}
+                dt class="text-muted" { "Port" } dd class="m-0 font-mono" data-review="port" {}
+                dt class="text-muted" { "Environment" } dd class="m-0 font-mono" data-review="environment" {}
+            }
         }
     }
 }

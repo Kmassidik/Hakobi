@@ -71,8 +71,12 @@ Gap: none.
 User intent: GitHub App repository selection, push-to-build, auto-deploy,
 rollback, and deletion. Registration, installation, and user connection must
 be honest distinct states. Monorepos and single repositories both work.
-New-app creation uses one fully visible form with detected source defaults,
-port 8080, and recommended 1-core/512-MiB limits (custom values remain visible).
+New-app creation uses validated Source, Identity, Build, and Review steps with
+detected source defaults, port 8080, and recommended 1-core/512-MiB limits
+(custom values remain editable). Environment variables use add/remove name-value
+rows; example-file discovery imports names only and preserves manual edits. The
+server wire format remains a JSON object, with native-form fallback when browser
+scripting is unavailable. Editing an existing app remains a fully visible form.
 Creating an app immediately queues its first build and container start. Apps
 remain private until a running app is explicitly assigned a subdomain; only
 then are managed DNS and tunnel ingress created and public health checked.
