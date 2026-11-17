@@ -212,12 +212,21 @@ impl ContainerBackend for RoutingBackend {
         image: &str,
         name: &str,
         container_port: u16,
+        requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
     ) -> Result<RunResult> {
         self.select(endpoint)
             .await?
-            .run_container(endpoint, image, name, container_port, env, resources)
+            .run_container(
+                endpoint,
+                image,
+                name,
+                container_port,
+                requested_host_port,
+                env,
+                resources,
+            )
             .await
     }
 

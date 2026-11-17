@@ -75,7 +75,11 @@ New-app creation uses validated Source, Identity, Build, and Review steps with
 the canonical connected progress card, an eight-column task panel, and a sticky
 four-column live recipe summary from `docs/UI_STYLE_PROMPT.md`. Detection fills
 source defaults, port 8080, and recommended 1-core/512-MiB limits (custom values
-remain editable). Environment variables use add/remove name-value
+remain editable). Port mapping exposes an optional host port and the detected
+container port: blank host port uses automatic allocation, while a custom value
+requests that exact loopback binding and fails honestly on conflicts. The target
+machine is auto-selected and hidden for a single enabled host, with a selector
+shown when multiple hosts are available. Environment variables use add/remove name-value
 rows; example-file discovery imports names only and preserves manual edits. The
 server wire format remains a JSON object, with native-form fallback when browser
 scripting is unavailable. Editing an existing app remains a fully visible form.

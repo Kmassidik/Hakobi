@@ -24,6 +24,8 @@ pub(super) struct BuildContext {
     pub image_tag: String,
     /// Container port the app listens on (host port maps to this).
     pub container_port: u16,
+    /// Requested host port; blank app settings select one automatically.
+    pub requested_host_port: Option<u16>,
     pub resources: ResourceLimits,
     /// Raw JSON object of container environment variables.
     pub env_json: String,

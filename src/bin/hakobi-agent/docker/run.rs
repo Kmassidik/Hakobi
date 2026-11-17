@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use anyhow::{bail, Result};
 use axum::{
     extract::{rejection::JsonRejection, State},
     http::{HeaderMap, StatusCode},
@@ -35,17 +36,8 @@ pub(crate) async fn docker_run(
             return error_response(StatusCode::BAD_REQUEST, rejection.body_text());
         }
     };
-    if let Err(error) = validate_image_reference(&request.image) {
+    if let Err(error) = validate_run_request(&request) {
         return error_response(StatusCode::BAD_REQUEST, error.to_string());
-    }
-    if let Err(error) = validate_container_name(&request.name) {
-        return error_response(StatusCode::BAD_REQUEST, error.to_string());
-    }
-    if request.container_port == 0 {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "container port must be between 1 and 65535",
-        );
     }
     let backend = DockerBackend;
     match docker_call(
@@ -54,6 +46,7 @@ pub(crate) async fn docker_run(
             &request.image,
             &request.name,
             request.container_port,
+            request.host_port,
             &request.env,
             ResourceLimits {
                 cpu: request.cpu_limit,
@@ -70,4 +63,16 @@ pub(crate) async fn docker_run(
         }
         Err(response) => *response,
     }
+}
+
+fn validate_run_request(request: &RunContainerRequest) -> Result<()> {
+    validate_image_reference(&request.image)?;
+    validate_container_name(&request.name)?;
+    if request.container_port == 0 {
+        bail!("container port must be between 1 and 65535");
+    }
+    if request.host_port == Some(0) {
+        bail!("host port must be between 1 and 65535");
+    }
+    Ok(())
 }

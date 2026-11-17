@@ -111,11 +111,7 @@ async fn agent_backend_validates_detail_input_before_the_agent() {
         .is_ok());
 }
 
-#[tokio::test]
-async fn agent_backend_sends_authenticated_mutations() {
-    let url = spawn_fake_agent(TOKEN).await;
-    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
-
+async fn exercise_lifecycle(backend: &AgentBackend) {
     backend
         .start_container(host_agent::LOCAL_ENDPOINT, "demo-api")
         .await
@@ -140,12 +136,20 @@ async fn agent_backend_sends_authenticated_mutations() {
         .remove_container(host_agent::LOCAL_ENDPOINT, "demo-api")
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn agent_backend_sends_authenticated_mutations() {
+    let url = spawn_fake_agent(TOKEN).await;
+    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+    exercise_lifecycle(&backend).await;
     let result = backend
         .run_container(
             host_agent::LOCAL_ENDPOINT,
             "alpine:3.20",
             "demo-api",
             8080,
+            None,
             &Default::default(),
             Default::default(),
         )
@@ -161,6 +165,25 @@ async fn agent_backend_sends_authenticated_mutations() {
         .unwrap_err()
         .to_string();
     assert!(missing.contains("no such container"), "{missing}");
+}
+
+#[tokio::test]
+async fn agent_backend_forwards_the_exact_requested_host_port() {
+    let url = spawn_fake_agent(TOKEN).await;
+    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+    let result = backend
+        .run_container(
+            host_agent::LOCAL_ENDPOINT,
+            "alpine:3.20",
+            "demo-api",
+            8080,
+            Some(18080),
+            &Default::default(),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(result.host_port, 18080);
 }
 
 #[tokio::test]
@@ -240,6 +263,7 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
             "alpine latest",
             "demo-api",
             8080,
+            None,
             &Default::default(),
             Default::default(),
         )
@@ -251,12 +275,32 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
             "alpine:3.20",
             "demo-api",
             0,
+            None,
             &Default::default(),
             Default::default(),
         )
         .await
         .is_err());
     assert!(backend.test("unix:///var/run/docker.sock").await.is_err());
+}
+
+#[tokio::test]
+async fn agent_backend_rejects_zero_host_port_before_calling_the_agent() {
+    let url = spawn_fake_agent(TOKEN).await;
+    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+    let error = backend
+        .run_container(
+            host_agent::LOCAL_ENDPOINT,
+            "alpine:3.20",
+            "demo-api",
+            8080,
+            Some(0),
+            &Default::default(),
+            Default::default(),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("host port"), "{error}");
 }
 
 #[tokio::test]

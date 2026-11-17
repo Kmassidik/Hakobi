@@ -355,6 +355,7 @@ fn create_catalog_app(catalog: &mut Catalog, host_id: &str, name: &str) -> Strin
             None,
             None,
             None,
+            None,
         )
         .unwrap()
 }

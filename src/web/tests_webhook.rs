@@ -49,6 +49,7 @@ fn seed_app(path: &std::path::Path, secret: Option<&str>) -> (String, String) {
             Some(3000),
             None,
             None,
+            None,
         )
         .unwrap();
     if let Some(secret) = secret {

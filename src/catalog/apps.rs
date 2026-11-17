@@ -3,6 +3,8 @@
 //! Apps bind a build recipe to an enrolled host agent. Deployments
 //! are immutable, versioned records; logs attach to a single deployment.
 
+mod update;
+
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 
@@ -23,6 +25,8 @@ pub struct App {
     pub github_dockerfile: Option<String>,
     pub github_auto_deploy: bool,
     pub container_port: Option<u16>,
+    /// Requested loopback host port; None selects an automatic port per deployment.
+    pub requested_host_port: Option<u16>,
     /// Maximum CPU cores; None leaves the container unlimited.
     pub cpu_limit: Option<f64>,
     /// Maximum memory in bytes; None leaves the container unlimited.
@@ -140,13 +144,14 @@ fn read_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<App> {
         memory_limit_bytes: row.get::<_, Option<i64>>(18)?.map(|value| value as u64),
         runtime_status: row.get(19)?,
         subdomain: row.get(20)?,
+        requested_host_port: row.get::<_, Option<i64>>(21)?.map(|v| v as u16),
     })
 }
 
 const APP_COLUMNS: &str = "id, name, host_id, build_type, github_repo, \
      github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, host_port, \
      env_json, status, webhook_secret, webhook_enabled, created_at, updated_at, \
-     cpu_limit, memory_limit_bytes, runtime_status, subdomain";
+     cpu_limit, memory_limit_bytes, runtime_status, subdomain, requested_host_port";
 
 impl Catalog {
     /// Replaces the app's container environment variables (JSON object).
@@ -183,6 +188,7 @@ impl Catalog {
         github_dockerfile: Option<&str>,
         github_auto_deploy: bool,
         container_port: Option<u16>,
+        requested_host_port: Option<u16>,
         cpu_limit: Option<f64>,
         memory_limit_bytes: Option<u64>,
     ) -> Result<String> {
@@ -190,6 +196,7 @@ impl Catalog {
         validate_app_name(name)?;
         validate_build_type(build_type)?;
         validate_port(container_port)?;
+        validate_port(requested_host_port)?;
         validate_resource_limits(cpu_limit, memory_limit_bytes)?;
 
         let id = super::new_id();
@@ -210,6 +217,7 @@ impl Catalog {
             github_dockerfile,
             github_auto_deploy,
             container_port,
+            requested_host_port,
             cpu_limit,
             memory_limit_bytes,
         )?;
@@ -239,59 +247,6 @@ impl Catalog {
             )
             .optional()
             .context("load app")
-    }
-
-    /// Replaces the mutable fields of a CP9 app.
-    #[allow(clippy::too_many_arguments)]
-    pub fn update_app(
-        &mut self,
-        id: &str,
-        name: &str,
-        host_id: &str,
-        build_type: &str,
-        github_repo: Option<&str>,
-        github_branch: Option<&str>,
-        github_path: Option<&str>,
-        github_dockerfile: Option<&str>,
-        github_auto_deploy: bool,
-        container_port: Option<u16>,
-        cpu_limit: Option<f64>,
-        memory_limit_bytes: Option<u64>,
-        env_json: &str,
-    ) -> Result<()> {
-        let name = name.trim();
-        validate_app_name(name)?;
-        validate_env_json(env_json)?;
-        validate_build_type(build_type)?;
-        validate_port(container_port)?;
-        validate_resource_limits(cpu_limit, memory_limit_bytes)?;
-        let transaction = self.connection.transaction()?;
-        ensure_enabled_host(&transaction, host_id)?;
-        if app_name_taken(&transaction, name, Some(id))? {
-            bail!("app {name} already exists");
-        }
-        let updated = update_app_record(
-            &transaction,
-            id,
-            name,
-            host_id,
-            build_type,
-            github_repo,
-            github_branch,
-            github_path,
-            github_dockerfile,
-            github_auto_deploy,
-            container_port,
-            cpu_limit,
-            memory_limit_bytes,
-            env_json,
-        )?;
-        if updated == 0 {
-            bail!("app {id} not found");
-        }
-        super::record_audit(&transaction, "update", "app", id)?;
-        transaction.commit()?;
-        Ok(())
     }
 
     pub fn set_app_runtime_status_for_deployment(&mut self, deployment_id: &str) -> Result<()> {
@@ -377,6 +332,7 @@ fn insert_app(
     github_dockerfile: Option<&str>,
     github_auto_deploy: bool,
     container_port: Option<u16>,
+    requested_host_port: Option<u16>,
     cpu_limit: Option<f64>,
     memory_limit_bytes: Option<u64>,
 ) -> Result<()> {
@@ -384,8 +340,8 @@ fn insert_app(
         "INSERT INTO apps \
              (id, name, host_id, build_type, github_repo, github_branch, \
               github_path, github_dockerfile, github_auto_deploy, container_port, \
-              cpu_limit, memory_limit_bytes, status, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'idle', \
+              requested_host_port, cpu_limit, memory_limit_bytes, status, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'idle', \
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
         params![
@@ -403,6 +359,7 @@ fn insert_app(
                 .filter(|value| !value.is_empty()),
             i64::from(github_auto_deploy),
             container_port,
+            requested_host_port,
             cpu_limit,
             memory_limit_bytes.map(|value| value as i64),
         ],
@@ -423,6 +380,7 @@ fn update_app_record(
     github_dockerfile: Option<&str>,
     github_auto_deploy: bool,
     container_port: Option<u16>,
+    requested_host_port: Option<u16>,
     cpu_limit: Option<f64>,
     memory_limit_bytes: Option<u64>,
     env_json: &str,
@@ -431,8 +389,8 @@ fn update_app_record(
         "UPDATE apps \
          SET name = ?2, host_id = ?3, build_type = ?4, github_repo = ?5, \
              github_branch = ?6, github_path = ?7, github_dockerfile = ?8, \
-             github_auto_deploy = ?9, container_port = ?10, env_json = ?11, \
-             cpu_limit = ?12, memory_limit_bytes = ?13, \
+             github_auto_deploy = ?9, container_port = ?10, requested_host_port = ?11, \
+             env_json = ?12, cpu_limit = ?13, memory_limit_bytes = ?14, \
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
          WHERE id = ?1",
         params![
@@ -450,6 +408,7 @@ fn update_app_record(
                 .filter(|value| !value.is_empty()),
             i64::from(github_auto_deploy),
             container_port,
+            requested_host_port,
             env_json,
             cpu_limit,
             memory_limit_bytes.map(|value| value as i64),

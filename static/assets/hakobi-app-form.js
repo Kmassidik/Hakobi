@@ -185,6 +185,11 @@
     return field && field.value ? field.value : (fallback || "");
   }
 
+  function portMapping(form, containerFallback) {
+    var host = fieldValue(form, "requested_host_port", "auto");
+    return host + " → " + fieldValue(form, "container_port", containerFallback);
+  }
+
   function environmentLabel(form) {
     try {
       var count = Object.keys(parseEnvironment(form.elements.env_json.value)).length;
@@ -199,7 +204,7 @@
       repo: fieldValue(form, "github_repo", "Not selected") + " · " + fieldValue(form, "github_branch", "Not selected"),
       name: fieldValue(form, "name", "—"),
       build: fieldValue(form, "build_type", "Not selected") + " · " + fieldValue(form, "github_dockerfile", "—"),
-      port: fieldValue(form, "container_port", "—"),
+      port: portMapping(form, "—"),
       environment: environmentLabel(form),
     };
     Object.keys(values).forEach(function (key) {
@@ -211,6 +216,7 @@
   function selectedText(form, name, fallback) {
     var field = form.elements[name];
     if (!field || !field.value) return fallback;
+    if (field.dataset.summaryLabel) return field.dataset.summaryLabel;
     if (!field.selectedOptions || !field.selectedOptions.length) return field.value;
     return field.selectedOptions[0].textContent.trim();
   }
@@ -225,7 +231,7 @@
       repo: fieldValue(form, "github_repo", "Not selected"),
       branch: fieldValue(form, "github_branch", "Not selected"),
       host: selectedText(form, "host_id", "Not selected"),
-      runtime: selectedText(form, "build_type", "Not selected") + " · :" + fieldValue(form, "container_port", "8080"),
+      runtime: selectedText(form, "build_type", "Not selected") + " · " + portMapping(form, "8080"),
       allocation: cpu + " CPU · " + memory + " MiB",
       environment: environmentLabel(form),
       auto_deploy: autoDeploy && autoDeploy.checked ? "Auto-deploy on push" : "Manual deploy only",

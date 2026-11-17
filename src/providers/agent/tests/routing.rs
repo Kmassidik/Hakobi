@@ -85,6 +85,7 @@ impl ContainerBackend for StubBackend {
         _image: &str,
         _name: &str,
         _container_port: u16,
+        _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: ResourceLimits,
     ) -> Result<RunResult> {
@@ -143,6 +144,7 @@ async fn routing_dispatches_by_endpoint_scheme() {
             "alpine:3.20",
             "demo",
             80,
+            None,
             &std::collections::HashMap::new(),
             ResourceLimits::default(),
         )

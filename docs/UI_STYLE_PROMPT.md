@@ -82,6 +82,10 @@ anything new.
   an Add variable action. On mobile each row becomes a readable stacked group.
   Preserve exact string values, reject duplicate/invalid names inline, and keep
   example-file values blank.
+- Port mapping uses Host port (optional) and Container port controls beside the
+  build type. Blank host port displays Automatic; custom values are explicit.
+  Helper text states loopback-only binding and automatic allocation. Review and
+  summary use an honest `host → container` mapping, with `auto` until assigned.
 - Resource defaults use selectable Recommended and Custom cards. Recommended
   shows 1 CPU and 512 MiB in read-only fields. Custom enables editing. Selection
   must be visually obvious without excessive badges.

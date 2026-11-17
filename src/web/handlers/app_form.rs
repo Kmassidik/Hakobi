@@ -28,6 +28,8 @@ pub(crate) struct AppForm {
     #[serde(default)]
     pub(crate) container_port: String,
     #[serde(default)]
+    pub(crate) requested_host_port: String,
+    #[serde(default)]
     pub(crate) cpu_limit: String,
     #[serde(default)]
     pub(crate) memory_limit_mb: String,
@@ -51,6 +53,7 @@ pub(crate) fn form_values(form: &AppForm) -> templates::AppFormValues {
         },
         github_auto_deploy: form.github_auto_deploy.as_deref() == Some("1"),
         container_port: form.container_port.trim().to_owned(),
+        requested_host_port: form.requested_host_port.trim().to_owned(),
         cpu_limit: form.cpu_limit.trim().to_owned(),
         memory_limit_mb: form.memory_limit_mb.trim().to_owned(),
         env_json: if form.env_json.trim().is_empty() {
@@ -73,6 +76,10 @@ pub(crate) fn edit_form_values(app: hakobi::catalog::App) -> templates::AppFormV
         github_auto_deploy: app.github_auto_deploy,
         container_port: app
             .container_port
+            .map(|port| port.to_string())
+            .unwrap_or_default(),
+        requested_host_port: app
+            .requested_host_port
             .map(|port| port.to_string())
             .unwrap_or_default(),
         cpu_limit: app
@@ -160,6 +167,15 @@ pub(crate) fn validate_app_inputs(
     {
         return Err("Container port must be between 1 and 65535.".into());
     }
+    if !values.requested_host_port.is_empty()
+        && values
+            .requested_host_port
+            .parse::<u16>()
+            .map(|port| port == 0)
+            != Ok(false)
+    {
+        return Err("Host port must be between 1 and 65535.".into());
+    }
     resource_limits(values).map_err(|error| error.to_string())?;
     let env: serde_json::Value = serde_json::from_str(&values.env_json)
         .map_err(|_| "Environment must be a valid JSON object.".to_owned())?;
@@ -182,6 +198,7 @@ pub(crate) async fn create_app_record(
     let github_dockerfile = non_empty(&values.github_dockerfile);
     let github_auto_deploy = values.github_auto_deploy;
     let container_port = parse_port(&values.container_port);
+    let requested_host_port = parse_port(&values.requested_host_port);
     let (cpu_limit, memory_limit_bytes) = resource_limits(values)?;
     let env_json = values.env_json.clone();
     with_catalog(state, move |catalog| {
@@ -195,6 +212,7 @@ pub(crate) async fn create_app_record(
             github_dockerfile.as_deref(),
             github_auto_deploy,
             container_port,
+            requested_host_port,
             cpu_limit,
             memory_limit_bytes,
         )?;
@@ -218,6 +236,7 @@ pub(crate) async fn update_app_record(
     let github_dockerfile = non_empty(&values.github_dockerfile);
     let github_auto_deploy = values.github_auto_deploy;
     let container_port = parse_port(&values.container_port);
+    let requested_host_port = parse_port(&values.requested_host_port);
     let (cpu_limit, memory_limit_bytes) = resource_limits(values)?;
     let env_json = values.env_json.clone();
     let app_id = id.to_owned();
@@ -241,6 +260,7 @@ pub(crate) async fn update_app_record(
             github_dockerfile.as_deref(),
             github_auto_deploy,
             container_port,
+            requested_host_port,
             cpu_limit,
             memory_limit_bytes,
             &env_json,

@@ -155,11 +155,20 @@ impl ContainerBackend for RecordingBackend {
         image: &str,
         name: &str,
         port: u16,
+        requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
     ) -> anyhow::Result<RunResult> {
         self.fake
-            .run_container(endpoint, image, name, port, env, resources)
+            .run_container(
+                endpoint,
+                image,
+                name,
+                port,
+                requested_host_port,
+                env,
+                resources,
+            )
             .await
     }
 }
@@ -217,6 +226,7 @@ fn create_app(catalog: &mut Catalog, host_id: &str, name: &str) -> String {
             None,
             Some("Dockerfile"),
             false,
+            None,
             None,
             None,
             None,

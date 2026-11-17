@@ -40,6 +40,9 @@ and guarded domain CRUD must remain working. Use parameterized SQL only.
 - Cloudflare Tunnel: explicit `llm.glicc.id` → 8081 and
   `llminferences.glicc.id` → 8082; wildcard `*.glicc.id` → edge 9000.
 - Apps publish on loopback only. Do not expose raw host ports publicly.
+  App host-port overrides bind exactly to `127.0.0.1`; blank selects the
+  automatic range, and a custom-port collision must fail rather than silently
+  choosing another port.
 - Tailscale is in active use. Do not stop or reconfigure Tailscale, the GPU
   workload, the LLM frontend, or the LLM API when changing the general edge.
 - `ufw` is disabled by explicit user choice; do not enable it without asking.

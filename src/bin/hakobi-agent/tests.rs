@@ -132,6 +132,7 @@ async fn docker_run_rejects_invalid_requests_before_touching_docker() {
         r#"{"image":"alpine;rm -rf /","name":"demo-api","container_port":8080}"#,
         r#"{"image":"alpine:3.20","name":"bad name","container_port":8080}"#,
         r#"{"image":"alpine:3.20","name":"demo-api","container_port":0}"#,
+        r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080,"host_port":0}"#,
         r#"{"image":42}"#,
     ];
     for body in cases {

@@ -37,6 +37,7 @@ pub(super) fn recipe_summary(hosts: &[HostAgent], values: &AppFormValues) -> Mar
     let host = hosts
         .iter()
         .find(|host| host.id == values.host_id)
+        .or_else(|| hosts.first().filter(|_| hosts.len() == 1))
         .map(|host| format!("{} · {}", host.name, host.agent_url))
         .unwrap_or_else(|| "Not selected".into());
     html! {
@@ -54,7 +55,7 @@ pub(super) fn recipe_summary(hosts: &[HostAgent], values: &AppFormValues) -> Mar
                     (summary_row("Repository", "repo", present(&values.github_repo)))
                     (summary_row("Branch", "branch", present(&values.github_branch)))
                     (summary_row("Host", "host", host))
-                    (summary_row("Runtime", "runtime", format!("{} · :{}", build_label(&values.build_type), present(&values.container_port))))
+                    (summary_row("Runtime", "runtime", format!("{} · {}", build_label(&values.build_type), port_mapping(values))))
                     (summary_row("Allocation", "allocation", format!("{} CPU · {} MiB", present(&values.cpu_limit), present(&values.memory_limit_mb))))
                     (summary_row("Environment", "environment", environment_label(&values.env_json)))
                     (summary_row("Auto-deploy", "auto_deploy", if values.github_auto_deploy { "Auto-deploy on push".into() } else { "Manual deploy only".into() }))
@@ -160,7 +161,7 @@ pub(super) fn review_summary(values: &AppFormValues) -> Markup {
                 (review_row("Repository", "repo", repo, Some(1)))
                 (review_row("App", "name", present(&values.name), Some(2)))
                 (review_row("Build", "build", build, Some(3)))
-                (review_row("Port", "port", present(&values.container_port), Some(3)))
+                (review_row("Port mapping", "port", port_mapping(values), Some(3)))
                 (review_row("Environment", "environment", environment_label(&values.env_json), Some(3)))
             }
         }
@@ -177,6 +178,15 @@ fn review_row(label: &str, key: &str, value: String, target: Option<u8>) -> Mark
             }
         }
     }
+}
+
+fn port_mapping(values: &AppFormValues) -> String {
+    let host = if values.requested_host_port.trim().is_empty() {
+        "auto"
+    } else {
+        values.requested_host_port.trim()
+    };
+    format!("{} → {}", host, present(&values.container_port))
 }
 
 fn present(value: &str) -> String {

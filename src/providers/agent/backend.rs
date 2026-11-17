@@ -302,6 +302,7 @@ impl ContainerBackend for AgentBackend {
         image: &str,
         name: &str,
         container_port: u16,
+        requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
     ) -> Result<RunResult> {
@@ -311,10 +312,14 @@ impl ContainerBackend for AgentBackend {
         if container_port == 0 {
             bail!("container port must be between 1 and 65535");
         }
+        if requested_host_port == Some(0) {
+            bail!("host port must be between 1 and 65535");
+        }
         let request = RunContainerRequest {
             image: image.to_owned(),
             name: name.to_owned(),
             container_port,
+            host_port: requested_host_port,
             env: env.clone(),
             cpu_limit: resources.cpu,
             memory_limit_bytes: resources.memory_bytes,

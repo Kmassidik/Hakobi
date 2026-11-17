@@ -308,7 +308,7 @@ async fn fake_run(
         StatusCode::CREATED,
         Json(RunContainerResponse {
             container_id: format!("id-{}", request.name),
-            host_port: 18000,
+            host_port: request.host_port.unwrap_or(18000),
             name: request.name,
         }),
     )

@@ -229,6 +229,7 @@ async fn deploy_image(
             image_tag,
             &container_name,
             context.container_port,
+            context.requested_host_port,
             &env,
             context.resources,
         )
@@ -371,6 +372,7 @@ async fn load_build_context(
         Ok(BuildContext {
             deploy_endpoint: format!("agent://{}", app.host_id),
             container_port: app.container_port.unwrap_or(8080),
+            requested_host_port: app.requested_host_port,
             resources: ResourceLimits {
                 cpu: app.cpu_limit,
                 memory_bytes: app.memory_limit_bytes,

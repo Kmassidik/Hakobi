@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use axum::{
     body::Body,
@@ -12,6 +10,7 @@ use hakobi::{
         ContainerBackend, ContainerPort, ContainerRow, DockerSnapshot, HostInfo, RunResult,
     },
 };
+use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
@@ -217,6 +216,7 @@ impl ContainerBackend for DetailBackend {
         _image: &str,
         name: &str,
         _container_port: u16,
+        _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: hakobi::providers::ResourceLimits,
     ) -> anyhow::Result<RunResult> {
@@ -331,6 +331,7 @@ fn seed_named_app(data: &TempDir) {
             None,
             None,
             false,
+            None,
             None,
             None,
             None,

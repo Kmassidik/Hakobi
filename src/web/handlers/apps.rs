@@ -70,6 +70,7 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
         github_dockerfile: "Dockerfile".into(),
         github_auto_deploy: true,
         container_port: "8080".into(),
+        requested_host_port: String::new(),
         cpu_limit: "1".into(),
         memory_limit_mb: "512".into(),
         env_json: "{}".into(),

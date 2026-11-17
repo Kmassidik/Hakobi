@@ -1,3 +1,15 @@
+use std::sync::{Arc, Mutex};
+
+use axum::{
+    body::{to_bytes, Body},
+    extract::State,
+    http::{Request, StatusCode},
+    response::{IntoResponse, Response},
+    routing::any,
+    Json, Router,
+};
+use serde_json::{json, Value};
+
 use super::compose::{
     compose_up_args, validate_compose_project, validate_compose_yaml, MAX_COMPOSE_BYTES,
 };
@@ -151,6 +163,7 @@ async fn invalid_inputs_fail_before_connecting() {
         "bad image",
         "web",
         80,
+        None,
         &Default::default(),
         Default::default(),
     )
@@ -163,6 +176,7 @@ async fn invalid_inputs_fail_before_connecting() {
         "nginx",
         "bad name",
         80,
+        None,
         &Default::default(),
         Default::default(),
     )
@@ -175,6 +189,7 @@ async fn invalid_inputs_fail_before_connecting() {
         "nginx",
         "web",
         0,
+        None,
         &Default::default(),
         Default::default(),
     )
@@ -224,5 +239,217 @@ fn container_config_binds_exposed_port() {
         .flatten()
         .expect("binding");
     assert_eq!(binding.len(), 1);
+    assert_eq!(binding[0].host_ip.as_deref(), Some("127.0.0.1"));
     assert_eq!(binding[0].host_port.as_deref(), Some("18000"));
+}
+
+#[derive(Default)]
+struct FakeDockerState {
+    create_bodies: Vec<Value>,
+    collisions_remaining: usize,
+    collide_on_start: bool,
+    list_calls: usize,
+}
+
+fn created_host_port(body: &Value) -> u16 {
+    body.pointer("/HostConfig/PortBindings/80~1tcp/0/HostPort")
+        .and_then(Value::as_str)
+        .expect("host port in Docker create body")
+        .parse()
+        .unwrap()
+}
+
+async fn fake_create_container(
+    state: &Arc<Mutex<FakeDockerState>>,
+    request: Request<Body>,
+) -> Response {
+    let bytes = to_bytes(request.into_body(), 65_536).await.unwrap();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let host_port = created_host_port(&body);
+    let collide = {
+        let mut state = state.lock().unwrap();
+        state.create_bodies.push(body);
+        if state.collisions_remaining == 0 {
+            false
+        } else {
+            state.collisions_remaining -= 1;
+            true
+        }
+    };
+    if collide {
+        let message = format!("Bind for 127.0.0.1:{host_port} failed: port is already allocated");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "message": message })),
+        )
+            .into_response();
+    }
+    (
+        StatusCode::CREATED,
+        Json(json!({ "Id": "container-id", "Warnings": [] })),
+    )
+        .into_response()
+}
+
+async fn fake_docker_request(
+    State(state): State<Arc<Mutex<FakeDockerState>>>,
+    request: Request<Body>,
+) -> Response {
+    let path = request.uri().path().to_owned();
+    if path.ends_with("/containers/json") {
+        state.lock().unwrap().list_calls += 1;
+        return Json(json!([])).into_response();
+    }
+    if path.ends_with("/containers/create") {
+        return fake_create_container(&state, request).await;
+    }
+    if path.ends_with("/start") {
+        if state.lock().unwrap().collide_on_start {
+            let message = "Bind for 127.0.0.1:18080 failed: port is already allocated";
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": message })),
+            )
+                .into_response();
+        }
+        return StatusCode::NO_CONTENT.into_response();
+    }
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({ "message": format!("unexpected Docker path: {path}") })),
+    )
+        .into_response()
+}
+
+async fn spawn_fake_docker(
+    collisions: usize,
+    collide_on_start: bool,
+) -> (String, Arc<Mutex<FakeDockerState>>) {
+    let state = Arc::new(Mutex::new(FakeDockerState {
+        collisions_remaining: collisions,
+        collide_on_start,
+        ..Default::default()
+    }));
+    let app = Router::new()
+        .fallback(any(fake_docker_request))
+        .with_state(Arc::clone(&state));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("tcp://{address}"), state)
+}
+
+#[tokio::test]
+async fn custom_host_port_uses_the_exact_loopback_mapping() {
+    let (endpoint, state) = spawn_fake_docker(0, false).await;
+    let result = run_image(
+        &endpoint,
+        "nginx",
+        "web",
+        80,
+        Some(18080),
+        &Default::default(),
+        Default::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.host_port, 18080);
+    let state = state.lock().unwrap();
+    assert_eq!(state.list_calls, 0);
+    assert_eq!(state.create_bodies.len(), 1);
+    assert_eq!(created_host_port(&state.create_bodies[0]), 18080);
+    assert_eq!(
+        state.create_bodies[0]
+            .pointer("/HostConfig/PortBindings/80~1tcp/0/HostIp")
+            .and_then(Value::as_str),
+        Some("127.0.0.1")
+    );
+}
+
+#[tokio::test]
+async fn automatic_host_port_retries_the_next_candidate() {
+    let (endpoint, state) = spawn_fake_docker(1, false).await;
+    let result = run_image(
+        &endpoint,
+        "nginx",
+        "web",
+        80,
+        None,
+        &Default::default(),
+        Default::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.host_port, 18001);
+    let state = state.lock().unwrap();
+    assert_eq!(state.list_calls, 1);
+    let ports: Vec<u16> = state.create_bodies.iter().map(created_host_port).collect();
+    assert_eq!(ports, vec![18000, 18001]);
+}
+
+#[tokio::test]
+async fn custom_host_port_collision_never_falls_back() {
+    let (endpoint, state) = spawn_fake_docker(1, false).await;
+    let error = run_image(
+        &endpoint,
+        "nginx",
+        "web",
+        80,
+        Some(18080),
+        &Default::default(),
+        Default::default(),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("requested host port 18080 is unavailable"),
+        "{error}"
+    );
+    let state = state.lock().unwrap();
+    assert_eq!(state.list_calls, 0);
+    assert_eq!(state.create_bodies.len(), 1);
+    assert_eq!(created_host_port(&state.create_bodies[0]), 18080);
+}
+
+#[tokio::test]
+async fn custom_host_port_start_collision_is_clear_and_final() {
+    let (endpoint, state) = spawn_fake_docker(0, true).await;
+    let error = run_image(
+        &endpoint,
+        "nginx",
+        "web",
+        80,
+        Some(18080),
+        &Default::default(),
+        Default::default(),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("requested host port 18080 is unavailable"),
+        "{error}"
+    );
+    assert_eq!(state.lock().unwrap().create_bodies.len(), 1);
+}
+
+#[tokio::test]
+async fn requested_host_port_zero_fails_before_connecting() {
+    let error = run_image(
+        "tcp://127.0.0.1:1",
+        "nginx",
+        "web",
+        80,
+        Some(0),
+        &Default::default(),
+        Default::default(),
+    )
+    .await
+    .expect_err("invalid requested host port");
+    assert!(error.to_string().contains("requested host port"), "{error}");
 }

@@ -49,18 +49,22 @@ pub(super) fn app_identity_fields(hosts: &[HostAgent], values: &AppFormValues) -
                 "1–64 ASCII letters, digits, dots, dashes, or underscores. Must be unique."
             }
         }
-        label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
-            "Host"
-            select class=(CONTROL) name="host_id" required {
-                option value="" disabled selected[values.host_id.is_empty()] { "Select an enabled host…" }
-                @for host in hosts {
-                    option value=(host.id) selected[values.host_id == host.id] {
-                        (host.name) " · " (host.agent_url)
+        @if hosts.len() == 1 {
+            input type="hidden" name="host_id" value=(hosts[0].id) data-summary-label=(format!("{} · {}", hosts[0].name, hosts[0].agent_url));
+        } @else {
+            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                "Host"
+                select class=(CONTROL) name="host_id" required {
+                    option value="" disabled selected[values.host_id.is_empty()] { "Select an enabled host…" }
+                    @for host in hosts {
+                        option value=(host.id) selected[values.host_id == host.id] {
+                            (host.name) " · " (host.agent_url)
+                        }
                     }
                 }
-            }
-            span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
-                "Only enrolled, enabled host agents are available."
+                span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
+                    "Only enrolled, enabled host agents are available."
+                }
             }
         }
     }
@@ -68,12 +72,19 @@ pub(super) fn app_identity_fields(hosts: &[HostAgent], values: &AppFormValues) -
 
 pub(super) fn build_settings_fields(values: &AppFormValues) -> Markup {
     html! {
-        div class="grid grid-cols-1 gap-4 sm:grid-cols-2" {
+        div class="grid grid-cols-1 gap-4 sm:grid-cols-3" {
             label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
                 "Build type"
                 select class=(CONTROL) name="build_type" required {
                     option value="dockerfile" selected[values.build_type == "dockerfile"] { "Dockerfile" }
                     option value="nixpacks" selected[values.build_type == "nixpacks"] { "Nixpacks" }
+                }
+            }
+            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                "Host port (optional)"
+                input class=(CONTROL) name="requested_host_port" type="number" value=(values.requested_host_port) min="1" max="65535" placeholder="Automatic" autocomplete="off";
+                span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
+                    "Loopback-only. Leave blank to automatically assign a host port."
                 }
             }
             label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {

@@ -24,23 +24,24 @@ pub struct RunResult {
 /// Creates and starts a container from an already-present image.
 ///
 /// No pull happens: if the image is missing locally Docker rejects the create
-/// call and that error is returned. The host port is chosen automatically from
-/// `18000..18200`, retrying the next candidate when Docker reports that a port
-/// is already allocated.
+/// call and that error is returned. A requested host port is attempted exactly
+/// once. Otherwise a host port is chosen automatically from `18000..18200`,
+/// retrying the next candidate when Docker reports that a port is allocated.
 pub async fn run_image(
     endpoint: &str,
     image: &str,
     name: &str,
     container_port: u16,
+    requested_host_port: Option<u16>,
     env: &HashMap<String, String>,
     resources: ResourceLimits,
 ) -> Result<RunResult> {
-    validate_image_reference(image)?;
-    validate_container_name(name)?;
-    validate_container_port(container_port)?;
-    resources.validate()?;
+    validate_run_input(image, name, container_port, requested_host_port, &resources)?;
     let docker = connect(endpoint)?;
-    let candidates = candidate_ports(&docker).await?;
+    let candidates = match requested_host_port {
+        Some(host_port) => vec![host_port],
+        None => candidate_ports(&docker).await?,
+    };
 
     let mut last_collision: Option<String> = None;
     for host_port in candidates {
@@ -48,7 +49,18 @@ pub async fn run_image(
         let options = CreateContainerOptionsBuilder::new().name(name).build();
         match docker.create_container(Some(options), config).await {
             Ok(created) => {
-                return start_container(&docker, image, name, host_port, created.id).await;
+                return start_container(
+                    &docker,
+                    image,
+                    name,
+                    host_port,
+                    created.id,
+                    requested_host_port.is_some(),
+                )
+                .await;
+            }
+            Err(error) if is_port_collision(&error) && requested_host_port.is_some() => {
+                bail!("requested host port {host_port} is unavailable: {error}");
             }
             Err(error) if is_port_collision(&error) => {
                 last_collision = Some(format!("host port {host_port}: {error}"));
@@ -64,6 +76,22 @@ pub async fn run_image(
 
     let detail = last_collision.unwrap_or_else(|| "all candidate ports are in use".to_owned());
     bail!("no free host port in {PORT_RANGE_START}–{PORT_RANGE_END} for image `{image}`: {detail}")
+}
+
+fn validate_run_input(
+    image: &str,
+    name: &str,
+    container_port: u16,
+    requested_host_port: Option<u16>,
+    resources: &ResourceLimits,
+) -> Result<()> {
+    validate_image_reference(image)?;
+    validate_container_name(name)?;
+    validate_container_port(container_port)?;
+    if let Some(host_port) = requested_host_port {
+        validate_container_port(host_port).context("invalid requested host port")?;
+    }
+    resources.validate()
 }
 
 async fn candidate_ports(docker: &Docker) -> Result<Vec<u16>> {
@@ -83,6 +111,7 @@ async fn start_container(
     name: &str,
     host_port: u16,
     container_id: String,
+    requested: bool,
 ) -> Result<RunResult> {
     if let Err(error) = docker.start_container(&container_id, None).await {
         if let Err(cleanup) = docker
@@ -93,6 +122,10 @@ async fn start_container(
                 container = %container_id,
                 "failed to remove container after start failure: {cleanup}"
             );
+        }
+        if requested && is_port_collision(&error) {
+            return Err(error)
+                .with_context(|| format!("requested host port {host_port} is unavailable"));
         }
         return Err(error)
             .with_context(|| format!("start container `{name}` from image `{image}`"));

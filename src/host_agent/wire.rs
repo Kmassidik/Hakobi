@@ -147,8 +147,8 @@ pub struct RemoveImageRequest {
 
 /// Body of `POST /v1/docker/containers/run`.
 ///
-/// Only an image that already exists locally, a container name, a single
-/// container port, environment variables, and optional resource limits are
+/// Only an image that already exists locally, a container name, container and
+/// optional host ports, environment variables, and optional resource limits are
 /// accepted. There is no endpoint or command override.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunContainerRequest {
@@ -158,6 +158,9 @@ pub struct RunContainerRequest {
     pub name: String,
     #[serde(default)]
     pub container_port: u16,
+    /// Requested loopback host port; omitted selects an automatic port.
+    #[serde(default)]
+    pub host_port: Option<u16>,
     /// Extra environment variables set inside the container.
     #[serde(default)]
     pub env: std::collections::HashMap<String, String>,

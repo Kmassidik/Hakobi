@@ -15,6 +15,7 @@ fn create_and_load_crud_app(catalog: &mut Catalog) -> (String, String) {
             Some("Dockerfile"),
             false,
             Some(8080),
+            Some(18080),
             Some(2.0),
             Some(512 * 1024 * 1024),
         )
@@ -26,6 +27,7 @@ fn create_and_load_crud_app(catalog: &mut Catalog) -> (String, String) {
     assert_eq!(loaded.name, "web-prod");
     assert_eq!(loaded.build_type, "dockerfile");
     assert_eq!(loaded.container_port, Some(8080));
+    assert_eq!(loaded.requested_host_port, Some(18080));
     assert_eq!(loaded.cpu_limit, Some(2.0));
     assert_eq!(loaded.memory_limit_bytes, Some(512 * 1024 * 1024));
     assert!(catalog
@@ -68,6 +70,7 @@ fn assert_invalid_app_updates(catalog: &mut Catalog, app_id: &str, host_id: &str
             Some(0),
             None,
             None,
+            None,
             "{}"
         )
         .is_err());
@@ -84,6 +87,7 @@ fn assert_invalid_app_updates(catalog: &mut Catalog, app_id: &str, host_id: &str
             None,
             None,
             false,
+            None,
             None,
             None,
             None,
@@ -110,6 +114,7 @@ fn create_deployment_app(catalog: &mut Catalog) -> String {
             None,
             None,
             false,
+            None,
             None,
             None,
             None,
@@ -171,7 +176,7 @@ fn catalog_persists_apps_across_reopen() {
     let app_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 16);
+        assert_eq!(catalog.schema_version().expect("schema version"), 17);
         let host_id = catalog
             .create_host_agent("apps-host", "https://apps.example.com", "tok_apps_0123456")
             .expect("create host");
@@ -189,6 +194,7 @@ fn catalog_persists_apps_across_reopen() {
                 Some(3000),
                 None,
                 None,
+                None,
             )
             .expect("create app");
 
@@ -200,14 +206,57 @@ fn catalog_persists_apps_across_reopen() {
         assert_eq!(apps[0].github_branch.as_deref(), Some("main"));
         assert!(apps[0].github_auto_deploy);
         assert_eq!(apps[0].container_port, Some(3000));
+        assert_eq!(apps[0].requested_host_port, None);
         assert_eq!(apps[0].status, "idle");
         assert!(apps[0].subdomain.is_none());
         assert!(!apps[0].created_at.is_empty());
     }
 
     let catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 16);
+    assert_eq!(catalog.schema_version().expect("schema version"), 17);
     assert_eq!(catalog.list_apps().expect("list apps").len(), 1);
+}
+
+#[test]
+fn schema_v16_apps_default_to_automatic_host_ports() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("catalog.sqlite3");
+    let app_id;
+    {
+        let mut catalog = Catalog::open(&path).unwrap();
+        let host = catalog
+            .create_host_agent("legacy-host", "https://legacy.example.com", "tok_legacy_01")
+            .unwrap();
+        app_id = catalog
+            .create_app(
+                "legacy",
+                &host,
+                "dockerfile",
+                None,
+                None,
+                None,
+                None,
+                false,
+                Some(3000),
+                Some(18080),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    connection
+        .execute_batch(
+            "ALTER TABLE apps DROP COLUMN requested_host_port; PRAGMA user_version = 16;",
+        )
+        .unwrap();
+    drop(connection);
+
+    let catalog = Catalog::open(&path).unwrap();
+    let app = catalog.get_app(&app_id).unwrap().unwrap();
+    assert_eq!(catalog.schema_version().unwrap(), 17);
+    assert_eq!(app.container_port, Some(3000));
+    assert_eq!(app.requested_host_port, None);
 }
 
 #[test]
@@ -247,6 +296,7 @@ fn app_subdomain_survives_reopen_and_validates_dns_labels() {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
     assert!(catalog.set_app_subdomain(&app_id, Some("Invalid")).is_err());
@@ -274,7 +324,7 @@ fn schema_v12_apps_gain_unlimited_resource_columns() {
     drop(connection);
 
     let catalog = Catalog::open(&path).expect("migrate catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 16);
+    assert_eq!(catalog.schema_version().expect("schema version"), 17);
     drop(catalog);
     let connection = rusqlite::Connection::open(&path).expect("reopen database");
     let mut statement = connection.prepare("PRAGMA table_info(apps)").unwrap();
@@ -287,6 +337,7 @@ fn schema_v12_apps_gain_unlimited_resource_columns() {
     assert!(columns.contains(&"memory_limit_bytes".into()));
     assert!(columns.contains(&"runtime_status".into()));
     assert!(columns.contains(&"subdomain".into()));
+    assert!(columns.contains(&"requested_host_port".into()));
     let image_tag_columns: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM pragma_table_info('deployments') WHERE name = 'image_tag'",
@@ -304,8 +355,9 @@ fn apps_crud_round_trip() {
 
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 16);
+        assert_eq!(catalog.schema_version().expect("schema version"), 17);
         let (app_id, host_id) = create_and_load_crud_app(&mut catalog);
+        catalog.set_app_host_port(&app_id, Some(19000)).unwrap();
 
         catalog
             .update_app(
@@ -319,6 +371,7 @@ fn apps_crud_round_trip() {
                 Some("docker/Dockerfile"),
                 true,
                 None,
+                Some(18081),
                 None,
                 None,
                 "{}",
@@ -334,6 +387,8 @@ fn apps_crud_round_trip() {
         assert_eq!(updated.github_path.as_deref(), Some("services/api"));
         assert!(updated.github_auto_deploy);
         assert_eq!(updated.container_port, None);
+        assert_eq!(updated.requested_host_port, Some(18081));
+        assert_eq!(updated.host_port, Some(19000));
 
         catalog.delete_app(&app_id).expect("delete app");
         assert!(catalog.list_apps().expect("list apps").is_empty());
@@ -359,6 +414,7 @@ fn apps_validate_name_host_and_enums() {
                 Some("Dockerfile"),
                 false,
                 $port,
+                None,
                 None,
                 None,
             )

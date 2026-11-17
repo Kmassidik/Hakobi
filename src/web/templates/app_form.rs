@@ -21,6 +21,7 @@ pub struct AppFormValues {
     pub github_dockerfile: String,
     pub github_auto_deploy: bool,
     pub container_port: String,
+    pub requested_host_port: String,
     pub cpu_limit: String,
     pub memory_limit_mb: String,
     pub env_json: String,

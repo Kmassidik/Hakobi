@@ -170,6 +170,7 @@ impl ContainerBackend for FakeBackend {
         _image: &str,
         name: &str,
         _container_port: u16,
+        _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: ResourceLimits,
     ) -> anyhow::Result<RunResult> {
@@ -297,6 +298,7 @@ impl ContainerBackend for PipelineBackend {
         image: &str,
         name: &str,
         _container_port: u16,
+        _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: ResourceLimits,
     ) -> anyhow::Result<RunResult> {

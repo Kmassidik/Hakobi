@@ -359,6 +359,7 @@ mod tests {
                 Some(8080),
                 None,
                 None,
+                None,
             )
             .unwrap();
         let deployment = catalog

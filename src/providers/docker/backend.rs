@@ -54,12 +54,15 @@ pub trait ContainerBackend: Send + Sync {
     /// Removes a Docker volume without forcing deletion.
     async fn remove_volume(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Creates and starts a container from an image already present locally.
+    /// A requested host port is exact; `None` selects an automatic candidate.
+    #[allow(clippy::too_many_arguments)]
     async fn run_container(
         &self,
         endpoint: &str,
         image: &str,
         name: &str,
         container_port: u16,
+        requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
     ) -> Result<RunResult>;
@@ -311,10 +314,20 @@ impl ContainerBackend for DockerBackend {
         image: &str,
         name: &str,
         container_port: u16,
+        requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
     ) -> Result<RunResult> {
-        run_image(endpoint, image, name, container_port, env, resources).await
+        run_image(
+            endpoint,
+            image,
+            name,
+            container_port,
+            requested_host_port,
+            env,
+            resources,
+        )
+        .await
     }
 }
 

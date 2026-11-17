@@ -138,6 +138,7 @@ fn run_requests_and_results_round_trip_through_json() {
         image: "alpine:3.20".into(),
         name: "demo-api".into(),
         container_port: 8080,
+        host_port: Some(18080),
         cpu_limit: Some(1.5),
         memory_limit_bytes: Some(512 * 1024 * 1024),
     };
@@ -157,6 +158,14 @@ fn run_requests_and_results_round_trip_through_json() {
         serde_json::from_str::<RunContainerResponse>(&encoded).unwrap(),
         result
     );
+}
+
+#[test]
+fn run_request_defaults_to_automatic_host_port() {
+    let request: RunContainerRequest =
+        serde_json::from_str(r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080}"#)
+            .unwrap();
+    assert_eq!(request.host_port, None);
 }
 
 #[test]

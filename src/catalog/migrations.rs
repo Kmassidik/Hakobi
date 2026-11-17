@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, Transaction};
 
 /// Schema version written to `PRAGMA user_version`.
-pub(super) const SCHEMA_VERSION: i64 = 16;
+pub(super) const SCHEMA_VERSION: i64 = 17;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS provider_connections (
@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS apps (
     github_auto_deploy INTEGER NOT NULL DEFAULT 0,
     -- runtime
     container_port     INTEGER,
+    requested_host_port INTEGER,
     host_port          INTEGER,
     cpu_limit          REAL,
     memory_limit_bytes INTEGER,
@@ -224,6 +225,14 @@ fn migrate_apps(transaction: &Transaction<'_>, current: i64) -> Result<()> {
         transaction
             .execute("ALTER TABLE apps ADD COLUMN subdomain TEXT", [])
             .context("add apps.subdomain")?;
+    }
+    if (1..17).contains(&current) {
+        transaction
+            .execute(
+                "ALTER TABLE apps ADD COLUMN requested_host_port INTEGER",
+                [],
+            )
+            .context("add apps.requested_host_port")?;
     }
     Ok(())
 }
