@@ -53,6 +53,9 @@ and guarded domain CRUD must remain working. Use parameterized SQL only.
 
 ## Readability and design
 
+- Before any UI design or frontend change, read and follow
+  `docs/UI_STYLE_PROMPT.md`. It is the single canonical Hakobi visual and
+  interaction reference; do not replace it with generic admin/SaaS patterns.
 - English-only code, comments, documentation, and commits.
 - Every tracked source file: at most 500 lines. `scripts/check-source-limits.py`
   enforces this in CI; generated `Cargo.lock` is exempt.

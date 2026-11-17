@@ -13,14 +13,31 @@
     picker.nameInput.value = part.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 64);
   }
 
+  function notifyFormChange(picker) {
+    if (!picker.form || !picker.form.dispatchEvent) return;
+    picker.form.dispatchEvent(new CustomEvent("hakobi:form-change", { bubbles: true }));
+  }
+
+  function setFieldValue(field, value) {
+    if (field) field.value = value;
+  }
+
+  function updateAppCards(picker) {
+    picker.appsBox.querySelectorAll("input[name=github_app_path]").forEach(function (input) {
+      input.closest("label").dataset.state = input.checked ? "selected" : "unselected";
+    });
+  }
+
   function sync(picker) {
     var checked = picker.appsBox.querySelector("input:checked");
     if (!checked) return;
     suggestName(picker, checked.value || picker.reposSel.value);
-    var dockerfileInput = document.querySelector("[name=github_dockerfile]");
-    if (dockerfileInput) dockerfileInput.value = checked.dataset.dockerfile;
-    var contextInput = document.querySelector("[name=github_path]");
-    if (contextInput) contextInput.value = checked.value;
+    var dockerfileInput = picker.form.querySelector("[name=github_dockerfile]");
+    var contextInput = picker.form.querySelector("[name=github_path]");
+    setFieldValue(dockerfileInput, checked.dataset.dockerfile);
+    setFieldValue(contextInput, checked.value);
+    updateAppCards(picker);
+    notifyFormChange(picker);
     loadEnvironment(picker, checked.value);
   }
 
@@ -29,60 +46,81 @@
     picker.envRequest = request;
     picker.envStatus.textContent = "Checking for an example environment file…";
     try {
+      var dockerfile = picker.form.querySelector("[name=github_dockerfile]");
       var query = "?repo=" + encodeURIComponent(picker.reposSel.value) +
         "&branch=" + encodeURIComponent(picker.branchSel.value) +
         "&path=" + encodeURIComponent(path) +
-        "&dockerfile=" + encodeURIComponent(document.querySelector("[name=github_dockerfile]").value);
+        "&dockerfile=" + encodeURIComponent(dockerfile.value);
       var response = await fetch("/api/github/environment" + query);
       var data = await response.json();
       if (!response.ok || request !== picker.envRequest) return;
-      if (data.port && !picker.portDirty) {
-        document.querySelector("[name=container_port]").value = data.port;
-      }
+      var port = picker.form.querySelector("[name=container_port]");
+      if (data.port && !picker.portDirty) setFieldValue(port, data.port);
       var keys = Object.keys(data.env || {});
       if (!data.found || !keys.length) {
         picker.envStatus.textContent = data.found
           ? "The example environment file has no valid variable names."
           : "No .env.example or .env.sample found; enter variables manually.";
+        notifyFormChange(picker);
         return;
       }
       var current = picker.envInput.value.trim();
       if (picker.envDirty || (current && current !== "{}")) {
         picker.envStatus.textContent = "Found " + keys.length + " example keys; kept your existing variables.";
+        notifyFormChange(picker);
         return;
       }
       picker.envInput.value = JSON.stringify(data.env, null, 2);
-      var form = picker.envInput.closest("form");
-      if (form) form.dispatchEvent(new CustomEvent("hakobi:env-import"));
+      picker.form.dispatchEvent(new CustomEvent("hakobi:env-import"));
       picker.envStatus.textContent = "Found " + keys.length + " variable names. Add values before deploying.";
+      notifyFormChange(picker);
     } catch (e) {
       picker.envStatus.textContent = "Could not inspect example environment files; enter variables manually.";
     }
   }
 
-  function renderApps(picker, apps) {
-    apps.forEach(function (app, i) {
+  function renderApps(picker, apps, selectedPath) {
+    var selected = apps.some(function (app) { return app.path === selectedPath; })
+      ? selectedPath : (apps[0] && apps[0].path);
+    apps.forEach(function (app) {
       var label = document.createElement("label");
-      label.className = "flex items-center gap-3 border-b border-line px-1 py-2.5 text-sm last:border-b-0";
+      label.className = "relative flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 bg-white p-4 transition hover:border-zinc-300 has-[:checked]:border-[#165237] has-[:checked]:bg-[#165237]/5";
       var input = document.createElement("input");
       input.type = "radio";
       input.name = "github_app_path";
       input.value = app.path;
       input.dataset.dockerfile = app.dockerfile;
-      if (i === 0) input.checked = true;
+      input.className = "mt-1 size-4 shrink-0 accent-[#165237]";
+      input.checked = app.path === selected;
       input.addEventListener("change", function () { sync(picker); });
-      label.appendChild(input);
+      var content = document.createElement("span");
+      content.className = "flex min-w-0 flex-1 items-start justify-between gap-3";
       var text = document.createElement("span");
-      text.textContent = app.path === "" ? "/ (repo root)" : app.path + "/";
-      label.appendChild(text);
+      text.className = "min-w-0";
+      var title = document.createElement("span");
+      title.className = "block text-sm font-semibold text-zinc-900";
+      title.textContent = app.path === "" ? "Repository root" : app.path.split("/").pop();
+      var path = document.createElement("span");
+      path.className = "mt-1 block break-all font-mono text-xs text-zinc-500";
+      path.textContent = app.path === "" ? "/" : app.path + "/";
+      var badge = document.createElement("span");
+      badge.className = "shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 font-mono text-[11px] text-zinc-600";
+      badge.textContent = app.dockerfile || "Dockerfile";
+      text.append(title, path);
+      content.append(text, badge);
+      label.append(input, content);
       picker.appsBox.appendChild(label);
     });
+    updateAppCards(picker);
   }
 
   async function detect(picker) {
     var repo = picker.reposSel.value;
     var branch = picker.branchSel.value;
     if (!repo || !branch) return;
+    var checked = picker.appsBox.querySelector("input:checked");
+    var context = picker.form.querySelector("[name=github_path]");
+    var selectedPath = checked ? checked.value : (context ? context.value : "");
     picker.appsBox.innerHTML = "<p class='m-0 text-xs text-muted'>Scanning for Dockerfiles…</p>";
     try {
       var res = await fetch(
@@ -96,7 +134,7 @@
           "<p class='m-0 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900'>No Dockerfile found at branch head. Add one, or adjust the branch.</p>";
         return;
       }
-      renderApps(picker, apps);
+      renderApps(picker, apps, selectedPath);
       setStatus(picker, apps.length === 1 ? "Detected one buildable app." : "Detected " + apps.length + " buildable apps — pick one.");
       sync(picker);
     } catch (e) {
@@ -106,6 +144,7 @@
 
   async function loadBranches(picker, repo) {
     picker.branchSel.innerHTML = "";
+    notifyFormChange(picker);
     try {
       var res = await fetch("/api/github/branches?repo=" + encodeURIComponent(repo));
       var data = await res.json();
@@ -118,6 +157,7 @@
         picker.branchSel.appendChild(opt);
       });
       if (!picker.branchSel.value && picker.branchSel.options.length) picker.branchSel.selectedIndex = 0;
+      notifyFormChange(picker);
       detect(picker);
     } catch (e) {
       setStatus(picker, "Could not load branches.");
@@ -141,6 +181,7 @@
     if (current && repos.some(function (repo) { return repo.full_name === current; })) {
       picker.reposSel.value = current;
     }
+    notifyFormChange(picker);
   }
 
   function loadRepositories(picker) {
@@ -176,6 +217,7 @@
     var form = grid.closest("form") || document;
     var picker = {
       grid: grid,
+      form: form,
       reposSel: grid.querySelector("[data-gh-repos]"),
       branchSel: grid.querySelector("[data-gh-branches]"),
       appsBox: grid.querySelector("[data-gh-apps]"),
@@ -195,6 +237,7 @@
         loadBranches(picker, picker.reposSel.value);
       }
     });
+    picker.branchSel.addEventListener("change", function () { detect(picker); });
     if (picker.nameInput) {
       picker.nameDirty = !!picker.nameInput.value;
       picker.nameInput.addEventListener("input", function () { picker.nameDirty = true; });

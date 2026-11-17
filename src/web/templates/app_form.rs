@@ -1,10 +1,15 @@
 //! App create/edit form template and delete confirmation dialog.
 
+mod fields;
+mod wizard;
+
 use maud::{html, Markup};
 
 use hakobi::catalog::HostAgent;
 
 use super::{brand, page, sidebar, CONTENT_WIDTH, EYEBROW, FIELD};
+use fields::{app_identity_fields, build_settings_fields, github_source_fields};
+use wizard::{deployment_policy_field, resource_limit_fields, review_summary};
 
 pub struct AppFormValues {
     pub name: String,
@@ -21,6 +26,10 @@ pub struct AppFormValues {
     pub env_json: String,
 }
 
+pub(super) const CONTROL: &str = "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-[13px] text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-[#165237] focus:ring-[3px] focus:ring-[#165237]/10";
+const PRIMARY_BUTTON: &str = "inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-[#165237] px-3.5 py-2 text-[13px] font-semibold text-white transition hover:bg-[#11402b]";
+const SECONDARY_BUTTON: &str = "inline-flex min-h-10 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3.5 py-2 text-[13px] font-semibold text-zinc-700 transition hover:bg-zinc-50";
+
 #[allow(clippy::too_many_arguments)]
 pub fn app_form(
     base_url: &str,
@@ -34,11 +43,12 @@ pub fn app_form(
     error: Option<&str>,
 ) -> Markup {
     page(
-        "App form · Hakobi",
+        &format!("{heading} · Hakobi"),
         html! {
-            div class="min-h-screen lg:pl-60" {
+            div class="min-h-screen bg-[#fafafa] lg:pl-60" {
                 (sidebar("apps", base_url, username, csrf_token))
                 (app_form_mobile_header(username, csrf_token))
+                (breadcrumb_bar(heading, action == "/apps"))
                 (app_form_main(hosts, values, action, heading, submit_label, error, csrf_token))
             }
         },
@@ -52,10 +62,30 @@ fn app_form_mobile_header(username: &str, csrf_token: &str) -> Markup {
                 (brand("Hakobi dashboard"))
                 div class="flex items-center gap-4" {
                     a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/apps" { "Apps" }
-                    span class="text-sm text-muted max-sm:hidden" { (username) }
+                    span class="max-sm:hidden text-sm text-muted" { (username) }
                     form method="post" action="/logout" class="m-0" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
                         button class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink" type="submit" { "Sign out" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn breadcrumb_bar(heading: &str, guided: bool) -> Markup {
+    html! {
+        div class="border-b border-zinc-200 bg-white/80" {
+            div class="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-4 px-4 sm:px-8" {
+                nav class="flex min-w-0 items-center gap-2 text-[12px]" aria-label="Breadcrumb" {
+                    a class="font-medium text-zinc-500 no-underline hover:text-zinc-950" href="/apps" { "All apps" }
+                    span class="text-zinc-300" aria-hidden="true" { "/" }
+                    span class="truncate font-medium text-zinc-900" aria-current="page" { (heading) }
+                }
+                @if guided {
+                    span class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[#165237]/15 bg-[#165237]/5 px-2.5 py-1 whitespace-nowrap text-[10px] font-semibold text-[#165237]" {
+                        i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true" {}
+                        "Build Recipe Wizard"
                     }
                 }
             }
@@ -73,18 +103,22 @@ fn app_form_main(
     error: Option<&str>,
     csrf_token: &str,
 ) -> Markup {
+    let guided = action == "/apps";
     html! {
-        main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
-            a class="text-[0.75rem] font-semibold text-muted no-underline hover:text-ink" href="/apps" { "← All apps" }
-            p class=(format!("{EYEBROW} mb-3 mt-6 text-brand-bright")) { "App" }
-            h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { (heading) }
-            p class="mt-4 max-w-[44rem] leading-[1.7] text-muted" {
-                "Bind a build recipe to an enrolled host. On push to the tracked branch, Hakobi rebuilds and redeploys automatically."
+        main class="mx-auto w-full max-w-5xl px-4 py-7 sm:px-8 sm:py-9" {
+            p class=(format!("{EYEBROW} m-0 text-[#165237]")) { "App" }
+            h1 class="m-0 mt-2 font-display text-[34px] font-normal leading-[1.1] tracking-[-0.03em] text-zinc-950" { (heading) }
+            p class="mb-0 mt-3 max-w-2xl text-[13.5px] leading-relaxed text-zinc-500" {
+                @if guided {
+                    "Create a build recipe from a GitHub repository and choose where Hakobi should run it."
+                } @else {
+                    "Update this app’s source, runtime, resources, and deployment policy."
+                }
             }
             @if let Some(message) = error {
-                div class="mb-6 mt-6 border-l-[3px] border-danger bg-danger/5 px-4 py-3.5 text-sm leading-normal text-danger" role="alert" { (message) }
+                div class="mt-5 rounded-lg border border-danger/20 bg-danger/5 px-4 py-3 text-[13px] leading-normal text-danger" role="alert" { (message) }
             }
-            (app_form_fields(hosts, values, action, submit_label, csrf_token))
+            (app_form_fields(hosts, values, action, submit_label, csrf_token, guided))
         }
     }
 }
@@ -95,263 +129,92 @@ fn app_form_fields(
     action: &str,
     submit_label: &str,
     csrf_token: &str,
+    guided: bool,
 ) -> Markup {
-    let guided = action == "/apps";
     html! {
-        form method="post" action=(action) data-app-form data-app-stepper[guided] class="mt-8 grid w-full max-w-[44rem] grid-cols-1 gap-5 rounded-[0.85rem] border border-line bg-surface/45 p-4 sm:p-6" {
+        form method="post" action=(action) data-app-form data-app-stepper[guided] class="mt-6" {
             input type="hidden" name="csrf_token" value=(csrf_token);
-            @if guided { (stepper_navigation()) }
-            section data-app-step="1" class="grid grid-cols-1 gap-5" {
-                (step_heading("Source", "Choose a repository and application. Hakobi fills in what it can detect."))
-                (github_source_fields(values))
-            }
-            section data-app-step="2" class="grid grid-cols-1 gap-5" {
-                (step_heading("Name your app", "Choose a recognizable name and where it should run."))
-                (app_identity_fields(hosts, values))
-            }
-            section data-app-step="3" class="grid grid-cols-1 gap-5" {
-                (step_heading("Configure the build", "Set the runtime, port, build paths, and environment."))
-                (build_settings_fields(values))
-            }
-            section data-app-step="4" class="grid grid-cols-1 gap-5" {
-                (step_heading("Resources and review", "Choose recommended or custom resources, set deployment policy, and review the app."))
-                (resource_limit_fields(values))
-                (deployment_policy_field(values))
-                @if guided { (review_summary()) }
-                (step_actions(submit_label))
-            }
             @if guided {
-                p data-step-error role="alert" class="m-0 text-sm text-danger" {}
-                div hidden class="flex items-center justify-between gap-3 border-t border-line pt-4" data-step-navigation {
-                    button type="button" data-step-back class="rounded-lg border border-line bg-transparent px-4 py-2.5 text-sm font-semibold text-ink" { "Back" }
-                    button type="button" data-step-next class="rounded-lg bg-brand px-4 py-2.5 text-sm font-bold text-white" { "Continue" }
+                (wizard::stepper_navigation())
+                p data-step-error role="alert" class="mb-0 mt-3 min-h-5 text-[13px] text-danger" {}
+            }
+            div class=(if guided { "mt-2 grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start" } else { "mt-6" }) {
+                div class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm lg:col-span-8" {
+                    (step_panel(1, "Source", "Choose a repository and application. Hakobi fills in what it can detect.", github_source_fields(values), guided, submit_label))
+                    (step_panel(2, "Name your app", "Choose a recognizable name and an enrolled host for the app.", app_identity_fields(hosts, values), guided, submit_label))
+                    (step_panel(3, "Configure the build", "Set the runtime, port, environment, and build paths.", build_settings_fields(values), guided, submit_label))
+                    (step_panel(4, "Resources and review", "Choose an allocation and deployment policy, then review the recipe.", resources_and_review(values, guided), guided, submit_label))
                 }
+                @if guided { (wizard::recipe_summary(hosts, values)) }
             }
         }
     }
 }
 
-fn stepper_navigation() -> Markup {
+fn resources_and_review(values: &AppFormValues, guided: bool) -> Markup {
     html! {
-        ol hidden data-step-progress class="m-0 grid list-none grid-cols-2 gap-2 p-0 sm:grid-cols-4" aria-label="App creation progress" {
-            @for (number, label) in [(1, "Source"), (2, "Identity"), (3, "Build"), (4, "Review")] {
-                li {
-                    button type="button" data-step-target=(number) class="w-full rounded-lg border border-line bg-transparent px-2 py-2.5 text-xs font-semibold text-muted" {
-                        span class="mr-1.5 text-brand-bright" { (number) }
-                        (label)
-                    }
-                }
-            }
-        }
+        (resource_limit_fields(values))
+        (deployment_policy_field(values))
+        @if guided { (review_summary(values)) }
     }
 }
 
-fn step_heading(title: &str, description: &str) -> Markup {
+fn step_panel(
+    number: u8,
+    title: &str,
+    description: &str,
+    body: Markup,
+    guided: bool,
+    submit_label: &str,
+) -> Markup {
     html! {
-        div {
-            h2 tabindex="-1" class="m-0 font-display text-2xl font-normal outline-none" { (title) }
-            p class="mb-0 mt-2 text-sm leading-relaxed text-muted" { (description) }
-        }
-    }
-}
-
-fn github_source_fields(values: &AppFormValues) -> Markup {
-    html! {
-        div id="gh-source-picker" data-gh-picker class="grid grid-cols-1 gap-5" {
-            label class="grid gap-1.5" {
-                span class="text-sm font-semibold text-ink" { "Repository" }
-                select name="github_repo" data-gh-repos class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
-                    option value="" { "Loading repositories…" }
-                    @if let Some(current) = Some(values.github_repo.clone()).filter(|value| !value.is_empty()) {
-                        option value=(current) selected { (current) }
-                    }
-                }
-            }
-            label class="grid gap-1.5" {
-                span class="text-sm font-semibold text-ink" { "Branch" }
-                select name="github_branch" data-gh-branches class="rounded-lg border border-line bg-surface px-3 py-2.5 text-sm" {
-                    @if let Some(current) = Some(values.github_branch.clone()).filter(|value| !value.is_empty()) {
-                        option value=(current) selected { (current) }
-                    } @else {
-                        option value="main" { "main" }
-                    }
-                }
-            }
-            div data-gh-apps class="grid grid-cols-1 gap-3" {}
-        }
-        p data-gh-status class="m-0 text-xs text-muted" { "Checking GitHub connection…" }
-    }
-}
-
-fn app_identity_fields(hosts: &[HostAgent], values: &AppFormValues) -> Markup {
-    html! {
-        label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-            "Name"
-            p class="m-0 text-xs font-normal leading-relaxed text-muted" {
-                "1–64 ASCII letters, digits, dots, dashes, or underscores. Must be unique."
-            }
-            input class=(FIELD) name="name" type="text" value=(values.name) maxlength="64" pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required autocomplete="off";
-        }
-        label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-            "Host"
-            p class="m-0 text-xs font-normal leading-relaxed text-muted" {
-                "Enrolled host agents only. Disabled hosts are hidden."
-            }
-            select class=(FIELD) name="host_id" required {
-                option value="" disabled selected[values.host_id.is_empty()] { "Select an enabled host…" }
-                @for host in hosts {
-                    option value=(host.id) selected[values.host_id == host.id] {
-                        (host.name) " · " (host.agent_url)
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn build_settings_fields(values: &AppFormValues) -> Markup {
-    html! {
-        div class="grid grid-cols-1 gap-5 md:grid-cols-2" {
-            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-                "Build type"
-                select class=(FIELD) name="build_type" required {
-                    @for build in ["dockerfile", "nixpacks"] {
-                        option value=(build) selected[values.build_type == build] { (build) }
-                    }
-                }
-            }
-            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-                "Container port"
-                input class=(FIELD) name="container_port" type="number" value=(values.container_port) min="1" max="65535" placeholder="8080";
-            }
-        }
-        (environment_fields(values))
-        label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-            "Context path"
-            p class="m-0 text-xs font-normal leading-relaxed text-muted" {
-                "Subdirectory of the repository to build, e.g. apps/web. Empty for the repo root."
-            }
-            input class=(FIELD) name="github_path" type="text" value=(values.github_path) maxlength="512" placeholder="." autocomplete="off";
-        }
-        label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-            "Dockerfile path"
-            input class=(FIELD) name="github_dockerfile" type="text" value=(values.github_dockerfile) maxlength="512" placeholder="Dockerfile" autocomplete="off";
-        }
-    }
-}
-
-fn environment_fields(values: &AppFormValues) -> Markup {
-    html! {
-        div class="grid gap-4 border-t border-line pt-5" {
-            label class="grid gap-2 text-[0.8rem] font-bold" {
-                "Environment variables (JSON, optional)"
-                textarea class=(FIELD) name="env_json" data-env-json rows="4" placeholder="{}" autocomplete="off" { (values.env_json) }
-            }
-            div data-env-editor hidden class="grid gap-4" {
+        section data-app-step=(number) class="bg-white" {
+            div class="flex flex-col gap-3 border-b border-zinc-200 px-6 py-5 sm:flex-row sm:items-start sm:justify-between" {
                 div {
-                    h3 class="m-0 text-sm font-bold" { "Variables" }
-                    p class="mb-0 mt-1 text-xs font-normal leading-relaxed text-muted" {
-                        "Add plain-text environment variables for the container."
-                    }
+                    h2 tabindex="-1" class="m-0 font-display text-[22px] font-normal leading-tight tracking-[-0.02em] text-zinc-950 outline-none" { (title) }
+                    p class="mb-0 mt-2 text-[12.5px] leading-relaxed text-zinc-500" { (description) }
                 }
-                div data-env-rows class="grid gap-4" {}
-                template data-env-row-template { (environment_row()) }
-                p data-env-error role="alert" class="m-0 text-xs font-normal text-danger" {}
-                div class="border-t border-line pt-4" {
-                    button type="button" data-env-add class="rounded-lg border border-line bg-transparent px-3.5 py-2 text-[0.8rem] font-semibold text-ink hover:bg-paper" {
-                        "+ Add variable"
-                    }
+                @if guided {
+                    span class="shrink-0 pt-1 text-[11px] font-medium text-zinc-400" { "Step " (number) " of 4" }
                 }
             }
-            span data-gh-env-status class="text-xs font-normal leading-relaxed text-muted" {
-                "After scanning, keys from .env.example or .env.sample appear here with blank values."
+            div class="grid gap-5 p-6" { (body) }
+            @if guided {
+                (step_navigation(number, submit_label))
+            } @else if number == 4 {
+                (edit_actions(submit_label))
             }
         }
     }
 }
 
-fn environment_row() -> Markup {
+fn step_navigation(step: u8, submit_label: &str) -> Markup {
     html! {
-        div data-env-row class="grid grid-cols-1 gap-3 sm:grid-cols-[7.5rem_minmax(0,1fr)_minmax(0,1.5fr)_2.75rem] sm:items-end" {
-            label class="grid gap-1.5 text-xs font-semibold text-muted" {
-                "Type"
-                select data-env-type class=(FIELD) aria-label="Variable type" {
-                    option value="variable" { "Variable" }
+        div data-step-navigation class="flex items-center justify-between gap-2 border-t border-zinc-200 bg-zinc-50 px-4 py-4 sm:px-6" {
+            button type="button" data-step-back hidden[step == 1] class=(SECONDARY_BUTTON) {
+                i class="fa-solid fa-arrow-left mr-2 text-[10px]" aria-hidden="true" {}
+                "Back"
+            }
+            @if step < 4 {
+                button type="button" data-step-next class=(PRIMARY_BUTTON) {
+                    "Continue"
+                    i class="fa-solid fa-arrow-right text-[10px]" aria-hidden="true" {}
+                }
+            } @else {
+                div data-step-submit class="flex items-center gap-2" {
+                    a class="px-1 text-[12px] font-semibold text-zinc-500 no-underline hover:text-zinc-950" href="/apps" { "Cancel" }
+                    button class=(PRIMARY_BUTTON) type="submit" { (submit_label) }
                 }
             }
-            label class="grid gap-1.5 text-xs font-semibold text-muted" {
-                "Variable name"
-                input data-env-key class=(FIELD) type="text" placeholder="Name" autocomplete="off";
-            }
-            label class="grid gap-1.5 text-xs font-semibold text-muted" {
-                "Value"
-                input data-env-value class=(FIELD) type="text" placeholder="Value" autocomplete="off";
-            }
-            button type="button" data-env-remove class="flex h-11 w-full items-center justify-center rounded-lg border border-danger/40 bg-transparent text-danger hover:bg-danger/5 sm:w-11" aria-label="Remove variable" title="Remove variable" {
-                i class="fa-solid fa-trash-can" aria-hidden="true" {}
-            }
         }
     }
 }
 
-fn deployment_policy_field(values: &AppFormValues) -> Markup {
+fn edit_actions(submit_label: &str) -> Markup {
     html! {
-        label class="flex items-center gap-3 py-2 text-sm font-semibold" {
-            input name="github_auto_deploy" type="checkbox" value="1" checked[values.github_auto_deploy] class="size-4";
-            span { "Automatically deploy when the tracked branch changes" }
-        }
-    }
-}
-
-fn review_summary() -> Markup {
-    html! {
-        div class="rounded-lg border border-line bg-paper/60 p-4" {
-            h3 class="m-0 text-sm font-bold" { "Review" }
-            dl class="mb-0 mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs" data-app-review {
-                dt class="text-muted" { "Repository" } dd class="m-0 break-all font-mono" data-review="repo" {}
-                dt class="text-muted" { "App" } dd class="m-0 break-all font-mono" data-review="name" {}
-                dt class="text-muted" { "Build" } dd class="m-0 break-all font-mono" data-review="build" {}
-                dt class="text-muted" { "Port" } dd class="m-0 font-mono" data-review="port" {}
-                dt class="text-muted" { "Environment" } dd class="m-0 font-mono" data-review="environment" {}
-            }
-        }
-    }
-}
-
-fn step_actions(submit_label: &str) -> Markup {
-    html! {
-        div class="flex flex-wrap items-center gap-3" data-step-submit {
-            button class="rounded-[0.6rem] bg-brand px-4 py-3 font-bold text-white transition hover:bg-[#0f4130]" type="submit" { (submit_label) }
-            a class="text-[0.8rem] font-semibold text-muted no-underline hover:text-ink" href="/apps" { "Cancel" }
-        }
-    }
-}
-
-fn resource_limit_fields(values: &AppFormValues) -> Markup {
-    html! {
-        fieldset class="m-0 grid grid-cols-1 gap-4 border-0 p-0 md:grid-cols-2" data-resource-settings {
-            legend class="mb-1 px-0 text-[0.8rem] font-bold" { "Runtime allocation" }
-            p class="col-span-full m-0 text-xs font-normal leading-relaxed text-muted" {
-                "Recommended starts with 1 CPU core and 512 MiB. Custom keeps both values under your control."
-            }
-            div class="col-span-full flex gap-6 text-sm font-semibold" {
-                label class="flex items-center gap-2" {
-                    input type="radio" name="resource_mode" value="recommended" data-resource-recommended checked[(values.cpu_limit == "1" && values.memory_limit_mb == "512")];
-                    "Recommended"
-                }
-                label class="flex items-center gap-2" {
-                    input type="radio" name="resource_mode" value="custom" data-resource-custom checked[!(values.cpu_limit == "1" && values.memory_limit_mb == "512")];
-                    "Custom"
-                }
-            }
-            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-                "CPU limit (cores)"
-                input class=(FIELD) name="cpu_limit" type="number" value=(values.cpu_limit) min="0.01" max="256" step="0.01" required data-resource-cpu;
-            }
-            label class="flex flex-col gap-2 text-[0.8rem] font-bold" {
-                "Memory limit (MiB)"
-                input class=(FIELD) name="memory_limit_mb" type="number" value=(values.memory_limit_mb) min="16" max="1048576" step="1" required data-resource-memory;
-            }
+        div class="flex items-center justify-end gap-3 border-t border-zinc-200 bg-zinc-50 px-6 py-4" data-step-submit {
+            a class="text-[12px] font-semibold text-zinc-500 no-underline hover:text-zinc-950" href="/apps" { "Cancel" }
+            button class=(PRIMARY_BUTTON) type="submit" { (submit_label) }
         }
     }
 }

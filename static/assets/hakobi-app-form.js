@@ -123,6 +123,8 @@
       return null;
     }
     input.hidden = true;
+    var raw = input.closest("[data-env-raw]");
+    if (raw) raw.hidden = true;
     wrapper.hidden = false;
     return editor;
   }
@@ -183,22 +185,76 @@
     return field && field.value ? field.value : (fallback || "");
   }
 
-  function updateReview(form) {
-    var environment = "Invalid variables";
+  function environmentLabel(form) {
     try {
       var count = Object.keys(parseEnvironment(form.elements.env_json.value)).length;
-      environment = count + (count === 1 ? " variable" : " variables");
-    } catch (e) { /* Validation identifies the fields that need attention. */ }
+      return count + (count === 1 ? " variable" : " variables");
+    } catch (e) {
+      return "Invalid variables";
+    }
+  }
+
+  function updateReview(form) {
     var values = {
-      repo: fieldValue(form, "github_repo", "Not set") + " · " + fieldValue(form, "github_branch", "Not set"),
-      name: fieldValue(form, "name", "Not set"),
-      build: fieldValue(form, "build_type", "dockerfile") + " · " + fieldValue(form, "github_dockerfile", "Dockerfile"),
-      port: fieldValue(form, "container_port", "8080"),
-      environment: environment,
+      repo: fieldValue(form, "github_repo", "Not selected") + " · " + fieldValue(form, "github_branch", "Not selected"),
+      name: fieldValue(form, "name", "—"),
+      build: fieldValue(form, "build_type", "Not selected") + " · " + fieldValue(form, "github_dockerfile", "—"),
+      port: fieldValue(form, "container_port", "—"),
+      environment: environmentLabel(form),
     };
     Object.keys(values).forEach(function (key) {
       var target = form.querySelector('[data-review="' + key + '"]');
       if (target) target.textContent = values[key];
+    });
+  }
+
+  function selectedText(form, name, fallback) {
+    var field = form.elements[name];
+    if (!field || !field.value) return fallback;
+    if (!field.selectedOptions || !field.selectedOptions.length) return field.value;
+    return field.selectedOptions[0].textContent.trim();
+  }
+
+  function updateSummary(form) {
+    var autoDeploy = form.elements.github_auto_deploy;
+    var cpu = fieldValue(form, "cpu_limit", "—");
+    var memory = fieldValue(form, "memory_limit_mb", "—");
+    var values = {
+      step: (form.dataset.currentStep || "1") + "/4",
+      name: fieldValue(form, "name", "—"),
+      repo: fieldValue(form, "github_repo", "Not selected"),
+      branch: fieldValue(form, "github_branch", "Not selected"),
+      host: selectedText(form, "host_id", "Not selected"),
+      runtime: selectedText(form, "build_type", "Not selected") + " · :" + fieldValue(form, "container_port", "8080"),
+      allocation: cpu + " CPU · " + memory + " MiB",
+      environment: environmentLabel(form),
+      auto_deploy: autoDeploy && autoDeploy.checked ? "Auto-deploy on push" : "Manual deploy only",
+    };
+    Object.keys(values).forEach(function (key) {
+      form.querySelectorAll('[data-summary="' + key + '"]').forEach(function (target) {
+        target.textContent = values[key];
+      });
+    });
+  }
+
+  function updateProgress(button, step) {
+    var target = Number(button.dataset.stepTarget);
+    var state = target < step ? "completed" : (target === step ? "active" : "upcoming");
+    button.dataset.stepState = state;
+    button.dataset.state = state;
+    button.classList.toggle("text-ink", state !== "upcoming");
+    button.classList.toggle("text-muted", state === "upcoming");
+    if (state === "active") button.setAttribute("aria-current", "step");
+    else button.removeAttribute("aria-current");
+    ["badge", "title", "bar"].forEach(function (part) {
+      var child = button.querySelector("[data-step-" + part + "]");
+      if (!child) return;
+      child.dataset.stepState = state;
+      child.dataset.state = state;
+      if (part === "badge") {
+        if (!child.dataset.stepNumber) child.dataset.stepNumber = child.textContent.trim();
+        child.textContent = state === "completed" ? "✓" : child.dataset.stepNumber;
+      }
     });
   }
 
@@ -208,16 +264,17 @@
       panel.hidden = Number(panel.dataset.appStep) !== step;
     });
     form.querySelectorAll("[data-step-target]").forEach(function (button) {
-      var current = Number(button.dataset.stepTarget) === step;
-      button.classList.toggle("text-ink", current);
-      button.classList.toggle("text-muted", !current);
-      if (current) button.setAttribute("aria-current", "step");
-      else button.removeAttribute("aria-current");
+      updateProgress(button, step);
     });
-    form.querySelector("[data-step-back]").hidden = step === 1;
-    form.querySelector("[data-step-next]").hidden = step === 4;
+    form.querySelectorAll("[data-step-back]").forEach(function (button) {
+      button.hidden = step === 1;
+    });
+    form.querySelectorAll("[data-step-next]").forEach(function (button) {
+      button.hidden = step === 4;
+    });
     form.querySelector("[data-step-error]").textContent = "";
     if (step === 4) updateReview(form);
+    updateSummary(form);
     var heading = form.querySelector('[data-app-step="' + step + '"] h2');
     if (heading) heading.focus({ preventScroll: true });
   }
@@ -273,20 +330,29 @@
 
   function prepareStepper(form) {
     var progress = form.querySelector("[data-step-progress]");
-    var navigation = form.querySelector("[data-step-navigation]");
-    if (!progress || !navigation || !form.querySelector("[data-step-next]")) return;
+    var navigation = form.querySelectorAll("[data-step-navigation]");
+    if (!progress || !navigation.length || !form.querySelector("[data-step-next]")) return;
     form.noValidate = true;
     progress.hidden = false;
-    navigation.hidden = false;
-    form.querySelector("[data-step-next]").addEventListener("click", function () {
-      goToStep(form, Number(form.dataset.currentStep) + 1);
+    navigation.forEach(function (footer) { footer.hidden = false; });
+    form.querySelectorAll("[data-step-next]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        goToStep(form, Number(form.dataset.currentStep) + 1);
+      });
     });
-    form.querySelector("[data-step-back]").addEventListener("click", function () {
-      showStep(form, Math.max(1, Number(form.dataset.currentStep) - 1));
+    form.querySelectorAll("[data-step-back]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        showStep(form, Math.max(1, Number(form.dataset.currentStep) - 1));
+      });
     });
     form.querySelectorAll("[data-step-target]").forEach(function (button) {
       button.addEventListener("click", function () {
         goToStep(form, Number(button.dataset.stepTarget));
+      });
+    });
+    form.querySelectorAll("[data-review-target]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        goToStep(form, Number(button.dataset.reviewTarget));
       });
     });
     showStep(form, 1);
@@ -313,22 +379,63 @@
     }
   }
 
+  function syncResourceCards(form, mode) {
+    form.querySelectorAll("[data-resource-card]").forEach(function (card) {
+      var selected = card.dataset.resourceCard === mode;
+      card.dataset.state = selected ? "selected" : "unselected";
+      card.dataset.selected = String(selected);
+      card.classList.toggle("border-[#165237]", selected);
+      card.classList.toggle("bg-[#165237]/5", selected);
+      card.classList.toggle("border-zinc-200", !selected);
+      card.classList.toggle("bg-white", !selected);
+    });
+  }
+
+  function lockResources(cpu, memory, locked) {
+    [cpu, memory].forEach(function (input) {
+      input.readOnly = locked;
+      input.classList.toggle("bg-zinc-100", locked);
+      input.classList.toggle("text-zinc-500", locked);
+      input.classList.toggle("cursor-not-allowed", locked);
+      input.classList.toggle("bg-white", !locked);
+    });
+  }
+
   function prepareResources(form) {
     var recommended = form.querySelector("[data-resource-recommended]");
     var custom = form.querySelector("[data-resource-custom]");
     var cpu = form.querySelector("[data-resource-cpu]");
     var memory = form.querySelector("[data-resource-memory]");
-    if (recommended && cpu && memory) {
-      recommended.addEventListener("change", function () {
+    if (!recommended || !custom || !cpu || !memory) return;
+    var mode = custom.checked ? "custom" : "recommended";
+    var manual = { cpu: cpu.value, memory: memory.value };
+    function select(next) {
+      if (next === "recommended") {
+        if (mode === "custom") manual = { cpu: cpu.value, memory: memory.value };
         cpu.value = "1";
         memory.value = "512";
-      });
-    }
-    [cpu, memory].forEach(function (input) {
-      if (input && custom) {
-        input.addEventListener("input", function () { custom.checked = true; });
+      } else {
+        cpu.value = manual.cpu;
+        memory.value = manual.memory;
       }
+      mode = next;
+      lockResources(cpu, memory, mode === "recommended");
+      syncResourceCards(form, mode);
+    }
+    recommended.addEventListener("change", function () { select("recommended"); });
+    custom.addEventListener("change", function () { select("custom"); });
+    [cpu, memory].forEach(function (input) {
+      input.addEventListener("input", function () {
+        if (mode !== "custom") {
+          custom.checked = true;
+          mode = "custom";
+          lockResources(cpu, memory, false);
+          syncResourceCards(form, mode);
+        }
+        manual = { cpu: cpu.value, memory: memory.value };
+      });
     });
+    select(mode);
   }
 
   function prepareForm(form) {
@@ -341,6 +448,14 @@
       bindEnvironment(editor);
     }
     if (form.matches("[data-app-stepper]")) prepareStepper(form);
+    function refreshSummary() {
+      updateSummary(form);
+      if (form.dataset.currentStep === "4") updateReview(form);
+    }
+    ["input", "change", "hakobi:form-change"].forEach(function (type) {
+      form.addEventListener(type, refreshSummary);
+    });
+    updateSummary(form);
     form.addEventListener("submit", function (event) {
       validateSubmission(form, event);
     });
