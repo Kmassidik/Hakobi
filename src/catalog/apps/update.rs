@@ -27,8 +27,7 @@ impl Catalog {
         env_json: &str,
     ) -> Result<()> {
         let name = name.trim();
-        validate_app_name(name)?;
-        validate_env_json(env_json)?;
+        validate_update_metadata(name, env_json)?;
         validate_build_type(build_type)?;
         validate_port(container_port)?;
         validate_port(requested_host_port)?;
@@ -60,6 +59,11 @@ impl Catalog {
         transaction.commit()?;
         Ok(())
     }
+}
+
+fn validate_update_metadata(name: &str, env_json: &str) -> Result<()> {
+    validate_app_name(name)?;
+    validate_env_json(env_json)
 }
 
 fn ensure_updated(updated: usize, id: &str) -> Result<()> {
