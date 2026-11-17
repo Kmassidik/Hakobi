@@ -38,7 +38,7 @@ pub(super) fn recipe_summary(hosts: &[HostAgent], values: &AppFormValues) -> Mar
         .iter()
         .find(|host| host.id == values.host_id)
         .or_else(|| hosts.first().filter(|_| hosts.len() == 1))
-        .map(|host| format!("{} · {}", host.name, host.agent_url))
+        .map(|host| host.name.clone())
         .unwrap_or_else(|| "Not selected".into());
     html! {
         aside class="lg:col-span-4 lg:sticky lg:top-6" aria-labelledby="recipe-summary-title" {
@@ -67,9 +67,9 @@ pub(super) fn recipe_summary(hosts: &[HostAgent], values: &AppFormValues) -> Mar
 
 fn summary_row(label: &str, key: &str, value: String) -> Markup {
     html! {
-        div class="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-3 py-3 text-[11.5px]" {
-            dt class="text-zinc-500" { (label) }
-            dd data-summary=(key) class="m-0 break-words text-right font-mono text-[11px] leading-relaxed text-zinc-800" { (value) }
+        div class="flex items-center justify-between gap-3 py-3 text-[11.5px]" {
+            dt class="shrink-0 text-zinc-500" { (label) }
+            dd data-summary=(key) class="m-0 whitespace-nowrap text-right font-mono text-[11px] leading-relaxed text-zinc-800" { (value) }
         }
     }
 }

@@ -230,7 +230,7 @@
       name: fieldValue(form, "name", "—"),
       repo: fieldValue(form, "github_repo", "Not selected"),
       branch: fieldValue(form, "github_branch", "Not selected"),
-      host: selectedText(form, "host_id", "Not selected"),
+      host: selectedText(form, "host_id", "Not selected").split("·")[0].trim(),
       runtime: selectedText(form, "build_type", "Not selected") + " · " + portMapping(form, "8080"),
       allocation: cpu + " CPU · " + memory + " MiB",
       environment: environmentLabel(form),
