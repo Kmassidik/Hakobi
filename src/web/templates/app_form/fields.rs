@@ -72,28 +72,39 @@ pub(super) fn app_identity_fields(hosts: &[HostAgent], values: &AppFormValues) -
 
 pub(super) fn build_settings_fields(values: &AppFormValues) -> Markup {
     html! {
-        div class="grid grid-cols-1 gap-4 sm:grid-cols-3" {
-            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
-                "Build type"
-                select class=(CONTROL) name="build_type" required {
-                    option value="dockerfile" selected[values.build_type == "dockerfile"] { "Dockerfile" }
-                    option value="nixpacks" selected[values.build_type == "nixpacks"] { "Nixpacks" }
-                }
+        label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+            "Build type"
+            select class=(CONTROL) name="build_type" required {
+                option value="dockerfile" selected[values.build_type == "dockerfile"] { "Dockerfile" }
+                option value="nixpacks" selected[values.build_type == "nixpacks"] { "Nixpacks" }
             }
-            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
-                "Host port (optional)"
-                input class=(CONTROL) name="requested_host_port" type="number" value=(values.requested_host_port) min="1" max="65535" placeholder="Automatic" autocomplete="off";
-                span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
-                    "Loopback-only. Leave blank to automatically assign a host port."
-                }
+        }
+        fieldset class="m-0 min-w-0 border-0 border-t border-zinc-200 p-0 pt-5" {
+            legend class="px-0 text-[13px] font-semibold text-zinc-800" { "Port mapping" }
+            p class="mb-4 mt-1 text-[11.5px] leading-relaxed text-zinc-500" {
+                "Map an automatic or custom loopback host port to the application’s container port."
             }
-            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
-                "Container port"
-                input class=(CONTROL) name="container_port" type="number" value=(values.container_port) min="1" max="65535" placeholder="8080";
+            div class="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center" {
+                label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                    "Host port (optional)"
+                    input class=(CONTROL) name="requested_host_port" type="number" value=(values.requested_host_port) min="1" max="65535" placeholder="Automatic" autocomplete="off";
+                    span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
+                        "Blank selects an available loopback port."
+                    }
+                }
+                span class="hidden pt-5 text-zinc-400 sm:block" aria-hidden="true" { "→" }
+                label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                    "Container port"
+                    input class=(CONTROL) name="container_port" type="number" value=(values.container_port) min="1" max="65535" placeholder="8080";
+                    span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
+                        "The port your application listens on."
+                    }
+                }
             }
         }
         (environment_fields(values))
-        div class="grid grid-cols-1 gap-4 sm:grid-cols-2" {
+        section class="grid gap-5 border-t border-zinc-200 pt-5" aria-labelledby="build-paths-title" {
+            h3 id="build-paths-title" class="m-0 text-[13px] font-semibold text-zinc-800" { "Build paths" }
             label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
                 "Context path"
                 input class=(CONTROL) name="github_path" type="text" value=(values.github_path) maxlength="512" placeholder="." autocomplete="off";
@@ -102,6 +113,7 @@ pub(super) fn build_settings_fields(values: &AppFormValues) -> Markup {
             label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
                 "Dockerfile path"
                 input class=(CONTROL) name="github_dockerfile" type="text" value=(values.github_dockerfile) maxlength="512" placeholder="Dockerfile" autocomplete="off";
+                span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" { "Relative path to the Dockerfile used for the image build." }
             }
         }
     }
@@ -127,6 +139,12 @@ fn environment_fields(values: &AppFormValues) -> Markup {
                         "Add variable"
                     }
                 }
+                div class="hidden sm:grid sm:grid-cols-12 sm:gap-3 text-[11px] font-semibold text-zinc-500" {
+                    span class="sm:col-span-3" { "Type" }
+                    span class="sm:col-span-4" { "Name" }
+                    span class="sm:col-span-4" { "Value" }
+                    span class="sm:col-span-1" {}
+                }
                 div data-env-rows class="grid gap-3" {}
                 template data-env-row-template { (environment_row()) }
                 p data-env-error role="alert" class="m-0 text-[11.5px] font-normal text-danger" {}
@@ -140,19 +158,19 @@ fn environment_fields(values: &AppFormValues) -> Markup {
 
 fn environment_row() -> Markup {
     html! {
-        div data-env-row class="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 sm:grid-cols-12 sm:items-end sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0" {
+        div data-env-row class="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 sm:grid-cols-12 sm:items-center sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0" {
             label class="grid gap-1.5 text-[11px] font-semibold text-zinc-500 sm:col-span-3" {
-                "Type"
+                span class="sm:hidden" { "Type" }
                 select data-env-type class=(CONTROL) aria-label="Variable type" {
                     option value="variable" { "Variable" }
                 }
             }
             label class="grid gap-1.5 text-[11px] font-semibold text-zinc-500 sm:col-span-4" {
-                "Name"
+                span class="sm:hidden" { "Name" }
                 input data-env-key class=(CONTROL) type="text" placeholder="Name" autocomplete="off";
             }
             label class="grid gap-1.5 text-[11px] font-semibold text-zinc-500 sm:col-span-4" {
-                "Value"
+                span class="sm:hidden" { "Value" }
                 input data-env-value class=(CONTROL) type="text" placeholder="Value" autocomplete="off";
             }
             button type="button" data-env-remove class="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-danger/30 bg-white px-3 text-danger hover:bg-danger/5 sm:col-span-1 sm:w-full sm:px-0" aria-label="Remove variable" title="Remove variable" {
