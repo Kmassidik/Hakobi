@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
@@ -132,13 +132,34 @@ impl ProxyHttp for HakobiProxy {
 struct CatalogReload {
     table: SharedTable,
     catalog_path: std::path::PathBuf,
+    wal_path: std::path::PathBuf,
 }
 
 impl CatalogReload {
-    fn reload_if_changed(&self, last_build: &mut std::time::SystemTime) {
-        let mtime = std::fs::metadata(&self.catalog_path)
-            .and_then(|meta| meta.modified())
-            .unwrap_or(*last_build);
+    fn new(table: SharedTable, catalog_path: std::path::PathBuf) -> Self {
+        let mut wal_path = catalog_path.as_os_str().to_os_string();
+        wal_path.push("-wal");
+        Self {
+            table,
+            catalog_path,
+            wal_path: wal_path.into(),
+        }
+    }
+
+    fn mtime(&self) -> SystemTime {
+        [&self.catalog_path, &self.wal_path]
+            .into_iter()
+            .filter_map(|path| {
+                std::fs::metadata(path)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+            })
+            .max()
+            .unwrap_or(SystemTime::UNIX_EPOCH)
+    }
+
+    fn reload_if_changed(&self, last_build: &mut SystemTime) {
+        let mtime = self.mtime();
         if mtime <= *last_build {
             return;
         }
@@ -159,9 +180,7 @@ impl CatalogReload {
 #[async_trait]
 impl BackgroundService for CatalogReload {
     async fn start(&self, mut shutdown: ShutdownWatch) {
-        let mut last_build = std::fs::metadata(&self.catalog_path)
-            .and_then(|meta| meta.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let mut last_build = self.mtime();
         loop {
             tokio::select! {
                 _ = shutdown.changed() => break,
@@ -186,6 +205,18 @@ fn worker_threads() -> usize {
         })
 }
 
+fn server_configuration() -> ServerConf {
+    ServerConf {
+        threads: worker_threads(),
+        upstream_keepalive_pool_size: UPSTREAM_POOL_SIZE_PER_THREAD,
+        work_stealing: false,
+        max_retries: 1,
+        grace_period_seconds: Some(1),
+        graceful_shutdown_timeout_seconds: Some(5),
+        ..ServerConf::default()
+    }
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     let addr: SocketAddr = std::env::var("HAKOBI_EDGE_ADDR")
@@ -197,15 +228,7 @@ fn main() -> Result<()> {
         .unwrap_or_else(|_| std::path::PathBuf::from("catalog.sqlite3"));
     let table: SharedTable = Arc::new(ArcSwap::from_pointee(load_table(&catalog_path)?));
 
-    let configuration = ServerConf {
-        threads: worker_threads(),
-        upstream_keepalive_pool_size: UPSTREAM_POOL_SIZE_PER_THREAD,
-        work_stealing: false,
-        max_retries: 1,
-        ..ServerConf::default()
-    };
-
-    let mut server = Server::new_with_opt_and_conf(None, configuration);
+    let mut server = Server::new_with_opt_and_conf(None, server_configuration());
     server.bootstrap();
     let mut proxy = http_proxy_service(
         &server.configuration,
@@ -217,10 +240,7 @@ fn main() -> Result<()> {
     server.add_service(proxy);
     server.add_service(background_service(
         "catalog reload",
-        CatalogReload {
-            table,
-            catalog_path,
-        },
+        CatalogReload::new(table, catalog_path),
     ));
     log::info!("hakobi-edge listening on {addr}");
     server.run_forever()
@@ -246,4 +266,66 @@ fn load_table(catalog_path: &std::path::Path) -> Result<RouteTable> {
         .routes
         .insert("console.glicc.id".to_owned(), Upstream::new(3000));
     Ok(table)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{File, FileTimes};
+
+    #[test]
+    fn wal_only_mtime_change_reloads_routes() {
+        let temp = tempfile::tempdir().unwrap();
+        let catalog_path = temp.path().join("catalog.sqlite3");
+        let _catalog = hakobi::catalog::Catalog::open(&catalog_path).unwrap();
+        let writer = rusqlite::Connection::open(&catalog_path).unwrap();
+        writer.pragma_update(None, "journal_mode", "WAL").unwrap();
+
+        let table: SharedTable =
+            Arc::new(ArcSwap::from_pointee(load_table(&catalog_path).unwrap()));
+        let reload = CatalogReload::new(Arc::clone(&table), catalog_path);
+        assert!(table.load().upstream_for("shop.glicc.id").is_none());
+
+        writer
+            .execute_batch(
+                "INSERT INTO host_agents (id, name, agent_url, created_at) \
+                 VALUES ('host', 'local', 'http://127.0.0.1:9100', '2026-01-01T00:00:00Z'); \
+                 INSERT INTO apps \
+                 (id, name, subdomain, host_id, host_port, created_at, updated_at) \
+                 VALUES ('app', 'shop', 'shop', 'host', 4100, \
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+            )
+            .unwrap();
+
+        // Simulate filesystems with coarse timestamps: only the WAL advances.
+        let main_mtime = std::fs::metadata(&reload.catalog_path)
+            .and_then(|meta| meta.modified())
+            .unwrap();
+        let wal_mtime = main_mtime.checked_add(Duration::from_secs(2)).unwrap();
+        File::options()
+            .write(true)
+            .open(&reload.wal_path)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(wal_mtime))
+            .unwrap();
+        let mut last_build = main_mtime;
+        assert_eq!(reload.mtime(), wal_mtime);
+
+        reload.reload_if_changed(&mut last_build);
+
+        assert_eq!(last_build, wal_mtime);
+        let current = table.load();
+        assert_eq!(current.routes_len(), 2);
+        assert_eq!(
+            current.upstream_for("shop.glicc.id").map(|peer| peer.addr),
+            Some(SocketAddr::from(([127, 0, 0, 1], 4100)))
+        );
+    }
+
+    #[test]
+    fn pingora_shutdown_is_bounded_explicitly() {
+        let configuration = server_configuration();
+        assert_eq!(configuration.grace_period_seconds, Some(1));
+        assert_eq!(configuration.graceful_shutdown_timeout_seconds, Some(5));
+    }
 }

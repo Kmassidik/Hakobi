@@ -1,5 +1,7 @@
 //! Explicit post-build publication through Cloudflare Tunnel and the L7 edge.
 
+use std::time::Duration;
+
 use axum::{
     extract::{Form, Path, Query, State},
     http::{header::CACHE_CONTROL, HeaderMap, HeaderValue, StatusCode},
@@ -7,6 +9,10 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+
+const PUBLIC_HEALTH_ATTEMPTS: usize = 10;
+const PUBLIC_HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+const PUBLIC_HEALTH_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 use super::{
     app_deploy::load_app, internal_error, post_is_allowed, redirect_with_notice, with_catalog,
@@ -247,22 +253,15 @@ async fn finish_publication(
 ) -> Response {
     match publish_route(state, id, subdomain, host_port).await {
         Ok(hostname) => {
-            if let Err(error) = save_subdomain(state, id, subdomain).await {
+            if let Err(error) = set_subdomain(state, id, Some(subdomain)).await {
                 let notice = format!(
                     "The route is ready, but saving publication failed: {error:#}. Retry to recover."
                 );
                 return publication_result(state, headers, id, Some(attempted), &notice, true)
                     .await;
             }
-            let healthy = public_health(&hostname).await;
-            let notice = if healthy {
-                format!("Application is alive at https://{hostname}.")
-            } else {
-                format!(
-                    "Published https://{hostname}; public health verification is still pending."
-                )
-            };
-            publication_result(state, headers, id, None, &notice, false).await
+            let health = public_health(&hostname).await;
+            publication_health_result(state, headers, id, &hostname, health).await
         }
         Err(error) => {
             publication_result(
@@ -274,6 +273,33 @@ async fn finish_publication(
                 true,
             )
             .await
+        }
+    }
+}
+
+async fn publication_health_result(
+    state: &AppState,
+    headers: &HeaderMap,
+    id: &str,
+    hostname: &str,
+    health: Result<(), String>,
+) -> Response {
+    match health {
+        Ok(()) => {
+            let notice = format!("Application is alive at https://{hostname}.");
+            publication_result(state, headers, id, None, &notice, false).await
+        }
+        Err(error) => {
+            let mut notice = format!(
+                "Public health verification failed for https://{hostname}: {error}. \
+                 The managed route remains configured; retry publication."
+            );
+            if let Err(clear_error) = set_subdomain(state, id, None).await {
+                notice.push_str(&format!(
+                    " Clearing the saved assignment also failed: {clear_error:#}."
+                ));
+            }
+            publication_result(state, headers, id, Some(hostname), &notice, true).await
         }
     }
 }
@@ -290,11 +316,14 @@ async fn publication_result(
     if !boosted && !is_error {
         return redirect_with_notice(&format!("/apps/{id}"), notice);
     }
-    let app = match load_app(state, id).await {
+    let mut app = match load_app(state, id).await {
         Ok(Some(app)) => app,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
         Err(error) => return internal_error(error),
     };
+    if is_error {
+        app.subdomain = None;
+    }
     let (csrf_token, cookies) = super::page_csrf(state, headers);
     let domain = apps_domain(state).await;
     let status = if is_error {
@@ -317,11 +346,11 @@ async fn publication_result(
     )
 }
 
-async fn save_subdomain(state: &AppState, id: &str, subdomain: &str) -> anyhow::Result<()> {
+async fn set_subdomain(state: &AppState, id: &str, subdomain: Option<&str>) -> anyhow::Result<()> {
     let app_id = id.to_owned();
-    let saved = subdomain.to_owned();
+    let saved = subdomain.map(str::to_owned);
     with_catalog(state, move |catalog| {
-        catalog.set_app_subdomain(&app_id, Some(&saved))
+        catalog.set_app_subdomain(&app_id, saved.as_deref())
     })
     .await
 }
@@ -379,16 +408,28 @@ async fn catalog_subdomain_owner(
     .await
 }
 
-async fn public_health(hostname: &str) -> bool {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build();
-    let Ok(client) = client else {
-        return false;
-    };
-    client
-        .get(format!("https://{hostname}/"))
-        .send()
-        .await
-        .is_ok_and(|response| response.status().is_success())
+async fn public_health(hostname: &str) -> Result<(), String> {
+    verify_public_health(&format!("https://{hostname}/"), PUBLIC_HEALTH_RETRY_DELAY).await
 }
+
+async fn verify_public_health(url: &str, retry_delay: Duration) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(PUBLIC_HEALTH_TIMEOUT)
+        .build()
+        .map_err(|error| format!("could not create health-check client: {error}"))?;
+    let mut last_error = None;
+    for attempt in 0..PUBLIC_HEALTH_ATTEMPTS {
+        match client.get(url).send().await {
+            Ok(response) if response.status().is_success() => return Ok(()),
+            Ok(response) => last_error = Some(format!("HTTP {}", response.status())),
+            Err(error) => last_error = Some(format!("network error: {error}")),
+        }
+        if attempt + 1 < PUBLIC_HEALTH_ATTEMPTS {
+            tokio::time::sleep(retry_delay).await;
+        }
+    }
+    Err(last_error.expect("health verification always makes an attempt"))
+}
+
+#[cfg(test)]
+mod tests;

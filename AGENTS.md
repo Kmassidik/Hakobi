@@ -34,7 +34,12 @@ and guarded domain CRUD must remain working. Use parameterized SQL only.
 - Production console: `https://console.glicc.id`, loopback port 3000.
 - `hakobi-edge`: Pingora-based L7 proxy on `127.0.0.1:9000`.
 - Pingora: pinned repository revision in `Cargo.toml`; 14 per-thread runtimes,
-  work stealing disabled, shared upstream pool, streaming bodies.
+  work stealing disabled, shared upstream pool, streaming bodies. Catalog reload
+  watches both the SQLite main file and `-wal`; shutdown uses a one-second grace
+  period and a five-second final timeout so SSE cannot hang restart indefinitely.
+- Publication is successful only after a final external 2xx response. Failed
+  health checks clear the displayed assignment, return an actionable error, and
+  keep managed DNS/ingress safe for an adoptable retry.
 - `max_retries = 1` means one total upstream attempt, not one retry. Zero
   skips proxying entirely. Never replay non-idempotent requests.
 - Cloudflare Tunnel: explicit `llm.glicc.id` → 8081 and

@@ -97,7 +97,12 @@ availability is checked before submission and again authoritatively on publish.
 Unpublished deletion never guesses a hostname, and Settings cannot delete a
 route assigned to an app. Deployment cancellation blocks later pipeline stages,
 and host installation uses the authenticated native-agent API.
-Future deployments update that stored route. Public traffic still enters only
+Future deployments update that stored route. Pingora watches both the main
+catalog and SQLite WAL before atomically swapping routes, and its bounded
+shutdown prevents long-lived build terminals from blocking restart. Publication
+uses bounded external health checks and only presents success after a final 2xx;
+failed verification clears the displayed assignment but preserves managed
+DNS/ingress for safe retry. Public traffic still enters only
 through the existing tunnel/L7 edge; raw application host ports stay private.
 Code reality: Manifest registration, installation webhooks/callback/recheck,
 installation tokens, push matching, and a repository picker. Repository lists
