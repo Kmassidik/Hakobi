@@ -73,8 +73,11 @@ anything new.
 ## Controls and data entry
 
 - Repository and branch controls sit side by side when space permits. Detected
-  applications are selectable cards showing path and build recipe; the selected
-  card uses a restrained green border/tint.
+  applications use single-line radio rows for up to three paths and native
+  searchable selection for four or more. Each row shows path and build recipe;
+  larger repositories keep hidden exact-path form state synchronized with the
+  search field. Partial free text is never a valid application selection.
+  Selected rows use a restrained green border/tint.
 - Environment variables use repeatable rows, never a JSON textarea as the
   primary UI. Desktop proportions: Type 3/12, Name 4/12, Value 4/12, remove
   1/12. Use Variable only unless real encrypted Secret support exists.

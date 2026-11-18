@@ -23,8 +23,9 @@
   }
 
   function updateAppCards(picker) {
-    picker.appsBox.querySelectorAll("input[name=github_app_path]").forEach(function (input) {
-      input.closest("label").dataset.state = input.checked ? "selected" : "unselected";
+    picker.appsBox.querySelectorAll("label[data-app-option]").forEach(function (label) {
+      var input = label.querySelector("input[name=github_app_path]");
+      label.dataset.state = input.checked ? "selected" : "unselected";
     });
   }
 
@@ -79,38 +80,93 @@
     }
   }
 
-  function renderApps(picker, apps, selectedPath) {
-    var selected = apps.some(function (app) { return app.path === selectedPath; })
-      ? selectedPath : (apps[0] && apps[0].path);
+  function appDisplay(app) {
+    return app.path === "" ? "/ (repository root)" : app.path;
+  }
+
+  function radioInput(picker, app, selected, hidden) {
+    var input = document.createElement("input");
+    input.type = "radio";
+    input.name = "github_app_path";
+    input.value = app.path;
+    input.dataset.dockerfile = app.dockerfile;
+    input.checked = app.path === selected;
+    input.className = hidden ? "hidden" : "size-4 shrink-0 accent-[#165237]";
+    input.addEventListener("change", function () { sync(picker); });
+    return input;
+  }
+
+  function renderRadioApps(picker, apps, selected) {
     apps.forEach(function (app) {
       var label = document.createElement("label");
-      label.className = "relative flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 bg-white p-4 transition hover:border-zinc-300 has-[:checked]:border-[#165237] has-[:checked]:bg-[#165237]/5";
-      var input = document.createElement("input");
-      input.type = "radio";
-      input.name = "github_app_path";
-      input.value = app.path;
-      input.dataset.dockerfile = app.dockerfile;
-      input.className = "mt-1 size-4 shrink-0 accent-[#165237]";
-      input.checked = app.path === selected;
-      input.addEventListener("change", function () { sync(picker); });
-      var content = document.createElement("span");
-      content.className = "flex min-w-0 flex-1 items-start justify-between gap-3";
+      label.dataset.appOption = "true";
+      label.className = "flex cursor-pointer flex-nowrap items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-3 transition has-[:checked]:border-[#165237] has-[:checked]:bg-[#165237]/5";
       var text = document.createElement("span");
-      text.className = "min-w-0";
-      var title = document.createElement("span");
-      title.className = "block text-sm font-semibold text-zinc-900";
-      title.textContent = app.path === "" ? "Repository root" : app.path.split("/").pop();
-      var path = document.createElement("span");
-      path.className = "mt-1 block break-all font-mono text-xs text-zinc-500";
-      path.textContent = app.path === "" ? "/" : app.path + "/";
+      text.className = "min-w-0 flex-1 truncate font-mono text-[13px] text-zinc-800";
+      text.textContent = appDisplay(app);
+      text.title = appDisplay(app);
       var badge = document.createElement("span");
       badge.className = "shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-1 font-mono text-[11px] text-zinc-600";
       badge.textContent = app.dockerfile || "Dockerfile";
-      text.append(title, path);
-      content.append(text, badge);
-      label.append(input, content);
+      label.append(radioInput(picker, app, selected, false), text, badge);
       picker.appsBox.appendChild(label);
     });
+  }
+
+  function selectSearchApp(picker, input) {
+    var app = picker.detectedApps.find(function (candidate) {
+      return appDisplay(candidate) === input.value;
+    });
+    picker.appsBox.querySelectorAll("input[name=github_app_path]").forEach(function (radio) {
+      radio.checked = !!app && radio.value === app.path;
+    });
+    var recipe = picker.appsBox.querySelector("[data-gh-selected-recipe]");
+    if (recipe) recipe.textContent = app ? app.dockerfile : "Select a detected application";
+    if (app) sync(picker);
+    else notifyFormChange(picker);
+  }
+
+  function searchLabel() {
+    var label = document.createElement("span");
+    label.className = "mb-2 block text-[13px] font-semibold text-zinc-800";
+    label.textContent = "Application";
+    return label;
+  }
+
+  function renderSearchApps(picker, apps, selected) {
+    picker.detectedApps = apps;
+    var wrapper = document.createElement("div");
+    var input = document.createElement("input");
+    input.type = "search";
+    input.className = "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-[13px] text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-[#165237] focus:ring-[3px] focus:ring-[#165237]/10";
+    input.placeholder = "Search applications…";
+    input.autocomplete = "off";
+    input.setAttribute("list", "gh-application-options");
+    var selectedApp = apps.find(function (app) { return app.path === selected; });
+    input.value = selectedApp ? appDisplay(selectedApp) : "";
+    var options = document.createElement("datalist");
+    options.id = "gh-application-options";
+    var recipe = document.createElement("p");
+    recipe.dataset.ghSelectedRecipe = "true";
+    recipe.className = "mb-0 mt-2 font-mono text-[11px] text-zinc-500";
+    recipe.textContent = selectedApp ? selectedApp.dockerfile : "Select a detected application";
+    apps.forEach(function (app) {
+      var option = document.createElement("option");
+      option.value = appDisplay(app);
+      options.appendChild(option);
+      picker.appsBox.appendChild(radioInput(picker, app, selected, true));
+    });
+    input.addEventListener("input", function () { selectSearchApp(picker, input); });
+    input.addEventListener("focus", function () { input.select(); });
+    wrapper.append(searchLabel(), input, options, recipe);
+    picker.appsBox.appendChild(wrapper);
+  }
+
+  function renderApps(picker, apps, selectedPath) {
+    var selected = apps.some(function (app) { return app.path === selectedPath; })
+      ? selectedPath : (apps[0] && apps[0].path);
+    if (apps.length > 3) renderSearchApps(picker, apps, selected);
+    else renderRadioApps(picker, apps, selected);
     updateAppCards(picker);
   }
 

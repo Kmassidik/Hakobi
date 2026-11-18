@@ -31,7 +31,7 @@ pub(super) fn github_source_fields(values: &AppFormValues) -> Markup {
             fieldset class="m-0 min-w-0 border-0 p-0" {
                 legend class="px-0 text-[13px] font-semibold text-zinc-800" { "Detected applications" }
                 p class="mb-3 mt-1 text-[11.5px] leading-relaxed text-zinc-500" {
-                    "Select the repository root or a detected subdirectory to build."
+                    "Up to three applications appear as rows; larger repositories use search."
                 }
                 div data-gh-apps class="grid grid-cols-1 gap-3" {}
             }
