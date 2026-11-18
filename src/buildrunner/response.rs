@@ -25,8 +25,25 @@ pub struct BuildResponse {
     pub detail: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct BuildLogEvent {
+    pub stage: String,
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum RunnerEvent {
+    Log { stage: String, message: String },
+    Complete { outcome: BuildResponse },
+}
+
 pub(super) fn parse_build_response(body: &[u8]) -> Result<BuildResponse> {
     serde_json::from_slice(body).context("build runner returned an invalid JSON response")
+}
+
+pub(super) fn parse_runner_event(body: &[u8]) -> Result<RunnerEvent> {
+    serde_json::from_slice(body).context("build runner returned an invalid NDJSON event")
 }
 
 fn missing_exit_code() -> i32 {

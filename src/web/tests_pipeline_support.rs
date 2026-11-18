@@ -10,6 +10,8 @@ pub(crate) enum PipelineScript {
     Ok { image_id: String, exit_code: i32 },
     /// Runner returns a failure detail with this exit code.
     Error { detail: String, exit_code: i32 },
+    /// Runner streams native clone/build events before a successful outcome.
+    Streaming,
 }
 
 fn response_body(script: &PipelineScript) -> String {
@@ -24,6 +26,14 @@ fn response_body(script: &PipelineScript) -> String {
             r#"{{"status":"failed","exit_code":{exit_code},"duration_ms":5,"log_tail":"boom","truncated":false,"detail":"{}"}}"#,
             detail.replace('\\', "\\\\")
         ),
+        PipelineScript::Streaming => concat!(
+            "{\"type\":\"log\",\"stage\":\"clone\",\"message\":\"cloned repository\"}\n",
+            "{\"type\":\"log\",\"stage\":\"build\",\"message\":\"compiled image\"}\n",
+            "{\"type\":\"complete\",\"outcome\":{\"status\":\"succeeded\",",
+            "\"image_id\":\"sha256:stream\",\"exit_code\":0,\"duration_ms\":5,",
+            "\"log_tail\":\"\",\"truncated\":false,\"detail\":null}}\n"
+        )
+        .to_owned(),
     }
 }
 
@@ -53,9 +63,14 @@ pub(crate) fn start_scripted_runner(script: PipelineScript, delay_ms: u64) -> St
             if delay_ms > 0 {
                 std::thread::sleep(Duration::from_millis(delay_ms));
             }
-            let payload = response_body(&script.lock().unwrap().clone());
+            let script = script.lock().unwrap().clone();
+            let payload = response_body(&script);
+            let content_type = match script {
+                PipelineScript::Streaming => "application/x-ndjson",
+                _ => "application/json",
+            };
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
                 payload.len()
             );
             let _ = stream.write_all(response.as_bytes());

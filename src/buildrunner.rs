@@ -12,4 +12,4 @@ mod response;
 mod tests;
 
 pub use client::{BuildRequest, BuildRunnerClient};
-pub use response::BuildResponse;
+pub use response::{BuildLogEvent, BuildResponse};

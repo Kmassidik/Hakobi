@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 
-use hakobi::buildrunner::BuildRequest;
+use hakobi::buildrunner::{BuildLogEvent, BuildRequest, BuildResponse};
 use hakobi::providers::{docker::validate_image_reference, ResourceLimits};
 
 use super::stages::{
@@ -113,6 +113,27 @@ fn spawn_cloudflare_route_sync(deps: &ExecutorDeps, app_id: &str) {
     }
 }
 
+fn spawn_build_log_writer(
+    deps: &ExecutorDeps,
+    deployment_id: &str,
+) -> (
+    tokio::sync::mpsc::UnboundedSender<BuildLogEvent>,
+    tokio::task::JoinHandle<Result<()>>,
+) {
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<BuildLogEvent>();
+    let deps = deps.clone();
+    let deployment_id = deployment_id.to_owned();
+    let writer = tokio::spawn(async move {
+        while let Some(event) = receiver.recv().await {
+            let level = "info";
+            let message = format!("[{}] {}", event.stage, event.message);
+            super::stages::log(&deps, &deployment_id, level, &message).await?;
+        }
+        Ok(())
+    });
+    (sender, writer)
+}
+
 /// Runs the build through the configured build runner and returns the image
 /// tag (`hakobi/{app}:v{version}`).
 async fn build_image(
@@ -132,13 +153,25 @@ async fn build_image(
         context_dir: context.context_dir.clone(),
         token: None,
     };
+    let (sender, writer) = spawn_build_log_writer(deps, deployment_id);
     let response = match context.build_type.as_str() {
-        "compose" => runner.build_compose(&request).await,
-        "dockerfile" => runner.build_dockerfile(&request).await,
-        "nixpacks" => runner.build_nixpacks(&request).await,
+        "compose" => runner.build_compose_stream(&request, sender).await,
+        "dockerfile" => runner.build_dockerfile_stream(&request, sender).await,
+        "nixpacks" => runner.build_nixpacks_stream(&request, sender).await,
         other => bail!("app has unsupported build type {other:?}"),
-    }
-    .context("build runner request failed")?;
+    };
+    let writer_result = writer.await.context("build log writer task failed")?;
+    let response = response.context("build runner request failed")?;
+    writer_result?;
+    persist_build_response(deps, deployment_id, response).await?;
+    Ok(context.image_tag.clone())
+}
+
+async fn persist_build_response(
+    deps: &ExecutorDeps,
+    deployment_id: &str,
+    response: BuildResponse,
+) -> Result<()> {
     let output = format!(
         "status={} exit={} duration_ms={}{}",
         response.status,
@@ -160,7 +193,7 @@ async fn build_image(
             truncate_message(&detail)
         );
     }
-    Ok(context.image_tag.clone())
+    Ok(())
 }
 
 async fn clear_previous_container(

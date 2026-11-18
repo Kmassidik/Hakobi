@@ -70,6 +70,19 @@ anything new.
 - Update summaries after user input and programmatic auto-detection. The summary
   is informational; it must not replace the final review or server validation.
 
+## Build terminal pattern
+
+- Place one inline Deployment section on the existing app page, not a modal,
+  sidebar, or separate default terminal page. Active output opens above history;
+  completed output remains collapsed behind an explicit Open action.
+- Show version, real status, and elapsed/final duration above the output. Use a
+  single dark terminal surface capped near 380px with connection state, Follow,
+  Resume, and Expand controls. No nested cards or shell input.
+- Follow output by default, pause when the user scrolls up, and provide Resume.
+  Expand uses the viewport and Escape restores it. Mobile keeps the page fixed;
+  only terminal text scrolls horizontally. Reconnect replay must not duplicate
+  events, and completed history remains readable without JavaScript.
+
 ## Controls and data entry
 
 - Repository and branch controls sit side by side when space permits. Detected

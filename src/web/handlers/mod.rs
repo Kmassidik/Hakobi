@@ -11,6 +11,7 @@ mod auth;
 mod container_detail;
 mod containers;
 mod dashboard;
+mod deployment_logs;
 mod docker_resources;
 mod github;
 mod github_repos;
@@ -40,6 +41,7 @@ pub(crate) use containers::{
     container_stop, containers,
 };
 pub(crate) use dashboard::{dashboard, dashboard_redirect};
+pub(crate) use deployment_logs::{deployment_events, deployment_terminal};
 pub(crate) use docker_resources::{
     image_delete, network_create, network_delete, volume_create, volume_delete,
 };
@@ -263,6 +265,8 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
         "assets/hakobi-app-form.js",
         "assets/hakobi-actions.js",
         "assets/hakobi-publish.js",
+        "assets/build-terminal.css",
+        "assets/hakobi-terminal.js",
         "assets/htmx.min.js",
         "assets/vendor/fontawesome/css/all.min.css",
         "assets/vendor/fontawesome/webfonts/fa-solid-900.woff2",

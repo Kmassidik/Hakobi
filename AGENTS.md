@@ -110,7 +110,9 @@ test, delete a behavioral assertion, or claim success from compilation alone.
   command execution, validation, and wire conversion.
 - `src/host_agent/`: native-agent wire models, collectors, and parsing.
 - `src/bin/hakobi-agent*`: native-agent sampler, routes, handlers, installers.
-- `src/buildrunner/`: HTTP build-runner client, payloads, validation, errors.
+- `src/buildrunner/`: HTTP build-runner client, payloads, incremental log events,
+  validation, and errors. Native agent builds stream through `src/agent_build*`;
+  console deployment code persists redacted events and serves authenticated SSE.
 - `build-runner/build_runner/`: standalone Python build executor and server.
 - `src/web/`: Axum routes, handlers, SSR templates, and behavior tests.
 - `src/bin/hakobi-edge.rs`: Pingora request lifecycle and atomic catalog routes.

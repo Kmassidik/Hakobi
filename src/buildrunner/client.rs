@@ -1,11 +1,15 @@
 use std::{env, fmt, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
-use reqwest::{redirect::Policy, Client, Method, RequestBuilder};
+use reqwest::{header::ACCEPT, redirect::Policy, Client, Method, RequestBuilder, Response};
+use tokio::sync::mpsc::UnboundedSender;
 
 use super::{
     payload::{validate_base_url, validate_opaque_token, BuildKind, BuildPayload},
-    response::{http_error, parse_build_response, BuildResponse},
+    response::{
+        http_error, parse_build_response, parse_runner_event, BuildLogEvent, BuildResponse,
+        RunnerEvent,
+    },
 };
 
 const ENV_BUILDRUNNER_URL: &str = "HAKOBI_BUILDRUNNER_URL";
@@ -144,6 +148,31 @@ impl BuildRunnerClient {
         self.build(BuildKind::Nixpacks, request).await
     }
 
+    pub async fn build_compose_stream(
+        &self,
+        request: &BuildRequest,
+        logs: UnboundedSender<BuildLogEvent>,
+    ) -> Result<BuildResponse> {
+        self.build_stream(BuildKind::Compose, request, logs).await
+    }
+
+    pub async fn build_dockerfile_stream(
+        &self,
+        request: &BuildRequest,
+        logs: UnboundedSender<BuildLogEvent>,
+    ) -> Result<BuildResponse> {
+        self.build_stream(BuildKind::Dockerfile, request, logs)
+            .await
+    }
+
+    pub async fn build_nixpacks_stream(
+        &self,
+        request: &BuildRequest,
+        logs: UnboundedSender<BuildLogEvent>,
+    ) -> Result<BuildResponse> {
+        self.build_stream(BuildKind::Nixpacks, request, logs).await
+    }
+
     pub(super) fn from_optional(url: Option<&str>, token: Option<&str>) -> Result<Option<Self>> {
         let Some(url) = url.map(str::trim).filter(|value| !value.is_empty()) else {
             return Ok(None);
@@ -171,6 +200,31 @@ impl BuildRunnerClient {
         parse_build_response(&body)
     }
 
+    async fn build_stream(
+        &self,
+        kind: BuildKind,
+        request: &BuildRequest,
+        logs: UnboundedSender<BuildLogEvent>,
+    ) -> Result<BuildResponse> {
+        let payload = BuildPayload::for_request(kind, request)?;
+        let response = self
+            .request(Method::POST, kind.endpoint())
+            .timeout(self.build_timeout)
+            .header(ACCEPT, "application/x-ndjson")
+            .json(&payload)
+            .send()
+            .await
+            .context("build runner request failed")?;
+        if !response.status().is_success() {
+            return Err(http_error(response).await);
+        }
+        if is_ndjson(&response) {
+            read_ndjson(response, logs).await
+        } else {
+            read_json_fallback(response, logs).await
+        }
+    }
+
     fn request(&self, method: Method, path: &str) -> RequestBuilder {
         let builder = self.client.request(method, self.endpoint(path));
         match self.token.as_deref() {
@@ -181,6 +235,81 @@ impl BuildRunnerClient {
 
     pub(super) fn endpoint(&self, path: &str) -> String {
         format!("{}{path}", self.base_url)
+    }
+}
+
+fn is_ndjson(response: &Response) -> bool {
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/x-ndjson"))
+}
+
+async fn read_json_fallback(
+    response: Response,
+    logs: UnboundedSender<BuildLogEvent>,
+) -> Result<BuildResponse> {
+    let body = response
+        .bytes()
+        .await
+        .context("could not read the build runner response")?;
+    let outcome = parse_build_response(&body)?;
+    if !outcome.log_tail.is_empty() {
+        let _ = logs.send(BuildLogEvent {
+            stage: "runner".to_owned(),
+            message: outcome.log_tail.clone(),
+        });
+    }
+    Ok(outcome)
+}
+
+async fn read_ndjson(
+    mut response: Response,
+    logs: UnboundedSender<BuildLogEvent>,
+) -> Result<BuildResponse> {
+    let mut buffered = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .context("could not read the build runner event stream")?
+    {
+        buffered.extend_from_slice(&chunk);
+        let mut start = 0;
+        while let Some(relative) = buffered[start..].iter().position(|byte| *byte == b'\n') {
+            let end = start + relative;
+            if let Some(outcome) = handle_event_line(&buffered[start..end], &logs)? {
+                return Ok(outcome);
+            }
+            start = end + 1;
+        }
+        if start > 0 {
+            buffered.drain(..start);
+        }
+    }
+    if !buffered.is_empty() {
+        if let Some(outcome) = handle_event_line(&buffered, &logs)? {
+            return Ok(outcome);
+        }
+    }
+    bail!("build runner event stream ended without a complete event")
+}
+
+fn handle_event_line(
+    line: &[u8],
+    logs: &UnboundedSender<BuildLogEvent>,
+) -> Result<Option<BuildResponse>> {
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    match parse_runner_event(line)? {
+        RunnerEvent::Log { stage, message } => {
+            let _ = logs.send(BuildLogEvent { stage, message });
+            Ok(None)
+        }
+        RunnerEvent::Complete { outcome } => Ok(Some(outcome)),
     }
 }
 

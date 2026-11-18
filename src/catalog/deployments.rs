@@ -1,5 +1,7 @@
 //! Deployment persistence: versioned deployment records and their logs.
 
+use std::borrow::Cow;
+
 use anyhow::{bail, Context, Result};
 use rusqlite::{params, OptionalExtension};
 
@@ -33,6 +35,84 @@ pub struct DeploymentLog {
     pub timestamp: String,
     pub level: String,
     pub message: String,
+}
+
+pub const DEPLOYMENT_LOG_MESSAGE_LIMIT: usize = 16 * 1024;
+pub const DEPLOYMENT_LOG_BYTE_LIMIT: i64 = 1024 * 1024;
+pub const DEPLOYMENT_LOG_LINE_LIMIT: i64 = 2000;
+pub const DEPLOYMENT_LOG_TRUNCATION_MARKER: &str = "[hakobi] earlier log output truncated";
+const MESSAGE_TRUNCATION_MARKER: &str = "\n[message truncated]";
+
+fn bounded_log_message(message: &str) -> Cow<'_, str> {
+    if message.len() <= DEPLOYMENT_LOG_MESSAGE_LIMIT {
+        return Cow::Borrowed(message);
+    }
+    let mut end = DEPLOYMENT_LOG_MESSAGE_LIMIT - MESSAGE_TRUNCATION_MARKER.len();
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    Cow::Owned(format!("{}{MESSAGE_TRUNCATION_MARKER}", &message[..end]))
+}
+
+fn deployment_log_usage(
+    transaction: &rusqlite::Transaction<'_>,
+    deployment_id: &str,
+) -> Result<(i64, i64)> {
+    Ok(transaction.query_row(
+        "SELECT COUNT(*), COALESCE(SUM(LENGTH(CAST(message AS BLOB))), 0) \
+         FROM deployment_logs WHERE deployment_id = ?1",
+        params![deployment_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?)
+}
+
+fn enforce_log_retention(
+    transaction: &rusqlite::Transaction<'_>,
+    deployment_id: &str,
+) -> Result<()> {
+    let (lines, bytes) = deployment_log_usage(transaction, deployment_id)?;
+    if lines <= DEPLOYMENT_LOG_LINE_LIMIT && bytes <= DEPLOYMENT_LOG_BYTE_LIMIT {
+        return Ok(());
+    }
+    let marker_id = retention_marker(transaction, deployment_id)?;
+    loop {
+        let (lines, bytes) = deployment_log_usage(transaction, deployment_id)?;
+        if lines <= DEPLOYMENT_LOG_LINE_LIMIT && bytes <= DEPLOYMENT_LOG_BYTE_LIMIT {
+            return Ok(());
+        }
+        let oldest = transaction
+            .query_row(
+                "SELECT id FROM deployment_logs WHERE deployment_id = ?1 AND id != ?2 \
+             ORDER BY id LIMIT 1",
+                params![deployment_id, marker_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        let Some(oldest) = oldest else {
+            return Ok(());
+        };
+        transaction.execute("DELETE FROM deployment_logs WHERE id = ?1", params![oldest])?;
+    }
+}
+
+fn retention_marker(transaction: &rusqlite::Transaction<'_>, deployment_id: &str) -> Result<i64> {
+    if let Some(id) = transaction
+        .query_row(
+            "SELECT id FROM deployment_logs WHERE deployment_id = ?1 AND message = ?2 \
+         ORDER BY id LIMIT 1",
+            params![deployment_id, DEPLOYMENT_LOG_TRUNCATION_MARKER],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?
+    {
+        return Ok(id);
+    }
+    transaction.execute(
+        "INSERT INTO deployment_logs (deployment_id, timestamp, level, message) \
+         VALUES (?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'warn', ?2)",
+        params![deployment_id, DEPLOYMENT_LOG_TRUNCATION_MARKER],
+    )?;
+    Ok(transaction.last_insert_rowid())
 }
 
 /// Validates that `value` is one of the accepted build types.
@@ -298,7 +378,7 @@ impl Catalog {
             .context("load deployment")
     }
 
-    /// Appends a log line to a deployment.
+    /// Appends a log line and drops oldest output when retention is exceeded.
     pub fn add_deployment_log(
         &mut self,
         deployment_id: &str,
@@ -306,22 +386,35 @@ impl Catalog {
         message: &str,
     ) -> Result<()> {
         validate_log_level(level)?;
-        self.connection.execute(
+        let message = bounded_log_message(message);
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
             "INSERT INTO deployment_logs (deployment_id, timestamp, level, message) \
              VALUES (?1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?2, ?3)",
-            params![deployment_id, level, message],
+            params![deployment_id, level, message.as_ref()],
         )?;
+        enforce_log_retention(&transaction, deployment_id)?;
+        transaction.commit()?;
         Ok(())
     }
 
-    /// Lists log lines for a deployment in chronological order.
+    /// Lists retained log lines for a deployment in chronological order.
     pub fn list_deployment_logs(&self, deployment_id: &str) -> Result<Vec<DeploymentLog>> {
+        self.list_deployment_logs_after(deployment_id, 0)
+    }
+
+    /// Lists retained log lines inserted after `after_id`, in chronological order.
+    pub fn list_deployment_logs_after(
+        &self,
+        deployment_id: &str,
+        after_id: i64,
+    ) -> Result<Vec<DeploymentLog>> {
         let mut statement = self.connection.prepare(
             "SELECT id, deployment_id, timestamp, level, message \
-             FROM deployment_logs WHERE deployment_id = ?1 ORDER BY id",
+             FROM deployment_logs WHERE deployment_id = ?1 AND id > ?2 ORDER BY id",
         )?;
         let rows = statement
-            .query_map(params![deployment_id], |row| {
+            .query_map(params![deployment_id, after_id], |row| {
                 Ok(DeploymentLog {
                     id: row.get(0)?,
                     deployment_id: row.get(1)?,
@@ -336,44 +429,4 @@ impl Catalog {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cancelled_deployment_cannot_advance() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut catalog = Catalog::open(directory.path().join("catalog.sqlite3")).unwrap();
-        let host = catalog
-            .create_host_agent("host", "https://host.example.com", "tok_host_01")
-            .unwrap();
-        let app = catalog
-            .create_app(
-                "web",
-                &host,
-                "dockerfile",
-                Some("acme/web"),
-                Some("main"),
-                None,
-                Some("Dockerfile"),
-                false,
-                Some(8080),
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-        let deployment = catalog
-            .create_deployment(&app, "manual", None, None)
-            .unwrap();
-
-        assert!(catalog
-            .advance_deployment_status(&deployment, "cancelled", None)
-            .unwrap());
-        assert!(!catalog
-            .advance_deployment_status(&deployment, "running", None)
-            .unwrap());
-        let record = catalog.get_deployment(&deployment).unwrap().unwrap();
-        assert_eq!(record.status, "cancelled");
-        assert!(record.completed_at.is_some());
-    }
-}
+mod tests;

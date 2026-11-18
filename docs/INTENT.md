@@ -40,7 +40,12 @@ and runs containers; deployments publish `app.container_port` on loopback. Optio
 CPU-core and MiB limits are stored as bytes and enforced through Docker `HostConfig`
 for both Dockerfile and Nixpacks builds; blank fields remain unlimited. Runtime
 actions use the app's managed container and persist stopped/paused state apart
-from deployment state. Deletion removes networks labeled `id.hakobi.app` with
+from deployment state. Deployment output streams incrementally from the native
+agent through the console as redacted, bounded catalog events. An authenticated
+SSE endpoint replays event IDs for reconnecting build terminals; status and
+duration come from the deployment record. Active output opens inline above
+history, while completed deployments retain the same terminal behind Open.
+Deletion removes networks labeled `id.hakobi.app` with
 the exact app UUID. Matching volumes are preserved unless the user separately
 confirms permanent app-data deletion. Unlabeled, shared, external, and other-app
 resources are never selected by cleanup.

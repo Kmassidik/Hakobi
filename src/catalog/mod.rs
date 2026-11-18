@@ -24,6 +24,7 @@ pub use apps::{
 };
 pub use deployments::{
     validate_build_type, validate_registry_mode, validate_source_type, Deployment, DeploymentLog,
+    DEPLOYMENT_LOG_TRUNCATION_MARKER,
 };
 pub use github::{GithubApp, GithubConnection};
 pub use hosts::HostAgent;

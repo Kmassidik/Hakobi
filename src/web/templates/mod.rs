@@ -4,6 +4,7 @@ pub(crate) mod app_form;
 mod app_publish;
 mod app_runtime;
 mod apps;
+mod build_terminal;
 mod container_detail;
 mod containers;
 mod dashboard;
@@ -15,6 +16,7 @@ pub(crate) use app_form::{app_form, AppFormValues};
 pub(crate) use app_publish::{app_publication_notice, app_status_body};
 pub(crate) use app_runtime::{app_runtime_card, app_usage_section};
 pub(crate) use apps::{app_deployments, app_detail, app_logs, apps};
+pub use build_terminal::build_terminal;
 pub(crate) use container_detail::{
     container_detail, container_logs_error, container_logs_section, container_stats_error,
     container_stats_section, ContainerDetailData,
@@ -52,6 +54,7 @@ pub(crate) fn page(title: &str, content: Markup) -> Markup {
                 link rel="icon" type="image/x-icon" href=(super::handlers::asset_url("favicon.ico"));
                 link rel="apple-touch-icon" href=(super::handlers::asset_url("art/mascot/hako-idle.webp"));
                 link rel="stylesheet" href=(super::handlers::asset_url("app.css"));
+                link rel="stylesheet" href=(super::handlers::asset_url("build-terminal.css"));
                 link rel="stylesheet" href=(super::handlers::asset_url("vendor/fontawesome/css/all.min.css"));
                 script src=(super::handlers::asset_url("htmx.min.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi.js")) defer {}
@@ -61,6 +64,7 @@ pub(crate) fn page(title: &str, content: Markup) -> Markup {
                 script src=(super::handlers::asset_url("hakobi-app-form.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-actions.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-publish.js")) defer {}
+                script src=(super::handlers::asset_url("hakobi-terminal.js")) defer {}
             }
             body class=(PAGE_BODY) {
                 (content)

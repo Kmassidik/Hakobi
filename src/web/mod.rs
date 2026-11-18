@@ -19,6 +19,8 @@ mod tests_dashboard;
 #[cfg(test)]
 mod tests_deployment;
 #[cfg(test)]
+mod tests_deployment_logs;
+#[cfg(test)]
 mod tests_metrics;
 #[cfg(test)]
 mod tests_owned_resources;
@@ -287,6 +289,14 @@ fn app_routes() -> Router<AppState> {
         .route("/apps/{id}/rollback", post(handlers::app_rollback))
         .route("/apps/{id}/deployments", get(handlers::app_deployments))
         .route("/apps/{id}/logs", get(handlers::app_logs))
+        .route(
+            "/deployments/{deployment_id}/terminal",
+            get(handlers::deployment_terminal),
+        )
+        .route(
+            "/deployments/{deployment_id}/events",
+            get(handlers::deployment_events),
+        )
         .route("/apps/{id}/status", get(handlers::app_status_partial))
         .route(
             "/apps/{id}/publication",

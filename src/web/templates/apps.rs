@@ -2,21 +2,12 @@
 //! logs partials, and the shared deployment-table rows.
 
 use super::app_publish::app_status_class;
+use super::build_terminal::{build_terminal, deployment_duration, is_active, status_class};
 use super::{brand, page, pagination_controls, sidebar, CONTENT_WIDTH, EYEBROW};
 use crate::web::pagination::Page;
 use hakobi::catalog::{App, Deployment, DeploymentLog};
 use maud::{html, Markup};
 use std::collections::HashMap;
-
-fn deployment_status_class(status: &str) -> &'static str {
-    match status {
-        "running" => "bg-emerald-500/10 text-emerald-700",
-        "building" | "deploying" => "bg-sky-500/10 text-sky-700",
-        "failed" => "bg-red-500/10 text-red-700",
-        "rolled_back" => "bg-amber-500/10 text-amber-700",
-        _ => "bg-slate-500/10 text-slate-600",
-    }
-}
 
 fn apps_mobile_header(
     username: &str,
@@ -163,6 +154,7 @@ pub fn app_detail(
     latest: Option<&Deployment>,
     previous: Option<&Deployment>,
     apps_domain: Option<&str>,
+    latest_logs: &[DeploymentLog],
 ) -> Markup {
     page(
         "App · Hakobi",
@@ -170,7 +162,7 @@ pub fn app_detail(
             div class="min-h-screen lg:pl-60" {
                 (sidebar("apps", base_url, username, csrf_token))
                 (apps_mobile_header(username, csrf_token, "/apps", "Apps"))
-                (app_detail_main(base_url, csrf_token, app, deployments_page, query, latest, previous, apps_domain))
+                (app_detail_main(base_url, csrf_token, app, deployments_page, query, latest, previous, apps_domain, latest_logs))
             }
         },
     )
@@ -186,8 +178,8 @@ fn app_detail_main(
     latest: Option<&Deployment>,
     previous: Option<&Deployment>,
     apps_domain: Option<&str>,
+    latest_logs: &[DeploymentLog],
 ) -> Markup {
-    let base = format!("/apps/{}", app.id);
     html! {
         main class=(format!("{CONTENT_WIDTH} pb-20 pt-10 lg:pt-16")) {
             a class="text-[0.75rem] font-semibold text-muted no-underline hover:text-ink" href="/apps" { "← All apps" }
@@ -212,14 +204,30 @@ fn app_detail_main(
             (super::app_publish::app_publication(app, csrf_token, apps_domain))
             (app_detail_cards(base_url, csrf_token, app, previous))
             (super::app_usage_section(app))
-            section id="app-deployments" class="mt-10" {
-                div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
-                    h2 class="m-0 text-[1.2rem] font-bold" { "Deployment history" }
-                    a class="text-[0.78rem] font-semibold text-brand no-underline hover:underline" href=(format!("/apps/{}/logs", app.id)) { "Latest logs →" }
+            div id="deployment-terminal" {
+                @if let Some(deployment) = latest.filter(|deployment| is_active(deployment)) {
+                    (build_terminal(deployment, latest_logs, csrf_token, true))
                 }
-                (deployment_rows(app, deployments_page.items, csrf_token))
-                (pagination_controls(&base, query, "deployments_page", deployments_page, None))
             }
+            (app_history_section(app, deployments_page, csrf_token, query))
+        }
+    }
+}
+
+fn app_history_section(
+    app: &App,
+    history: &Page<'_, Deployment>,
+    csrf_token: &str,
+    query: &HashMap<String, String>,
+) -> Markup {
+    let base = format!("/apps/{}", app.id);
+    html! {
+        section id="app-deployments" class="mt-10" {
+            div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between" {
+                h2 class="m-0 text-[1.2rem] font-bold" { "Deployment history" }
+            }
+            (deployment_rows(app, history.items, csrf_token))
+            (pagination_controls(&base, query, "deployments_page", history, None))
         }
     }
 }
@@ -346,6 +354,7 @@ pub fn deployment_rows(app: &App, deployments: &[Deployment], csrf_token: &str) 
                         th class="px-4 py-3 font-semibold" { "Commit" }
                         th class="px-4 py-3 font-semibold" { "Started" }
                         th class="px-4 py-3 font-semibold" { "Completed" }
+                        th class="px-4 py-3 font-semibold" { "Duration" }
                         th class="px-4 py-3 font-semibold" { "" }
                     }
                 }
@@ -364,14 +373,19 @@ fn deployment_row(app: &App, deployment: &Deployment, csrf_token: &str) -> Marku
         tr class="border-t border-line" {
             td class="px-4 py-3 font-semibold" { "v" (deployment.version) }
             td class="px-4 py-3" {
-                span class=(format!("rounded-full px-2.5 py-1 text-[0.68rem] font-semibold {}", deployment_status_class(&deployment.status))) { (deployment.status) }
+                span class=(status_class(&deployment.status)) { (deployment.status) }
             }
             td class="px-4 py-3 text-muted" { (deployment.trigger_type) }
             td class="px-4 py-3 font-mono text-xs text-muted" { (deployment.git_commit_sha.as_deref().unwrap_or("—")) }
             td class="px-4 py-3 text-xs text-muted" { (deployment.started_at) }
             td class="px-4 py-3 text-xs text-muted" { (deployment.completed_at.as_deref().unwrap_or("—")) }
+            td class="px-4 py-3 font-mono text-xs text-muted" { (deployment_duration(deployment)) }
             td class="px-4 py-3" {
                 div class="flex flex-wrap gap-2" {
+                    a class="rounded-lg border border-line bg-transparent px-2.5 py-1.5 text-[0.68rem] font-semibold text-ink no-underline"
+                        href=(format!("/apps/{}/logs?deployment={}", app.id, deployment.id))
+                        hx-get=(format!("/deployments/{}/terminal", deployment.id))
+                        hx-target="#deployment-terminal" hx-swap="innerHTML" { "Open" }
                     @if deployment.status == "running" {
                         form method="post" action=(format!("/apps/{}/rollback", app.id)) class="m-0" {
                             input type="hidden" name="csrf_token" value=(csrf_token);
@@ -411,6 +425,7 @@ pub fn app_deployments(
                     a class="text-[0.75rem] font-semibold text-muted no-underline hover:underline" href=(format!("/apps/{}", app.id)) { "← " (app.name) }
                     p class=(format!("{EYEBROW} mb-3 mt-6 text-brand-bright")) { "History" }
                     h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Deployments" }
+                    div id="deployment-terminal" {}
                     div class="mt-8" {
                         (deployment_rows(app, history.items, csrf_token))
                         (pagination_controls(&base, query, "deployments_page", history, None))
@@ -441,34 +456,13 @@ pub fn app_logs(
                     p class=(format!("{EYEBROW} mb-3 mt-6 text-brand-bright")) { "Output" }
                     h1 class="m-0 font-display text-[clamp(2.2rem,5vw,4rem)] font-normal tracking-[-0.04em]" { "Deployment logs" }
                     @match deployment {
-                        Some(deployment) => p class="mt-3 text-sm text-muted" { "Latest: v" (deployment.version) " · " (deployment.status) },
+                        Some(deployment) => div id="deployment-terminal" {
+                            (build_terminal(deployment, logs, csrf_token, true))
+                        },
                         None => p class="mt-3 text-sm text-muted" { "No deployments yet." },
-                    }
-                    div id="app-logs" class="mt-8 max-h-[36rem] overflow-auto rounded-[0.85rem] border border-line bg-surface p-5 font-mono text-xs" {
-                        (app_log_lines(logs))
                     }
                 }
             }
         },
     )
-}
-
-fn app_log_lines(logs: &[DeploymentLog]) -> Markup {
-    html! {
-        @if logs.is_empty() {
-            p class="m-0 text-muted" { "No log lines recorded." }
-        } @else {
-            @for log in logs.iter().rev().take(200).collect::<Vec<_>>().iter().rev() {
-                p class="m-0 leading-relaxed" {
-                    span class="text-muted" { (log.timestamp) " " }
-                    span class=(match log.level.as_str() {
-                        "error" => "text-red-600 font-semibold",
-                        "warn" => "text-amber-600 font-semibold",
-                        _ => "text-brand",
-                    }) { (log.level) }
-                    " " (log.message)
-                }
-            }
-        }
-    }
 }

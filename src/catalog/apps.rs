@@ -101,10 +101,10 @@ pub fn validate_deployment_status(value: &str) -> Result<()> {
 
 /// Validates that `value` is one of the accepted log levels.
 pub fn validate_log_level(value: &str) -> Result<()> {
-    if matches!(value, "info" | "warn" | "error") {
+    if matches!(value, "debug" | "info" | "warn" | "error") {
         return Ok(());
     }
-    bail!("log level must be info, warn, or error");
+    bail!("log level must be debug, info, warn, or error");
 }
 
 /// Validates an app name: non-empty ASCII slug, 1–64 characters.

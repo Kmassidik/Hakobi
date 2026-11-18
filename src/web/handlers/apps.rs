@@ -188,6 +188,7 @@ pub(crate) async fn app_detail(
         };
     let latest = deployments.first().cloned();
     let previous = deployments.get(1).cloned();
+    let latest_logs = super::deployment_logs::logs_for_deployment(&state, latest.as_ref()).await;
     let query = parse_query(raw_query.as_deref());
     let deployments_page = paginate(&deployments, page_number(&query, "deployments_page"), 10);
     let (csrf_token, cookies) = page_csrf(&state, &headers);
@@ -204,6 +205,7 @@ pub(crate) async fn app_detail(
             latest.as_ref(),
             previous.as_ref(),
             apps_domain.as_deref(),
+            &latest_logs,
         ),
         cookies,
     )
@@ -250,6 +252,7 @@ pub(crate) async fn app_logs(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if !super::authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
@@ -260,25 +263,26 @@ pub(crate) async fn app_logs(
         Err(error) => return internal_error(error),
     };
     let app_id = app.id.clone();
+    let query = parse_query(raw_query.as_deref());
+    let selected_id = query.get("deployment").cloned();
     let deployment = match with_catalog(&state, move |catalog| {
-        catalog.get_latest_deployment(&app_id)
+        let selected = match selected_id {
+            Some(id) => catalog
+                .get_deployment(&id)?
+                .filter(|deployment| deployment.app_id == app_id),
+            None => None,
+        };
+        match selected {
+            Some(deployment) => Ok(Some(deployment)),
+            None => catalog.get_latest_deployment(&app_id),
+        }
     })
     .await
     {
         Ok(deployment) => deployment,
         Err(error) => return internal_error(error),
     };
-    let logs = match &deployment {
-        Some(record) => {
-            let deployment_id = record.id.clone();
-            with_catalog(&state, move |catalog| {
-                catalog.list_deployment_logs(&deployment_id)
-            })
-            .await
-            .unwrap_or_default()
-        }
-        None => Vec::new(),
-    };
+    let logs = super::deployment_logs::logs_for_deployment(&state, deployment.as_ref()).await;
     let (csrf_token, cookies) = page_csrf(&state, &headers);
     html_response(
         StatusCode::OK,

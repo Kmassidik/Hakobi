@@ -204,6 +204,9 @@ async fn manual_deploy_runs_the_full_pipeline() {
     let logs = catalog.list_deployment_logs(&deployment.id).unwrap();
     let messages: Vec<&str> = logs.iter().map(|log| log.message.as_str()).collect();
     assert!(messages.iter().any(|m| m.contains("Build started")));
+    assert!(logs
+        .iter()
+        .any(|log| log.level == "info" && log.message == "[runner] ok"));
     assert!(messages.iter().any(|m| m.contains("built image")));
     assert!(messages.iter().any(|m| m.contains("started on host port")));
 }
@@ -404,4 +407,26 @@ async fn rollback_redeploys_running_version_and_reports_missing() {
         location2.contains("No+running+deployment") || location2.contains("No running deployment"),
         "{location2}"
     );
+}
+
+#[tokio::test]
+async fn streamed_runner_logs_are_persisted_with_their_stages() {
+    let runner = scripted_runner(PipelineScript::Streaming);
+    let (data, app) = pipeline_app(Some(runner));
+    let path = data.path().join("catalog.sqlite3");
+    let (_, app_id) = seed_app(&path, None);
+    let (authenticated, csrf) = sign_in(&app).await;
+    let deploy = post_deploy(&app, &app_id, &authenticated, &csrf).await;
+    assert_eq!(deploy.status(), StatusCode::SEE_OTHER);
+    assert_eq!(await_terminal(&path, &app_id).await, "running");
+
+    let catalog = hakobi::catalog::Catalog::open(&path).unwrap();
+    let deployment = catalog.get_latest_deployment(&app_id).unwrap().unwrap();
+    let logs = catalog.list_deployment_logs(&deployment.id).unwrap();
+    assert!(logs
+        .iter()
+        .any(|log| { log.level == "info" && log.message == "[clone] cloned repository" }));
+    assert!(logs
+        .iter()
+        .any(|log| { log.level == "info" && log.message == "[build] compiled image" }));
 }
