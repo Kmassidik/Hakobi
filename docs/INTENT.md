@@ -99,7 +99,10 @@ route assigned to an app. Deployment cancellation blocks later pipeline stages,
 and host installation uses the authenticated native-agent API.
 Future deployments update that stored route. Pingora watches both the main
 catalog and SQLite WAL before atomically swapping routes, and its bounded
-shutdown prevents long-lived build terminals from blocking restart. Publication
+shutdown prevents long-lived build terminals from blocking restart. Intentional
+binary restarts use systemd SIGINT fast shutdown with a ten-second stop budget;
+SSE clients reconnect while ordinary catalog changes remain graceful ArcSwap
+reloads. Publication
 uses bounded external health checks and only presents success after a final 2xx;
 failed verification clears the displayed assignment but preserves managed
 DNS/ingress for safe retry. Public traffic still enters only

@@ -37,6 +37,9 @@ and guarded domain CRUD must remain working. Use parameterized SQL only.
   work stealing disabled, shared upstream pool, streaming bodies. Catalog reload
   watches both the SQLite main file and `-wal`; shutdown uses a one-second grace
   period and a five-second final timeout so SSE cannot hang restart indefinitely.
+  Runtime groups can drain sequentially, so intentional binary restarts also use
+  systemd `KillSignal=SIGINT` and `TimeoutStopSec=10`; SSE clients reconnect.
+  Normal catalog changes remain graceful ArcSwap reloads without process restart.
 - Publication is successful only after a final external 2xx response. Failed
   health checks clear the displayed assignment, return an actionable error, and
   keep managed DNS/ingress safe for an adoptable retry.
