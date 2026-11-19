@@ -30,6 +30,7 @@ RUN apt-get update \
     && chown hakobi:hakobi /data
 COPY --from=build /build/target/release/hakobi /usr/local/bin/hakobi
 COPY --from=build /build/target/release/hakobi-agent /usr/local/bin/hakobi-agent
+COPY --from=build /build/target/release/hakobi-edge /usr/local/bin/hakobi-edge
 COPY --from=cloudflared /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 ENV HAKOBI_DATA_DIR=/data \
     PORT=3000 \
