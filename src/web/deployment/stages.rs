@@ -2,7 +2,8 @@
 //! transitions, log lines, and the versioned image tag scheme.
 
 use anyhow::Result;
-use hakobi::providers::ResourceLimits;
+use hakobi::catalog::AppProcess;
+use hakobi::providers::{ContainerVolume, ResourceLimits};
 
 use super::{run_catalog_op, ExecutorDeps};
 
@@ -27,8 +28,11 @@ pub(super) struct BuildContext {
     /// Requested host port; blank app settings select one automatically.
     pub requested_host_port: Option<u16>,
     pub resources: ResourceLimits,
-    /// Raw JSON object of container environment variables.
-    pub env_json: String,
+    pub environment: std::collections::HashMap<String, String>,
+    pub start_command: Option<String>,
+    pub release_command: Option<String>,
+    pub volumes: Vec<ContainerVolume>,
+    pub processes: Vec<AppProcess>,
 }
 
 /// Appends a log line to a deployment.

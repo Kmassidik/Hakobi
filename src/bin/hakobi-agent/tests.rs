@@ -45,6 +45,7 @@ fn docker_routes() -> Vec<(Method, &'static str)> {
         (Method::POST, "/v1/docker/containers/demo-api/unpause"),
         (Method::POST, "/v1/docker/containers/demo-api/delete"),
         (Method::POST, "/v1/docker/containers/run"),
+        (Method::POST, "/v1/docker/containers/release"),
         (Method::POST, "/v1/docker/images/remove"),
         (Method::POST, "/v1/docker/networks/create"),
         (Method::POST, "/v1/docker/networks/delete"),
@@ -133,6 +134,11 @@ async fn docker_run_rejects_invalid_requests_before_touching_docker() {
         r#"{"image":"alpine:3.20","name":"bad name","container_port":8080}"#,
         r#"{"image":"alpine:3.20","name":"demo-api","container_port":0}"#,
         r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080,"host_port":0}"#,
+        r#"{"image":"alpine:3.20","name":"demo-worker","host_port":18080}"#,
+        r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080,"start_command":"echo\u0000bad"}"#,
+        r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080,"volumes":[{"name":"/host/path","mount_path":"/data","read_only":false}]}"#,
+        r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080,"volumes":[{"name":"data","mount_path":"../data","read_only":false}]}"#,
+        r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080,"volumes":[{"name":"data","mount_path":"/data/../root","read_only":false}]}"#,
         r#"{"image":42}"#,
     ];
     for body in cases {
@@ -144,6 +150,48 @@ async fn docker_run_rejects_invalid_requests_before_touching_docker() {
         let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
         let error: AgentErrorBody = serde_json::from_slice(&bytes).unwrap();
         assert!(!error.error.is_empty(), "{body}");
+    }
+}
+
+#[tokio::test]
+async fn oversized_commands_are_rejected_before_docker() {
+    let command = "x".repeat(hakobi::providers::MAX_SHELL_COMMAND_CHARS + 1);
+    for (uri, field) in [
+        ("/v1/docker/containers/run", "start_command"),
+        ("/v1/docker/containers/release", "command"),
+    ] {
+        let mut body = serde_json::json!({
+            "image": "alpine:3.20",
+            "name": "demo-release",
+            "container_port": 8080
+        });
+        body[field] = command.clone().into();
+        let response = app(state())
+            .oneshot(json_request(uri, TEST_TOKEN, &body.to_string()))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+    }
+}
+
+#[tokio::test]
+async fn docker_release_rejects_invalid_requests_before_touching_docker() {
+    for body in [
+        r#"{"image":"alpine latest","name":"demo-release","command":"true"}"#,
+        r#"{"image":"alpine:3.20","name":"bad name","command":"true"}"#,
+        r#"{"image":"alpine:3.20","name":"demo-release","command":""}"#,
+        r#"{"image":"alpine:3.20","name":"demo-release","command":"echo\u0000bad"}"#,
+        r#"{"image":"alpine:3.20","name":"demo-release","command":"true","volumes":[{"name":"data","mount_path":"/data//root","read_only":false}]}"#,
+    ] {
+        let response = app(state())
+            .oneshot(json_request(
+                "/v1/docker/containers/release",
+                TEST_TOKEN,
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{body}");
     }
 }
 

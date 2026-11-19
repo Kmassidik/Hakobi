@@ -5,6 +5,7 @@
 //! catalog plumbing both stages use.
 
 pub(crate) mod executor;
+mod processes;
 pub(crate) mod stages;
 pub(crate) use stages::{container_name_for, image_tag_for};
 

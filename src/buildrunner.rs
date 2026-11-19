@@ -12,4 +12,5 @@ mod response;
 mod tests;
 
 pub use client::{BuildRequest, BuildRunnerClient};
+pub use payload::{validate_branch, validate_public_git_url};
 pub use response::{BuildLogEvent, BuildResponse};

@@ -12,8 +12,8 @@ use axum::{
 use hakobi::{
     host_agent::{self, RunContainerRequest, RunContainerResponse},
     providers::{
-        validate_container_name, validate_image_reference, ContainerBackend, DockerBackend,
-        ResourceLimits,
+        validate_container_name, validate_image_reference, validate_shell_command,
+        validate_volumes, ContainerBackend, DockerBackend, ResourceLimits,
     },
 };
 
@@ -52,6 +52,8 @@ pub(crate) async fn docker_run(
                 cpu: request.cpu_limit,
                 memory_bytes: request.memory_limit_bytes,
             },
+            request.start_command.as_deref(),
+            &request.volumes,
         ),
         DOCKER_RUN_TIMEOUT,
     )
@@ -68,11 +70,18 @@ pub(crate) async fn docker_run(
 fn validate_run_request(request: &RunContainerRequest) -> Result<()> {
     validate_image_reference(&request.image)?;
     validate_container_name(&request.name)?;
-    if request.container_port == 0 {
+    if request.container_port == Some(0) {
         bail!("container port must be between 1 and 65535");
     }
     if request.host_port == Some(0) {
         bail!("host port must be between 1 and 65535");
     }
+    if request.container_port.is_none() && request.host_port.is_some() {
+        bail!("a host port requires a container port");
+    }
+    if let Some(command) = &request.start_command {
+        validate_shell_command(command)?;
+    }
+    validate_volumes(&request.volumes)?;
     Ok(())
 }

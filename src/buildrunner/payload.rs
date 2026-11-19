@@ -166,6 +166,19 @@ fn validate_git_url(value: &str) -> Result<()> {
     validate_scp_git(value)
 }
 
+/// Validates the tokenless HTTPS remotes accepted for public-source apps.
+pub fn validate_public_git_url(value: &str) -> Result<()> {
+    validate_git_url(value)?;
+    if !value.starts_with("https://") {
+        bail!("public git_url must use https://");
+    }
+    let url = Url::parse(value).context("git_url is not a valid URL")?;
+    if !url.username().is_empty() || url.password().is_some() {
+        bail!("public git_url must not contain credentials");
+    }
+    Ok(())
+}
+
 fn validate_url_git(value: &str, scheme: &str) -> Result<()> {
     if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("ssh") {
         bail!("git_url must use https:// or ssh://");
@@ -222,7 +235,7 @@ fn validate_scp_git(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_branch(value: &str) -> Result<()> {
+pub fn validate_branch(value: &str) -> Result<()> {
     validate_field("branch", value, MAX_BRANCH_LEN)?;
     if value.chars().any(char::is_whitespace) {
         bail!("branch must not contain whitespace");

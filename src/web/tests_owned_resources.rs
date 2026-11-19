@@ -154,10 +154,12 @@ impl ContainerBackend for RecordingBackend {
         endpoint: &str,
         image: &str,
         name: &str,
-        port: u16,
+        port: Option<u16>,
         requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
+        start_command: Option<&str>,
+        volumes: &[hakobi::providers::ContainerVolume],
     ) -> anyhow::Result<RunResult> {
         self.fake
             .run_container(
@@ -168,6 +170,8 @@ impl ContainerBackend for RecordingBackend {
                 requested_host_port,
                 env,
                 resources,
+                start_command,
+                volumes,
             )
             .await
     }

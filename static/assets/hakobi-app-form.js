@@ -180,8 +180,12 @@
     return editor ? syncEnvironment(editor, false) : validateRawEnvironment(form);
   }
 
+  function activeField(form, name) {
+    return form.querySelector('[name="' + name + '"]:not(:disabled)');
+  }
+
   function fieldValue(form, name, fallback) {
-    var field = form.elements[name];
+    var field = activeField(form, name);
     return field && field.value ? field.value : (fallback || "");
   }
 
@@ -286,11 +290,14 @@
   }
 
   function validateSource(form, panel, error, focus) {
-    var repo = form.elements.github_repo;
-    var branch = form.elements.github_branch;
+    var publicSource = form.elements.source_kind && form.elements.source_kind.value === "public";
+    var repo = activeField(form, "github_repo");
+    var branch = activeField(form, "github_branch");
     var detected = panel.querySelector("[name=github_app_path]:checked");
-    if (repo && repo.value && branch && branch.value && detected) return true;
-    error.textContent = "Select a repository, branch, and detected app before continuing.";
+    if (repo && repo.value && branch && branch.value && (detected || publicSource)) return true;
+    error.textContent = publicSource
+      ? "Enter a public repository URL and branch or tag before continuing."
+      : "Select a repository, branch, and detected app before continuing.";
     if (focus) {
       var target = !repo.value ? repo : (!branch.value ? branch : panel.querySelector("[data-gh-apps]"));
       if (target) target.focus({ preventScroll: true });

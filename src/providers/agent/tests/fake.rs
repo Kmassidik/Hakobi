@@ -10,8 +10,8 @@ use crate::host_agent::{
     AgentErrorBody, DockerContainerInspect, DockerContainerLogs, DockerContainerMount,
     DockerContainerPort, DockerContainerRow, DockerContainerStats, DockerContainersResponse,
     DockerHostInfo, DockerImageRow, DockerNetworkRow, DockerResourceRequest,
-    DockerSnapshotResponse, DockerVersion, DockerVolumeRow, RemoveImageRequest,
-    RunContainerRequest, RunContainerResponse,
+    DockerSnapshotResponse, DockerVersion, DockerVolumeRow, ReleaseContainerRequest,
+    ReleaseContainerResponse, RemoveImageRequest, RunContainerRequest, RunContainerResponse,
 };
 
 /// Minimal in-process stand-in for the host agent Docker API.
@@ -308,11 +308,28 @@ async fn fake_run(
         StatusCode::CREATED,
         Json(RunContainerResponse {
             container_id: format!("id-{}", request.name),
-            host_port: request.host_port.unwrap_or(18000),
+            host_port: request
+                .container_port
+                .map(|_| request.host_port.unwrap_or(18000)),
             name: request.name,
         }),
     )
         .into_response()
+}
+
+async fn fake_release(
+    State(agent): State<FakeAgent>,
+    headers: HeaderMap,
+    Json(request): Json<ReleaseContainerRequest>,
+) -> Response {
+    if !agent.authorized(&headers) {
+        return FakeAgent::unauthorized_response();
+    }
+    Json(ReleaseContainerResponse {
+        exit_code: if request.command == "exit 17" { 17 } else { 0 },
+        logs: format!("release:{}:{}", request.name, request.command),
+    })
+    .into_response()
 }
 
 pub(super) async fn spawn_fake_agent(token: &str) -> String {
@@ -321,6 +338,7 @@ pub(super) async fn spawn_fake_agent(token: &str) -> String {
         .route("/v1/docker/containers", get(fake_containers))
         .route("/v1/docker/snapshot", get(fake_snapshot))
         .route("/v1/docker/containers/run", post(fake_run))
+        .route("/v1/docker/containers/release", post(fake_release))
         .route("/v1/docker/images/remove", post(fake_remove_image))
         .route("/v1/docker/networks/create", post(fake_resource))
         .route("/v1/docker/networks/delete", post(fake_resource))

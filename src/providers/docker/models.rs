@@ -1,6 +1,15 @@
 /// Docker label identifying the Hakobi app that owns a resource.
 pub const APP_OWNER_LABEL: &str = "id.hakobi.app";
 
+/// A named Docker volume mounted at an absolute path inside a container.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ContainerVolume {
+    pub name: String,
+    pub mount_path: String,
+    #[serde(default)]
+    pub read_only: bool,
+}
+
 /// Optional hard limits applied when a container is created.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ResourceLimits {

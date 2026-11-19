@@ -1,6 +1,7 @@
 //! App create/edit form template and delete confirmation dialog.
 
 mod fields;
+mod runtime;
 mod wizard;
 
 use maud::{html, Markup};
@@ -11,10 +12,12 @@ use super::{brand, page, sidebar, CONTENT_WIDTH, EYEBROW, FIELD};
 use fields::{app_identity_fields, build_settings_fields, github_source_fields};
 use wizard::{deployment_policy_field, resource_limit_fields, review_summary};
 
+#[derive(Clone)]
 pub struct AppFormValues {
     pub name: String,
     pub host_id: String,
     pub build_type: String,
+    pub source_kind: String,
     pub github_repo: String,
     pub github_branch: String,
     pub github_path: String,
@@ -25,6 +28,17 @@ pub struct AppFormValues {
     pub cpu_limit: String,
     pub memory_limit_mb: String,
     pub env_json: String,
+    pub start_command: String,
+    pub release_command: String,
+    pub volumes_json: String,
+    pub processes_json: String,
+    pub secrets_json: String,
+}
+
+impl AppFormValues {
+    pub fn is_public_source(&self) -> bool {
+        self.source_kind == "public"
+    }
 }
 
 pub(super) const CONTROL: &str = "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-[13px] text-zinc-950 outline-none transition placeholder:text-zinc-400 focus:border-[#165237] focus:ring-[3px] focus:ring-[#165237]/10";
@@ -111,7 +125,7 @@ fn app_form_main(
             h1 class="m-0 mt-2 font-display text-[34px] font-normal leading-[1.1] tracking-[-0.03em] text-zinc-950" { (heading) }
             p class="mb-0 mt-3 max-w-2xl text-[13.5px] leading-relaxed text-zinc-500" {
                 @if guided {
-                    "Create a build recipe from a GitHub repository and choose where Hakobi should run it."
+                    "Create a build recipe from your connected repositories or a public Git URL, then choose where Hakobi should run it."
                 } @else {
                     "Update this app’s source, runtime, resources, and deployment policy."
                 }
@@ -141,7 +155,7 @@ fn app_form_fields(
             }
             div class=(if guided { "mt-2 grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start" } else { "mt-6" }) {
                 div class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm lg:col-span-8" {
-                    (step_panel(1, "Source", "Choose a repository and application. Hakobi fills in what it can detect.", github_source_fields(values), guided, submit_label))
+                    (step_panel(1, "Source", "Choose a connected repository or enter a public HTTPS clone URL.", github_source_fields(values), guided, submit_label))
                     (step_panel(2, "Name your app", "Choose a recognizable name and an enrolled host for the app.", app_identity_fields(hosts, values), guided, submit_label))
                     (step_panel(3, "Configure the build", "Set the runtime, port, environment, and build paths.", build_settings_fields(values), guided, submit_label))
                     (step_panel(4, "Resources and review", "Choose an allocation and deployment policy, then review the recipe.", resources_and_review(values, guided), guided, submit_label))

@@ -46,7 +46,16 @@ SSE endpoint replays event IDs for reconnecting build terminals; status and
 duration come from the deployment record. Active output opens inline above
 history, while completed deployments retain the same terminal behind Open.
 Deletion removes networks labeled `id.hakobi.app` with
-the exact app UUID. Matching volumes are preserved unless the user separately
+the exact app UUID. Apps may define a custom web start command, a release
+command, private workers, and named volume mounts. Release commands run after
+the image build and before replacing production; non-zero exits fail the
+deployment without replacing the previous web container. Workers use the same
+image, environment, limits, and volumes but publish no ports. Lifecycle and
+deletion operations include every configured worker. Persistent volume data
+survives rebuilds and mount edits. Plain variables and encrypted write-only
+secrets share runtime injection; secret values are redacted from release logs
+and never rerendered. Connected repositories support push auto-deploy, while
+public HTTPS Git sources use tokenless manual Deploy latest builds. Matching volumes are preserved unless the user separately
 confirms permanent app-data deletion. Unlabeled, shared, external, and other-app
 resources are never selected by cleanup.
 Usage charts accumulate up to 60 real samples over five

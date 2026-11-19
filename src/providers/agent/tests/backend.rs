@@ -3,7 +3,7 @@ use super::TOKEN;
 use crate::host_agent::{self, AgentEndpoint};
 use crate::providers::agent::backend::{truncate_chars, MAX_ERROR_CHARS};
 use crate::providers::agent::AgentBackend;
-use crate::providers::docker::ContainerBackend;
+use crate::providers::docker::{ContainerBackend, ContainerVolume};
 
 #[tokio::test]
 async fn agent_backend_reads_the_typed_agent_api() {
@@ -148,15 +148,17 @@ async fn agent_backend_sends_authenticated_mutations() {
             host_agent::LOCAL_ENDPOINT,
             "alpine:3.20",
             "demo-api",
-            8080,
+            Some(8080),
             None,
             &Default::default(),
             Default::default(),
+            None,
+            &[],
         )
         .await
         .unwrap();
     assert_eq!(result.name, "demo-api");
-    assert_eq!(result.host_port, 18000);
+    assert_eq!(result.host_port, Some(18000));
     assert_eq!(result.container_id, "id-demo-api");
 
     let missing = backend
@@ -176,14 +178,57 @@ async fn agent_backend_forwards_the_exact_requested_host_port() {
             host_agent::LOCAL_ENDPOINT,
             "alpine:3.20",
             "demo-api",
-            8080,
+            Some(8080),
             Some(18080),
             &Default::default(),
             Default::default(),
+            None,
+            &[],
         )
         .await
         .unwrap();
-    assert_eq!(result.host_port, 18080);
+    assert_eq!(result.host_port, Some(18080));
+}
+
+#[tokio::test]
+async fn agent_backend_forwards_private_workers_and_release_failures() {
+    let url = spawn_fake_agent(TOKEN).await;
+    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+    let volumes = [ContainerVolume {
+        name: "demo-data".into(),
+        mount_path: "/data".into(),
+        read_only: true,
+    }];
+    let worker = backend
+        .run_container(
+            host_agent::LOCAL_ENDPOINT,
+            "alpine:3.20",
+            "demo-worker",
+            None,
+            None,
+            &Default::default(),
+            Default::default(),
+            Some("exec /bin/worker"),
+            &volumes,
+        )
+        .await
+        .unwrap();
+    assert_eq!(worker.host_port, None);
+    assert_eq!(worker.container_id, "id-demo-worker");
+
+    let release = backend
+        .release_container(
+            host_agent::LOCAL_ENDPOINT,
+            "alpine:3.20",
+            "demo-release",
+            &Default::default(),
+            &volumes,
+            "exit 17",
+        )
+        .await
+        .unwrap();
+    assert_eq!(release.exit_code, 17);
+    assert_eq!(release.logs, "release:demo-release:exit 17");
 }
 
 #[tokio::test]
@@ -262,10 +307,12 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
             host_agent::LOCAL_ENDPOINT,
             "alpine latest",
             "demo-api",
-            8080,
+            Some(8080),
             None,
             &Default::default(),
             Default::default(),
+            None,
+            &[],
         )
         .await
         .is_err());
@@ -274,10 +321,12 @@ async fn agent_backend_rejects_bad_input_before_calling_the_agent() {
             host_agent::LOCAL_ENDPOINT,
             "alpine:3.20",
             "demo-api",
-            0,
+            Some(0),
             None,
             &Default::default(),
             Default::default(),
+            None,
+            &[],
         )
         .await
         .is_err());
@@ -293,10 +342,12 @@ async fn agent_backend_rejects_zero_host_port_before_calling_the_agent() {
             host_agent::LOCAL_ENDPOINT,
             "alpine:3.20",
             "demo-api",
-            8080,
+            Some(8080),
             Some(0),
             &Default::default(),
             Default::default(),
+            None,
+            &[],
         )
         .await
         .unwrap_err();

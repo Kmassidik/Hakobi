@@ -5,7 +5,8 @@ use async_trait::async_trait;
 
 use super::super::container_detail::{DockerContainerUsage, DockerInspect, DockerLogs};
 use super::super::docker::{
-    ContainerBackend, ContainerRow, DockerBackend, DockerSnapshot, ResourceLimits, RunResult,
+    ContainerBackend, ContainerRow, ContainerVolume, DockerBackend, DockerSnapshot, ReleaseResult,
+    ResourceLimits, RunResult,
 };
 use super::backend::AgentBackend;
 use crate::catalog::Catalog;
@@ -211,10 +212,12 @@ impl ContainerBackend for RoutingBackend {
         endpoint: &str,
         image: &str,
         name: &str,
-        container_port: u16,
+        container_port: Option<u16>,
         requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
+        start_command: Option<&str>,
+        volumes: &[ContainerVolume],
     ) -> Result<RunResult> {
         self.select(endpoint)
             .await?
@@ -226,7 +229,24 @@ impl ContainerBackend for RoutingBackend {
                 requested_host_port,
                 env,
                 resources,
+                start_command,
+                volumes,
             )
+            .await
+    }
+
+    async fn release_container(
+        &self,
+        endpoint: &str,
+        image: &str,
+        name: &str,
+        env: &std::collections::HashMap<String, String>,
+        volumes: &[ContainerVolume],
+        command: &str,
+    ) -> Result<ReleaseResult> {
+        self.select(endpoint)
+            .await?
+            .release_container(endpoint, image, name, env, volumes, command)
             .await
     }
 

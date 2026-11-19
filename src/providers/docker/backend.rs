@@ -12,10 +12,12 @@ use super::super::container_detail::{DockerContainerUsage, DockerInspect, Docker
 use super::super::validate::{connect, connect_with_timeout};
 use super::{validate_container_name, validate_image_reference};
 use super::{
-    ContainerPort, ContainerRow, DockerSnapshot, HostInfo, ImageRow, NetworkRow, ResourceLimits,
-    VolumeRow, APP_OWNER_LABEL,
+    ContainerPort, ContainerRow, ContainerVolume, DockerSnapshot, HostInfo, ImageRow, NetworkRow,
+    ReleaseResult, ResourceLimits, VolumeRow, APP_OWNER_LABEL,
 };
-use crate::providers::docker_exec::{remove_container as remove_docker_container, run_image};
+use crate::providers::docker_exec::{
+    release, remove_container as remove_docker_container, run_image,
+};
 
 pub use crate::providers::docker_exec::RunResult;
 
@@ -54,18 +56,33 @@ pub trait ContainerBackend: Send + Sync {
     /// Removes a Docker volume without forcing deletion.
     async fn remove_volume(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Creates and starts a container from an image already present locally.
-    /// A requested host port is exact; `None` selects an automatic candidate.
+    /// `container_port: None` starts a worker without any published port.
     #[allow(clippy::too_many_arguments)]
     async fn run_container(
         &self,
         endpoint: &str,
         image: &str,
         name: &str,
-        container_port: u16,
+        container_port: Option<u16>,
         requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
+        start_command: Option<&str>,
+        volumes: &[ContainerVolume],
     ) -> Result<RunResult>;
+
+    /// Runs an auto-removed release command without publishing a port.
+    async fn release_container(
+        &self,
+        _endpoint: &str,
+        _image: &str,
+        _name: &str,
+        _env: &std::collections::HashMap<String, String>,
+        _volumes: &[ContainerVolume],
+        _command: &str,
+    ) -> Result<ReleaseResult> {
+        bail!("this backend does not support release commands")
+    }
 
     /// Returns the full inspect data of one container.
     ///
@@ -313,10 +330,12 @@ impl ContainerBackend for DockerBackend {
         endpoint: &str,
         image: &str,
         name: &str,
-        container_port: u16,
+        container_port: Option<u16>,
         requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
+        start_command: Option<&str>,
+        volumes: &[ContainerVolume],
     ) -> Result<RunResult> {
         run_image(
             endpoint,
@@ -326,8 +345,22 @@ impl ContainerBackend for DockerBackend {
             requested_host_port,
             env,
             resources,
+            start_command,
+            volumes,
         )
         .await
+    }
+
+    async fn release_container(
+        &self,
+        endpoint: &str,
+        image: &str,
+        name: &str,
+        env: &std::collections::HashMap<String, String>,
+        volumes: &[ContainerVolume],
+        command: &str,
+    ) -> Result<ReleaseResult> {
+        release(endpoint, image, name, env, volumes, command).await
     }
 }
 

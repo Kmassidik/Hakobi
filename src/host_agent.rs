@@ -17,11 +17,12 @@ pub use metrics::{
     DockerMetrics, InstallJob, SystemDisk, SystemMetrics, SystemNetwork, SystemProcess,
 };
 pub use wire::{
-    AgentErrorBody, DockerContainerInspect, DockerContainerLogs, DockerContainerMount,
-    DockerContainerPort, DockerContainerRow, DockerContainerStats, DockerContainersResponse,
-    DockerHostInfo, DockerImageRow, DockerNetworkRow, DockerResourceRequest,
-    DockerSnapshotResponse, DockerVersion, DockerVolumeRow, RemoveImageRequest,
-    RunContainerRequest, RunContainerResponse,
+    AgentErrorBody, ContainerVolume, DockerContainerInspect, DockerContainerLogs,
+    DockerContainerMount, DockerContainerPort, DockerContainerRow, DockerContainerStats,
+    DockerContainersResponse, DockerHostInfo, DockerImageRow, DockerNetworkRow,
+    DockerResourceRequest, DockerSnapshotResponse, DockerVersion, DockerVolumeRow,
+    ReleaseContainerRequest, ReleaseContainerResponse, RemoveImageRequest, RunContainerRequest,
+    RunContainerResponse,
 };
 
 /// Provider endpoint that is served by the host agent instead of a socket.

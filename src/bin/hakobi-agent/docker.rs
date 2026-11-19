@@ -1,8 +1,11 @@
+#[path = "docker/release.rs"]
+mod release;
 #[path = "docker/resources.rs"]
 mod resources;
 #[path = "docker/run.rs"]
 mod run;
 
+pub(super) use release::docker_release;
 pub(super) use resources::{
     docker_create_network, docker_create_volume, docker_delete_network, docker_delete_volume,
     docker_remove_image,

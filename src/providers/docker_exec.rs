@@ -10,8 +10,10 @@ mod endpoint;
 mod ports;
 
 #[cfg(test)]
+mod release_tests;
+#[cfg(test)]
 mod tests;
 
 pub use compose::{apply_compose, compose_available};
-pub use containers::{remove_container, run_image, RunResult};
+pub use containers::{release, remove_container, run_image, ReleaseResult, RunResult};
 pub use ports::{choose_free_port, PORT_RANGE_END, PORT_RANGE_START};

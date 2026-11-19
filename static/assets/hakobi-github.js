@@ -268,9 +268,10 @@
   }
 
   function preparePicker(grid) {
+    var form = grid.closest("form") || document;
+    if (form.elements.source_kind && form.elements.source_kind.value === "public") return;
     if (grid.dataset.ghPrepared) return;
     grid.dataset.ghPrepared = "true";
-    var form = grid.closest("form") || document;
     var picker = {
       grid: grid,
       form: form,
@@ -313,6 +314,10 @@
     if (scope.matches && scope.matches("[data-gh-picker]")) preparePicker(scope);
     scope.querySelectorAll("[data-gh-picker]").forEach(preparePicker);
   }
+
+  document.addEventListener("hakobi:source-change", function (event) {
+    init(event.target);
+  });
 
   document.addEventListener("htmx:afterSwap", function (event) {
     init(event.target);

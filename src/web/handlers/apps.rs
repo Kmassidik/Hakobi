@@ -64,6 +64,7 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
             .map(|host| host.id.clone())
             .unwrap_or_default(),
         build_type: "dockerfile".into(),
+        source_kind: "connected".into(),
         github_repo: String::new(),
         github_branch: "main".into(),
         github_path: String::new(),
@@ -74,6 +75,11 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
         cpu_limit: "1".into(),
         memory_limit_mb: "512".into(),
         env_json: "{}".into(),
+        start_command: String::new(),
+        release_command: String::new(),
+        volumes_json: "[]".into(),
+        processes_json: "[]".into(),
+        secrets_json: "{}".into(),
     };
     render_app_form(
         &state,
@@ -315,7 +321,20 @@ pub(crate) async fn app_edit_page(
         Ok(hosts) => hosts,
         Err(error) => return internal_error(error),
     };
-    let values = edit_form_values(app);
+    let app_id = app.id.clone();
+    let runtime = with_catalog(&state, move |catalog| {
+        Ok((
+            catalog.list_app_volumes(&app_id)?,
+            catalog.list_app_processes(&app_id)?,
+            catalog.list_app_secret_names(&app_id)?,
+        ))
+    })
+    .await;
+    let (volumes, processes, secret_names) = match runtime {
+        Ok(runtime) => runtime,
+        Err(error) => return internal_error(error),
+    };
+    let values = edit_form_values(app, &volumes, &processes, &secret_names);
     render_app_form(
         &state,
         &headers,
@@ -406,7 +425,7 @@ pub(crate) async fn app_delete(
     if form.confirm_name != app.name {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let image_tags = match app_image_tags(&state, &app).await {
+    let image_tags = match super::app_cleanup::app_image_tags(&state, &app).await {
         Ok(tags) => tags,
         Err(error) => return internal_error(error),
     };
@@ -414,13 +433,13 @@ pub(crate) async fn app_delete(
     let resources = super::app_cleanup::snapshot_owned_resources(&state, &app, delete_data).await;
     // Best-effort cleanup: container, owned resources, images, and Cloudflare
     // route. The DB delete is authoritative.
-    let route = remove_app_container(&state, &app).await;
+    let route = super::app_cleanup::remove_app_container(&state, &app).await;
     super::app_cleanup::remove_owned_resources(&state, &app, resources).await;
-    remove_app_images(&state, &app, &image_tags).await;
+    super::app_cleanup::remove_app_images(&state, &app, &image_tags).await;
     let result = with_catalog(&state, move |catalog| catalog.delete_app(&id)).await;
     if result.is_ok() {
         if let Some(subdomain) = route {
-            spawn_cloudflare_route_cleanup(&state, subdomain);
+            super::app_cleanup::spawn_cloudflare_route_cleanup(&state, subdomain);
         }
     }
     match result {
@@ -430,63 +449,4 @@ pub(crate) async fn app_delete(
         }
         Err(error) => internal_error(error),
     }
-}
-
-async fn app_image_tags(
-    state: &AppState,
-    app: &hakobi::catalog::App,
-) -> anyhow::Result<Vec<String>> {
-    let app_id = app.id.clone();
-    let app_name = app.name.clone();
-    with_catalog(state, move |catalog| {
-        Ok(catalog
-            .list_deployments(&app_id)?
-            .into_iter()
-            .map(|deployment| {
-                deployment.image_tag.unwrap_or_else(|| {
-                    crate::web::deployment::image_tag_for(&app_name, deployment.version)
-                })
-            })
-            .collect())
-    })
-    .await
-}
-
-async fn remove_app_container(state: &AppState, app: &hakobi::catalog::App) -> Option<String> {
-    let container = crate::web::deployment::container_name_for(&app.id);
-    let _ = state
-        .backend
-        .remove_container(&format!("agent://{}", app.host_id), &container)
-        .await;
-    app.subdomain.clone()
-}
-
-async fn remove_app_images(state: &AppState, app: &hakobi::catalog::App, tags: &[String]) {
-    let endpoint = format!("agent://{}", app.host_id);
-    for tag in tags {
-        if let Err(error) = state.backend.remove_image(&endpoint, tag).await {
-            tracing::warn!(app = %app.name, image = %tag, %error, "app image removal skipped");
-        }
-    }
-}
-
-fn spawn_cloudflare_route_cleanup(state: &AppState, subdomain: String) {
-    let cf_path = state.catalog_path.clone();
-    tokio::spawn(async move {
-        let settings = tokio::task::spawn_blocking(move || {
-            let catalog = hakobi::catalog::Catalog::open(cf_path.as_ref())?;
-            crate::cloudflare::apps_route::load_settings(&catalog)
-        })
-        .await
-        .unwrap_or_else(|error| Err(anyhow::anyhow!(error.to_string())));
-        let settings = match settings {
-            Ok(settings) => settings,
-            Err(_) => return,
-        };
-        if let Err(error) =
-            crate::cloudflare::apps_route::remove_app_route_with(&settings, &subdomain).await
-        {
-            tracing::warn!(error = %error, app = %subdomain, "cloudflare route removal skipped");
-        }
-    });
 }

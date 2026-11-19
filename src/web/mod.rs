@@ -27,6 +27,10 @@ mod tests_owned_resources;
 #[cfg(test)]
 mod tests_pipeline_support;
 #[cfg(test)]
+mod tests_public_source;
+#[cfg(test)]
+mod tests_runtime_options;
+#[cfg(test)]
 mod tests_settings;
 #[cfg(test)]
 mod tests_support;

@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rusqlite::{params, Connection, Transaction};
 
 /// Schema version written to `PRAGMA user_version`.
-pub(super) const SCHEMA_VERSION: i64 = 17;
+pub(super) const SCHEMA_VERSION: i64 = 18;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS provider_connections (
@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS apps (
     host_port          INTEGER,
     cpu_limit          REAL,
     memory_limit_bytes INTEGER,
+    start_command      TEXT,
+    release_command    TEXT,
     env_json           TEXT NOT NULL DEFAULT '{}',
     webhook_secret     TEXT,
     webhook_enabled    INTEGER NOT NULL DEFAULT 0,
@@ -119,6 +121,29 @@ CREATE TABLE IF NOT EXISTS deployment_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_deployment_logs_deployment ON deployment_logs (deployment_id);
+
+CREATE TABLE IF NOT EXISTS app_secrets (
+    app_id          TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    encrypted_value TEXT NOT NULL,
+    PRIMARY KEY (app_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS app_processes (
+    app_id      TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    command     TEXT NOT NULL,
+    PRIMARY KEY (app_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS app_volumes (
+    app_id      TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    mount_path  TEXT NOT NULL,
+    read_only   INTEGER NOT NULL DEFAULT 0 CHECK (read_only IN (0, 1)),
+    PRIMARY KEY (app_id, name),
+    UNIQUE (app_id, mount_path)
+);
 "#;
 
 /// v9 indexes — created only after apps/deployments exist in their final shape.
@@ -177,10 +202,10 @@ fn migrate_github(transaction: &Transaction<'_>, current: i64) -> Result<()> {
     if current < 6 {
         migrate_v6_github(transaction)?;
     }
-    if (1..7).contains(&current) {
+    if current < 7 {
         migrate_v7_github_installation(transaction)?;
     }
-    if (1..8).contains(&current) {
+    if current < 8 {
         transaction
             .execute("ALTER TABLE github_app ADD COLUMN app_slug TEXT", [])
             .context("add github_app.app_slug")?;
@@ -226,6 +251,11 @@ fn migrate_apps(transaction: &Transaction<'_>, current: i64) -> Result<()> {
             .execute("ALTER TABLE apps ADD COLUMN subdomain TEXT", [])
             .context("add apps.subdomain")?;
     }
+    migrate_latest_app_runtime(transaction, current)?;
+    Ok(())
+}
+
+fn migrate_latest_app_runtime(transaction: &Transaction<'_>, current: i64) -> Result<()> {
     if (1..17).contains(&current) {
         transaction
             .execute(
@@ -234,6 +264,40 @@ fn migrate_apps(transaction: &Transaction<'_>, current: i64) -> Result<()> {
             )
             .context("add apps.requested_host_port")?;
     }
+    if (1..18).contains(&current) {
+        migrate_v18_runtime(transaction)?;
+    }
+    Ok(())
+}
+
+fn migrate_v18_runtime(transaction: &Transaction<'_>) -> Result<()> {
+    for column in ["start_command", "release_command"] {
+        if !column_exists(transaction, "apps", column)? {
+            transaction.execute(&format!("ALTER TABLE apps ADD COLUMN {column} TEXT"), [])?;
+        }
+    }
+    transaction.execute_batch(
+        "CREATE TABLE IF NOT EXISTS app_secrets (
+            app_id TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            encrypted_value TEXT NOT NULL,
+            PRIMARY KEY (app_id, name)
+         );
+         CREATE TABLE IF NOT EXISTS app_processes (
+            app_id TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            command TEXT NOT NULL,
+            PRIMARY KEY (app_id, name)
+         );
+         CREATE TABLE IF NOT EXISTS app_volumes (
+            app_id TEXT NOT NULL REFERENCES apps (id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            mount_path TEXT NOT NULL,
+            read_only INTEGER NOT NULL DEFAULT 0 CHECK (read_only IN (0, 1)),
+            PRIMARY KEY (app_id, name),
+            UNIQUE (app_id, mount_path)
+         );",
+    )?;
     Ok(())
 }
 

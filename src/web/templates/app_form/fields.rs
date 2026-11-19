@@ -6,37 +6,108 @@ use super::{AppFormValues, CONTROL};
 
 pub(super) fn github_source_fields(values: &AppFormValues) -> Markup {
     html! {
-        div id="gh-source-picker" data-gh-picker class="grid gap-5" {
-            div class="grid grid-cols-1 gap-4 sm:grid-cols-2" {
-                label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
-                    "Repository"
-                    select name="github_repo" data-gh-repos class=(CONTROL) {
-                        option value="" { "Loading repositories…" }
-                        @if !values.github_repo.is_empty() {
-                            option value=(values.github_repo.as_str()) selected { (values.github_repo) }
-                        }
-                    }
-                }
-                label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
-                    "Branch"
-                    select name="github_branch" data-gh-branches class=(CONTROL) {
-                        @if !values.github_branch.is_empty() {
-                            option value=(values.github_branch.as_str()) selected { (values.github_branch) }
-                        } @else {
-                            option value="main" { "main" }
-                        }
-                    }
-                }
-            }
-            fieldset class="m-0 min-w-0 border-0 p-0" {
-                legend class="px-0 text-[13px] font-semibold text-zinc-800" { "Detected applications" }
-                p class="mb-3 mt-1 text-[11.5px] leading-relaxed text-zinc-500" {
-                    "Up to three applications appear as rows; larger repositories use search."
-                }
-                div data-gh-apps class="grid grid-cols-1 gap-3" {}
+        (source_cards(values))
+        (connected_source_fields(values))
+        (public_source_fields(values))
+    }
+}
+
+fn source_cards(values: &AppFormValues) -> Markup {
+    let public = values.is_public_source();
+    html! {
+        fieldset class="m-0 min-w-0 border-0 p-0" {
+            legend class="px-0 text-[13px] font-semibold text-zinc-800" { "Repository source" }
+            div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" {
+                (source_card("connected", "Your repositories", "Pick from repositories available to your connected GitHub App.", !public))
+                (source_card("public", "Public repository", "Clone a public repository with an HTTPS URL; no GitHub connection is needed.", public))
             }
         }
-        p data-gh-status class="m-0 text-[11.5px] leading-relaxed text-zinc-500" { "Checking GitHub connection…" }
+    }
+}
+
+fn source_card(kind: &str, title: &str, description: &str, selected: bool) -> Markup {
+    html! {
+        label data-source-card=(kind) data-state=(if selected { "selected" } else { "unselected" }) class=(source_card_class(selected)) {
+            input type="radio" name="source_kind" value=(kind) data-source-radio checked[selected] class="mt-0.5 size-4 shrink-0 accent-[#165237]";
+            span {
+                span class="block text-[12.5px] font-semibold text-zinc-900" { (title) }
+                span class="mt-1 block text-[11px] leading-relaxed text-zinc-500" { (description) }
+            }
+        }
+    }
+}
+
+fn source_card_class(selected: bool) -> &'static str {
+    if selected {
+        "flex cursor-pointer items-start gap-3 rounded-xl border border-[#165237] bg-[#165237]/5 p-4 transition"
+    } else {
+        "flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 bg-white p-4 transition"
+    }
+}
+
+fn connected_source_fields(values: &AppFormValues) -> Markup {
+    let public = values.is_public_source();
+    html! {
+        div data-source-panel="connected" hidden[public] {
+            div id="gh-source-picker" data-gh-picker class="grid gap-5" {
+                div class="grid grid-cols-1 gap-4 sm:grid-cols-2" {
+                    label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                        "Repository"
+                        select name="github_repo" data-gh-repos class=(CONTROL) disabled[public] {
+                            option value="" { "Loading repositories…" }
+                            @if !public && !values.github_repo.is_empty() {
+                                option value=(values.github_repo.as_str()) selected { (values.github_repo) }
+                            }
+                        }
+                    }
+                    label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                        "Branch"
+                        select name="github_branch" data-gh-branches class=(CONTROL) disabled[public] {
+                            @if !public && !values.github_branch.is_empty() {
+                                option value=(values.github_branch.as_str()) selected { (values.github_branch) }
+                            } @else {
+                                option value="main" { "main" }
+                            }
+                        }
+                    }
+                }
+                fieldset class="m-0 min-w-0 border-0 p-0" {
+                    legend class="px-0 text-[13px] font-semibold text-zinc-800" { "Detected applications" }
+                    p class="mb-3 mt-1 text-[11.5px] leading-relaxed text-zinc-500" {
+                        "Up to three applications appear as rows; larger repositories use search."
+                    }
+                    div data-gh-apps class="grid grid-cols-1 gap-3" {}
+                }
+            }
+            p data-gh-status class="m-0 mt-3 text-[11.5px] leading-relaxed text-zinc-500" { "Checking GitHub connection…" }
+        }
+    }
+}
+
+fn public_source_fields(values: &AppFormValues) -> Markup {
+    let public = values.is_public_source();
+    let branch = if public {
+        values.github_branch.as_str()
+    } else {
+        "main"
+    };
+    html! {
+        div data-source-panel="public" hidden[!public] class="grid grid-cols-1 gap-4 sm:grid-cols-2" {
+            label class="grid gap-2 text-[13px] font-semibold text-zinc-800 sm:col-span-2" {
+                "Repository URL"
+                input class=(CONTROL) name="github_repo" type="url" pattern="https://.*" value=(if public { values.github_repo.as_str() } else { "" }) maxlength="2048" required[public] disabled[!public] autocomplete="off" spellcheck="false" placeholder="https://github.com/owner/repository.git";
+                span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
+                    "HTTPS only. Credentials, query parameters, and fragments are not allowed."
+                }
+            }
+            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                "Branch or tag"
+                input class=(CONTROL) name="github_branch" type="text" value=(branch) maxlength="255" required[public] disabled[!public] autocomplete="off" placeholder="main";
+                span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
+                    "Hakobi clones this ref for each manual deployment."
+                }
+            }
+        }
     }
 }
 
@@ -103,6 +174,7 @@ pub(super) fn build_settings_fields(values: &AppFormValues) -> Markup {
             }
         }
         (environment_fields(values))
+        (super::runtime::runtime_fields(values))
         section class="grid gap-5 border-t border-zinc-200 pt-5" aria-labelledby="build-paths-title" {
             h3 id="build-paths-title" class="m-0 text-[13px] font-semibold text-zinc-800" { "Build paths" }
             label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {

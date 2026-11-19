@@ -1,5 +1,7 @@
 //! Container inventory, run form, and lifecycle action handlers.
 
+mod run;
+
 use axum::{
     extract::{Form, Path, RawQuery, State},
     http::{HeaderMap, StatusCode},
@@ -209,7 +211,7 @@ pub(crate) async fn container_create(
         Ok(port) => port,
         Err(response) => return *response,
     };
-    run_new_container(
+    run::run_new_container(
         &state,
         &headers,
         provider,
@@ -265,48 +267,6 @@ fn validate_container_values(
             Some("Container port must be a whole number between 1 and 65535."),
             StatusCode::BAD_REQUEST,
         ))),
-    }
-}
-
-async fn run_new_container(
-    state: &AppState,
-    headers: &HeaderMap,
-    provider: &ProviderConnection,
-    providers: &[ProviderConnection],
-    values: &templates::ContainerFormValues,
-    container_port: u16,
-) -> Response {
-    let result = state
-        .backend
-        .run_container(
-            &provider.endpoint,
-            &values.image,
-            &values.name,
-            container_port,
-            None,
-            &std::collections::HashMap::new(),
-            hakobi::providers::ResourceLimits::default(),
-        )
-        .await;
-    match result {
-        Ok(run) => {
-            let notice = format!(
-                "Container {} is running on host port {}.",
-                run.name, run.host_port
-            );
-            redirect_with_notice("/containers", &notice)
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "container run failed");
-            render_container_form(
-                state,
-                headers,
-                providers,
-                values,
-                Some(&truncate(&error.to_string(), 500)),
-                StatusCode::BAD_GATEWAY,
-            )
-        }
     }
 }
 

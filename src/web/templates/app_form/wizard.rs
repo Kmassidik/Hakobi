@@ -69,7 +69,7 @@ fn summary_row(label: &str, key: &str, value: String) -> Markup {
     html! {
         div class="flex items-center justify-between gap-3 py-3 text-[11.5px]" {
             dt class="shrink-0 text-zinc-500" { (label) }
-            dd data-summary=(key) class="m-0 whitespace-nowrap text-right font-mono text-[11px] leading-relaxed text-zinc-800" { (value) }
+            dd data-summary=(key) class="m-0 min-w-0 break-all text-right font-mono text-[11px] leading-relaxed text-zinc-800" { (value) }
         }
     }
 }
@@ -127,14 +127,23 @@ fn resource_card_class(selected: bool) -> &'static str {
 }
 
 pub(super) fn deployment_policy_field(values: &AppFormValues) -> Markup {
+    let public = values.is_public_source();
     html! {
-        label class="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 bg-white p-4" {
-            input name="github_auto_deploy" type="checkbox" value="1" checked[values.github_auto_deploy] class="mt-0.5 size-4 shrink-0 accent-[#165237]";
-            span {
-                span class="block text-[12.5px] font-semibold text-zinc-900" { "Automatically deploy on push" }
-                span class="mt-1 block text-[11px] leading-relaxed text-zinc-500" {
-                    "Hakobi rebuilds and redeploys when the tracked branch changes."
+        div data-connected-deploy-policy hidden[public] {
+            label class="flex cursor-pointer items-start gap-3 rounded-xl border border-zinc-200 bg-white p-4" {
+                input name="github_auto_deploy" type="checkbox" value="1" checked[values.github_auto_deploy] disabled[public] class="mt-0.5 size-4 shrink-0 accent-[#165237]";
+                span {
+                    span class="block text-[12.5px] font-semibold text-zinc-900" { "Automatically deploy on push" }
+                    span class="mt-1 block text-[11px] leading-relaxed text-zinc-500" {
+                        "Hakobi rebuilds and redeploys when the tracked branch changes."
+                    }
                 }
+            }
+        }
+        div data-public-deploy-policy hidden[!public] class="rounded-xl border border-zinc-200 bg-zinc-50 p-4" {
+            span class="block text-[12.5px] font-semibold text-zinc-900" { "Manual deployments only" }
+            span class="mt-1 block text-[11px] leading-relaxed text-zinc-500" {
+                "Public repositories do not receive GitHub App push events. Use Deploy latest on the app page."
             }
         }
     }
@@ -163,6 +172,9 @@ pub(super) fn review_summary(values: &AppFormValues) -> Markup {
                 (review_row("Build", "build", build, Some(3)))
                 (review_row("Port mapping", "port", port_mapping(values), Some(3)))
                 (review_row("Environment", "environment", environment_label(&values.env_json), Some(3)))
+                (review_row("Secrets", "secrets", count_label(&values.secrets_json, "secret"), Some(3)))
+                (review_row("Workers", "processes", count_label(&values.processes_json, "worker"), Some(3)))
+                (review_row("Volumes", "volumes", count_label(&values.volumes_json, "volume"), Some(3)))
             }
         }
     }
@@ -187,6 +199,18 @@ fn port_mapping(values: &AppFormValues) -> String {
         values.requested_host_port.trim()
     };
     format!("{} → {}", host, present(&values.container_port))
+}
+
+fn count_label(value: &str, noun: &str) -> String {
+    let count = serde_json::from_str::<serde_json::Value>(value)
+        .ok()
+        .and_then(|value| match value {
+            serde_json::Value::Array(values) => Some(values.len()),
+            serde_json::Value::Object(values) => Some(values.len()),
+            _ => None,
+        })
+        .unwrap_or(0);
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
 fn present(value: &str) -> String {

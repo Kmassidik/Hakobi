@@ -12,6 +12,65 @@ use url::Url;
 const CONNECT_TIMEOUT_SECS: u64 = 8;
 const MAX_IMAGE_LEN: usize = 255;
 const MAX_NAME_LEN: usize = 128;
+const MAX_VOLUME_NAME_LEN: usize = 255;
+pub const MAX_SHELL_COMMAND_CHARS: usize = 4096;
+
+/// Validates a shell command passed as a single `/bin/sh -c` argument.
+pub fn validate_shell_command(command: &str) -> Result<()> {
+    if command.contains('\0') {
+        bail!("shell command must not contain NUL");
+    }
+    if command.chars().count() > MAX_SHELL_COMMAND_CHARS {
+        bail!("shell command must be at most {MAX_SHELL_COMMAND_CHARS} characters");
+    }
+    Ok(())
+}
+
+/// Validates named-volume mounts without accepting host bind paths.
+pub fn validate_volumes(volumes: &[super::docker::ContainerVolume]) -> Result<()> {
+    for volume in volumes {
+        validate_volume_name(&volume.name)?;
+        validate_mount_path(&volume.mount_path)?;
+    }
+    Ok(())
+}
+
+fn validate_volume_name(name: &str) -> Result<()> {
+    if name.is_empty() || name.len() > MAX_VOLUME_NAME_LEN {
+        bail!("volume name must be 1–{MAX_VOLUME_NAME_LEN} characters");
+    }
+    if !name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphanumeric())
+    {
+        bail!("volume name must start with a letter or digit");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        bail!("volume name may only contain letters, digits, '.', '_' and '-'");
+    }
+    Ok(())
+}
+
+fn validate_mount_path(path: &str) -> Result<()> {
+    if !path.starts_with('/') {
+        bail!("volume mount path must be absolute");
+    }
+    if path.contains('\0') {
+        bail!("volume mount path must not contain NUL");
+    }
+    if path != "/"
+        && path[1..]
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
+    {
+        bail!("volume mount path must be clean and contain no '.' or '..' components");
+    }
+    Ok(())
+}
 
 /// Validates a Docker endpoint for direct connections.
 ///

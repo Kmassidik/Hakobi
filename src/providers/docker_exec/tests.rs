@@ -162,10 +162,12 @@ async fn invalid_inputs_fail_before_connecting() {
         "tcp://127.0.0.1:1",
         "bad image",
         "web",
-        80,
+        Some(80),
         None,
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .expect_err("invalid image");
@@ -175,10 +177,12 @@ async fn invalid_inputs_fail_before_connecting() {
         "tcp://127.0.0.1:1",
         "nginx",
         "bad name",
-        80,
+        Some(80),
         None,
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .expect_err("invalid name");
@@ -188,10 +192,12 @@ async fn invalid_inputs_fail_before_connecting() {
         "tcp://127.0.0.1:1",
         "nginx",
         "web",
-        0,
+        Some(0),
         None,
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .expect_err("invalid port");
@@ -215,20 +221,24 @@ async fn compose_inputs_fail_before_invoking_docker() {
 fn container_config_binds_exposed_port() {
     let config = container_config(
         "nginx",
-        80,
-        18000,
+        Some(80),
+        Some(18000),
         &Default::default(),
         ResourceLimits {
             cpu: Some(1.5),
             memory_bytes: Some(512 * 1024 * 1024),
         },
+        None,
+        &[],
     );
     assert_eq!(config.image.as_deref(), Some("nginx"));
+    assert_eq!(config.cmd, None);
     assert_eq!(
         config.exposed_ports.as_deref(),
         Some(&["80/tcp".to_owned()][..])
     );
     let host = config.host_config.expect("host config");
+    assert_eq!(host.mounts, None);
     assert_eq!(host.nano_cpus, Some(1_500_000_000));
     assert_eq!(host.memory, Some(512 * 1024 * 1024));
     let binding = host
@@ -348,14 +358,16 @@ async fn custom_host_port_uses_the_exact_loopback_mapping() {
         &endpoint,
         "nginx",
         "web",
-        80,
+        Some(80),
         Some(18080),
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .unwrap();
-    assert_eq!(result.host_port, 18080);
+    assert_eq!(result.host_port, Some(18080));
     let state = state.lock().unwrap();
     assert_eq!(state.list_calls, 0);
     assert_eq!(state.create_bodies.len(), 1);
@@ -375,14 +387,16 @@ async fn automatic_host_port_retries_the_next_candidate() {
         &endpoint,
         "nginx",
         "web",
-        80,
+        Some(80),
         None,
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .unwrap();
-    assert_eq!(result.host_port, 18001);
+    assert_eq!(result.host_port, Some(18001));
     let state = state.lock().unwrap();
     assert_eq!(state.list_calls, 1);
     let ports: Vec<u16> = state.create_bodies.iter().map(created_host_port).collect();
@@ -396,10 +410,12 @@ async fn custom_host_port_collision_never_falls_back() {
         &endpoint,
         "nginx",
         "web",
-        80,
+        Some(80),
         Some(18080),
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .unwrap_err();
@@ -422,10 +438,12 @@ async fn custom_host_port_start_collision_is_clear_and_final() {
         &endpoint,
         "nginx",
         "web",
-        80,
+        Some(80),
         Some(18080),
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .unwrap_err();
@@ -444,10 +462,12 @@ async fn requested_host_port_zero_fails_before_connecting() {
         "tcp://127.0.0.1:1",
         "nginx",
         "web",
-        80,
+        Some(80),
         Some(0),
         &Default::default(),
         Default::default(),
+        None,
+        &[],
     )
     .await
     .expect_err("invalid requested host port");

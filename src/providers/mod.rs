@@ -11,10 +11,11 @@ pub use agent::{
 };
 pub use container_detail::{ContainerMount, DockerContainerUsage, DockerInspect, DockerLogs};
 pub use docker::{
-    validate_container_name, validate_image_reference, ContainerBackend, ContainerGroup,
-    ContainerInventory, ContainerPort, ContainerRow, DockerBackend, DockerSnapshot, HostInfo,
-    ImageRow, NetworkRow, ResourceLimits, RunResult, ServiceGroup, StackGroup, VolumeRow,
-    APP_OWNER_LABEL,
+    validate_container_name, validate_image_reference, validate_shell_command, validate_volumes,
+    ContainerBackend, ContainerGroup, ContainerInventory, ContainerPort, ContainerRow,
+    ContainerVolume, DockerBackend, DockerSnapshot, HostInfo, ImageRow, NetworkRow, ReleaseResult,
+    ResourceLimits, RunResult, ServiceGroup, StackGroup, VolumeRow, APP_OWNER_LABEL,
+    MAX_SHELL_COMMAND_CHARS,
 };
 pub use kubernetes::{
     ConnectionInfo, DeploymentRow, KubernetesProvider, NamespaceRow, PodRow, ServicePort,

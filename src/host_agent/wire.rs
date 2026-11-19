@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub use crate::providers::ContainerVolume;
+
 /// Error body returned by the host agent for failed requests.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentErrorBody {
@@ -147,9 +149,8 @@ pub struct RemoveImageRequest {
 
 /// Body of `POST /v1/docker/containers/run`.
 ///
-/// Only an image that already exists locally, a container name, container and
-/// optional host ports, environment variables, and optional resource limits are
-/// accepted. There is no endpoint or command override.
+/// Accepts only local images and fixed Docker options. `container_port: null`
+/// starts a private worker; a present port is published on loopback only.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RunContainerRequest {
     #[serde(default)]
@@ -157,7 +158,7 @@ pub struct RunContainerRequest {
     #[serde(default)]
     pub name: String,
     #[serde(default)]
-    pub container_port: u16,
+    pub container_port: Option<u16>,
     /// Requested loopback host port; omitted selects an automatic port.
     #[serde(default)]
     pub host_port: Option<u16>,
@@ -170,6 +171,11 @@ pub struct RunContainerRequest {
     /// Maximum memory in bytes; omitted means unlimited.
     #[serde(default)]
     pub memory_limit_bytes: Option<u64>,
+    /// Optional command executed through `/bin/sh -c`, preserving ENTRYPOINT.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<ContainerVolume>,
 }
 
 /// Result of `POST /v1/docker/containers/run`.
@@ -177,10 +183,35 @@ pub struct RunContainerRequest {
 pub struct RunContainerResponse {
     #[serde(default)]
     pub container_id: String,
+    /// Absent for private workers with no published port.
     #[serde(default)]
-    pub host_port: u16,
+    pub host_port: Option<u16>,
     #[serde(default)]
     pub name: String,
+}
+
+/// Body of `POST /v1/docker/containers/release`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseContainerRequest {
+    #[serde(default)]
+    pub image: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub env: std::collections::HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub volumes: Vec<ContainerVolume>,
+    #[serde(default)]
+    pub command: String,
+}
+
+/// Completed release command, including nonzero exits, with bounded logs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseContainerResponse {
+    #[serde(default)]
+    pub exit_code: i64,
+    #[serde(default)]
+    pub logs: String,
 }
 
 /// One mounted path of a container, reported by inspect.

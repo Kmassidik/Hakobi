@@ -69,7 +69,10 @@ async fn render_container_detail(
         .inspect_container(&provider.endpoint, name)
         .await;
     let detail = match inspect {
-        Ok(inspect) => Ok(inspect),
+        Ok(inspect) => match redact_detail(state, inspect).await {
+            Ok(inspect) => Ok(inspect),
+            Err(error) => return internal_error(error),
+        },
         // A missing container is a user-facing miss; everything else is a
         // provider failure rendered with its bounded message.
         Err(error) if error_chain_contains_not_found(&error) => {
@@ -97,6 +100,42 @@ async fn render_container_detail(
         ),
         cookies,
     )
+}
+
+async fn redact_detail(
+    state: &AppState,
+    mut inspect: hakobi::providers::DockerInspect,
+) -> anyhow::Result<hakobi::providers::DockerInspect> {
+    redact_managed_secrets(state, &mut inspect).await?;
+    Ok(inspect)
+}
+
+async fn redact_managed_secrets(
+    state: &AppState,
+    inspect: &mut hakobi::providers::DockerInspect,
+) -> anyhow::Result<()> {
+    let Some(app_id) = inspect
+        .labels
+        .iter()
+        .find(|(key, _)| key == hakobi::providers::APP_OWNER_LABEL)
+        .map(|(_, value)| value.clone())
+    else {
+        return Ok(());
+    };
+    let names =
+        super::with_catalog(state, move |catalog| catalog.list_app_secret_names(&app_id)).await?;
+    redact_environment(inspect, &names);
+    Ok(())
+}
+
+fn redact_environment(inspect: &mut hakobi::providers::DockerInspect, names: &[String]) {
+    for variable in &mut inspect.env {
+        if let Some((name, _)) = variable.split_once('=') {
+            if names.iter().any(|secret| secret == name) {
+                *variable = format!("{name}=[redacted]");
+            }
+        }
+    }
 }
 
 async fn load_live_sections(
@@ -203,4 +242,21 @@ fn error_chain_contains_not_found(error: &anyhow::Error) -> bool {
         || error
             .chain()
             .any(|cause| cause.to_string().contains("no such container"))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn managed_secret_values_are_masked() {
+        let mut inspect = hakobi::providers::DockerInspect {
+            env: vec![
+                "DATABASE_URL=postgres://private".into(),
+                "RUST_LOG=info".into(),
+            ],
+            ..Default::default()
+        };
+        super::redact_environment(&mut inspect, &["DATABASE_URL".into()]);
+        assert_eq!(inspect.env[0], "DATABASE_URL=[redacted]");
+        assert_eq!(inspect.env[1], "RUST_LOG=info");
+    }
 }

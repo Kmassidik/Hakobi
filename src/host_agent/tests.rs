@@ -137,10 +137,16 @@ fn run_requests_and_results_round_trip_through_json() {
         env: Default::default(),
         image: "alpine:3.20".into(),
         name: "demo-api".into(),
-        container_port: 8080,
+        container_port: Some(8080),
         host_port: Some(18080),
         cpu_limit: Some(1.5),
         memory_limit_bytes: Some(512 * 1024 * 1024),
+        start_command: Some("exec /bin/server".into()),
+        volumes: vec![ContainerVolume {
+            name: "demo-data".into(),
+            mount_path: "/var/lib/demo".into(),
+            read_only: false,
+        }],
     };
     let encoded = serde_json::to_string(&request).unwrap();
     assert_eq!(
@@ -150,7 +156,7 @@ fn run_requests_and_results_round_trip_through_json() {
 
     let result = RunContainerResponse {
         container_id: "feedface".into(),
-        host_port: 18000,
+        host_port: Some(18000),
         name: "demo-api".into(),
     };
     let encoded = serde_json::to_string(&result).unwrap();
@@ -166,6 +172,38 @@ fn run_request_defaults_to_automatic_host_port() {
         serde_json::from_str(r#"{"image":"alpine:3.20","name":"demo-api","container_port":8080}"#)
             .unwrap();
     assert_eq!(request.host_port, None);
+    assert_eq!(request.container_port, Some(8080));
+    assert_eq!(request.start_command, None);
+    assert!(request.volumes.is_empty());
+}
+
+#[test]
+fn release_requests_preserve_failure_status_and_logs() {
+    let request = ReleaseContainerRequest {
+        image: "alpine:3.20".into(),
+        name: "demo-release".into(),
+        env: std::collections::HashMap::from([("MODE".into(), "migrate".into())]),
+        volumes: vec![ContainerVolume {
+            name: "demo-data".into(),
+            mount_path: "/data".into(),
+            read_only: true,
+        }],
+        command: "exit 23".into(),
+    };
+    let encoded = serde_json::to_string(&request).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ReleaseContainerRequest>(&encoded).unwrap(),
+        request
+    );
+    let response = ReleaseContainerResponse {
+        exit_code: 23,
+        logs: "migration failed\n".into(),
+    };
+    let encoded = serde_json::to_string(&response).unwrap();
+    assert_eq!(
+        serde_json::from_str::<ReleaseContainerResponse>(&encoded).unwrap(),
+        response
+    );
 }
 
 #[test]

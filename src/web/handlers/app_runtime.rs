@@ -98,10 +98,23 @@ pub(crate) async fn app_runtime_action(
         Err(error) => return internal_error(error),
     };
     let endpoint = format!("agent://{}", app.host_id);
+    let app_id = app.id.clone();
+    let processes = with_catalog(&state, move |catalog| catalog.list_app_processes(&app_id)).await;
+    let processes = match processes {
+        Ok(processes) => processes,
+        Err(error) => return internal_error(error),
+    };
     let name = container_name_for(&app.id);
-    let result = execute_action(&state, &endpoint, &name, action).await;
-    if let Err(error) = result {
-        return internal_error(error);
+    let mut names = vec![name];
+    names.extend(
+        processes
+            .into_iter()
+            .map(|process| hakobi::catalog::worker_container_name(&app.id, &process.name)),
+    );
+    for name in names {
+        if let Err(error) = execute_action(&state, &endpoint, &name, action).await {
+            return internal_error(error);
+        }
     }
     let app_id = app.id.clone();
     let status = action.state();

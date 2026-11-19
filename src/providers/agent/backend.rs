@@ -9,14 +9,16 @@ use super::super::container_detail::{
     ContainerMount, DockerContainerUsage, DockerInspect, DockerLogs,
 };
 use super::super::docker::{
-    validate_container_name, validate_image_reference, ContainerBackend, ContainerPort,
-    ContainerRow, DockerSnapshot, ResourceLimits, RunResult,
+    validate_container_name, validate_image_reference, validate_shell_command, validate_volumes,
+    ContainerBackend, ContainerPort, ContainerRow, ContainerVolume, DockerSnapshot, ReleaseResult,
+    ResourceLimits, RunResult,
 };
 use super::local::ensure_local_endpoint;
 use crate::host_agent::{
     AgentEndpoint, AgentErrorBody, AgentHost, DockerContainerInspect, DockerContainerLogs,
     DockerContainerStats, DockerContainersResponse, DockerResourceRequest, DockerSnapshotResponse,
-    DockerVersion, RemoveImageRequest, RunContainerRequest, RunContainerResponse,
+    DockerVersion, ReleaseContainerRequest, ReleaseContainerResponse, RemoveImageRequest,
+    RunContainerRequest, RunContainerResponse,
 };
 
 // Client budgets stay above the agent's own limits (20 s for queries and
@@ -301,20 +303,26 @@ impl ContainerBackend for AgentBackend {
         endpoint: &str,
         image: &str,
         name: &str,
-        container_port: u16,
+        container_port: Option<u16>,
         requested_host_port: Option<u16>,
         env: &std::collections::HashMap<String, String>,
         resources: ResourceLimits,
+        start_command: Option<&str>,
+        volumes: &[ContainerVolume],
     ) -> Result<RunResult> {
         ensure_local_endpoint(endpoint)?;
         validate_image_reference(image)?;
         validate_container_name(name)?;
-        if container_port == 0 {
-            bail!("container port must be between 1 and 65535");
+        if container_port == Some(0) || requested_host_port == Some(0) {
+            bail!("container and host ports must be between 1 and 65535");
         }
-        if requested_host_port == Some(0) {
-            bail!("host port must be between 1 and 65535");
+        if container_port.is_none() && requested_host_port.is_some() {
+            bail!("a host port requires a container port");
         }
+        if let Some(command) = start_command {
+            validate_shell_command(command)?;
+        }
+        validate_volumes(volumes)?;
         let request = RunContainerRequest {
             image: image.to_owned(),
             name: name.to_owned(),
@@ -323,11 +331,46 @@ impl ContainerBackend for AgentBackend {
             env: env.clone(),
             cpu_limit: resources.cpu,
             memory_limit_bytes: resources.memory_bytes,
+            start_command: start_command.map(str::to_owned),
+            volumes: volumes.to_vec(),
         };
         let response: RunContainerResponse = self
             .post("/v1/docker/containers/run", &request, RUN_TIMEOUT)
             .await?;
         Ok(RunResult::from(response))
+    }
+
+    async fn release_container(
+        &self,
+        endpoint: &str,
+        image: &str,
+        name: &str,
+        env: &std::collections::HashMap<String, String>,
+        volumes: &[ContainerVolume],
+        command: &str,
+    ) -> Result<ReleaseResult> {
+        ensure_local_endpoint(endpoint)?;
+        validate_image_reference(image)?;
+        validate_container_name(name)?;
+        validate_volumes(volumes)?;
+        validate_shell_command(command)?;
+        if command.is_empty() {
+            bail!("release command must not be empty");
+        }
+        let request = ReleaseContainerRequest {
+            image: image.to_owned(),
+            name: name.to_owned(),
+            env: env.clone(),
+            volumes: volumes.to_vec(),
+            command: command.to_owned(),
+        };
+        let response: ReleaseContainerResponse = self
+            .post("/v1/docker/containers/release", &request, RUN_TIMEOUT)
+            .await?;
+        Ok(ReleaseResult {
+            exit_code: response.exit_code,
+            logs: response.logs,
+        })
     }
 
     async fn inspect_container(&self, endpoint: &str, name: &str) -> Result<DockerInspect> {

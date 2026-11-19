@@ -6,6 +6,7 @@ pub(crate) mod app_deploy;
 pub(crate) mod app_form;
 mod app_publish;
 mod app_runtime;
+mod app_runtime_form;
 mod apps;
 mod auth;
 mod container_detail;
@@ -261,8 +262,10 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
         "assets/hakobi.js",
         "assets/hakobi-charts.js",
         "assets/hakobi-metrics.js",
+        "assets/hakobi-source.js",
         "assets/hakobi-github.js",
         "assets/hakobi-app-form.js",
+        "assets/hakobi-runtime-form.js",
         "assets/hakobi-actions.js",
         "assets/hakobi-publish.js",
         "assets/build-terminal.css",

@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 
 use super::{payload_value, rejection, sample_request};
 use crate::buildrunner::payload::{BuildKind, BuildPayload, MAX_BRANCH_LEN};
+use crate::buildrunner::validate_public_git_url;
 
 #[test]
 fn dockerfile_payload_contains_optional_fields() {
@@ -119,6 +120,27 @@ fn git_url_transport_is_restricted() {
             BuildPayload::for_request(BuildKind::Dockerfile, &request).is_ok(),
             "expected acceptance for {value:?}"
         );
+    }
+}
+
+#[test]
+fn public_git_urls_are_https_and_credential_free() {
+    for value in [
+        "https://github.com/acme/app.git",
+        "https://gitlab.com/acme/app.git",
+        "https://codeberg.org/acme/app",
+    ] {
+        assert!(validate_public_git_url(value).is_ok(), "URL: {value}");
+    }
+    for value in [
+        "http://github.com/acme/app.git",
+        "ssh://git@github.com/acme/app.git",
+        "https://user@github.com/acme/app.git",
+        "https://user:secret@github.com/acme/app.git",
+        "https://github.com/acme/app.git?token=secret",
+        "https://github.com/acme/app.git#main",
+    ] {
+        assert!(validate_public_git_url(value).is_err(), "URL: {value}");
     }
 }
 

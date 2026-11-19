@@ -430,3 +430,35 @@ async fn streamed_runner_logs_are_persisted_with_their_stages() {
         .iter()
         .any(|log| { log.level == "info" && log.message == "[build] compiled image" }));
 }
+
+#[tokio::test]
+async fn failed_release_does_not_replace_the_running_container() {
+    let runner = scripted_runner(PipelineScript::Ok {
+        image_id: "sha256:abc123".to_owned(),
+        exit_code: 0,
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("catalog.sqlite3");
+    let backend = Arc::new(PipelineBackend::new());
+    let app = super::router_with_pipeline(config(), path.clone(), backend.clone(), Some(runner))
+        .expect("router build");
+    let (_, app_id) = seed_app(&path, None);
+    let (authenticated, csrf) = sign_in(&app).await;
+    post_deploy(&app, &app_id, &authenticated, &csrf).await;
+    assert_eq!(await_terminal(&path, &app_id).await, "running");
+    assert_eq!(backend.call_counts(), (0, 1));
+
+    let mut catalog = hakobi::catalog::Catalog::open(&path).unwrap();
+    catalog
+        .set_app_runtime(&app_id, None, Some("exit 17"), &[], &[])
+        .unwrap();
+    backend.fail_release();
+    post_deploy(&app, &app_id, &authenticated, &csrf).await;
+    assert_eq!(await_terminal(&path, &app_id).await, "failed");
+    assert_eq!(backend.call_counts(), (1, 1));
+    let deployment = catalog.get_latest_deployment(&app_id).unwrap().unwrap();
+    let logs = catalog.list_deployment_logs(&deployment.id).unwrap();
+    assert!(logs.iter().any(|log| log
+        .message
+        .contains("release command exited with status 17")));
+}

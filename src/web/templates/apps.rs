@@ -278,6 +278,11 @@ fn app_build_card(app: &App) -> Markup {
 }
 
 fn app_source_card(app: &App) -> Markup {
+    let public = app
+        .github_repo
+        .as_deref()
+        .is_some_and(|repo| repo.starts_with("https://"));
+    let automatic = app.github_auto_deploy && !public;
     html! {
         article class="rounded-[0.85rem] border border-line bg-surface/45 p-5" {
             h2 class="m-0 mb-3 text-[0.95rem] font-bold" { "Source" }
@@ -286,8 +291,8 @@ fn app_source_card(app: &App) -> Markup {
                 @if let Some(branch) = &app.github_branch {
                     p class="m-0 mt-1 text-sm text-muted" { "Branch: " span class="font-semibold text-ink" { (branch) } }
                 }
-                span class=(format!("mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[0.68rem] font-semibold {}", if app.github_auto_deploy { "bg-brand-bright/10 text-brand" } else { "bg-slate-500/10 text-slate-600" })) {
-                    @if app.github_auto_deploy { "Auto-deploy on push" } @else { "Manual deploys only" }
+                span class=(format!("mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[0.68rem] font-semibold {}", if automatic { "bg-brand-bright/10 text-brand" } else { "bg-slate-500/10 text-slate-600" })) {
+                    @if automatic { "Auto-deploy on push" } @else { "Manual deploys only" }
                 }
             } @else {
                 p class="m-0 text-sm text-muted" { "No repository linked yet." }
@@ -311,6 +316,10 @@ fn app_webhook_card(base_url: &str, app: &App) -> Markup {
 }
 
 fn app_deploy_card(app: &App, previous: Option<&Deployment>, csrf_token: &str) -> Markup {
+    let public = app
+        .github_repo
+        .as_deref()
+        .is_some_and(|repo| repo.starts_with("https://"));
     html! {
         article class="rounded-[0.85rem] border border-line bg-surface/45 p-5" {
             h2 class="m-0 mb-3 text-[0.95rem] font-bold" { "Deploy" }
@@ -318,7 +327,7 @@ fn app_deploy_card(app: &App, previous: Option<&Deployment>, csrf_token: &str) -
                 input type="hidden" name="csrf_token" value=(csrf_token);
                 button class="rounded-lg bg-brand px-3.5 py-2 text-[0.78rem] font-semibold text-white transition hover:bg-[#0f4130]" type="submit" {
                     i class="fa-solid fa-rocket mr-2" aria-hidden="true" {}
-                    "Deploy"
+                    @if public { "Deploy latest" } @else { "Deploy" }
                 }
             }
             @if let Some(previous) = previous {

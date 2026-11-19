@@ -93,11 +93,11 @@ anything new.
   Selected rows use a restrained green border/tint.
 - Environment variables use repeatable rows, never a JSON textarea as the
   primary UI. Desktop proportions: Type 3/12, Name 4/12, Value 4/12, remove
-  1/12. Use Variable only unless real encrypted Secret support exists.
-- Variable rows provide Name and Value placeholders, a red remove action, and
-  an Add variable action. On mobile each row becomes a readable stacked group.
-  Preserve exact string values, reject duplicate/invalid names inline, and keep
-  example-file values blank.
+  1/12. Rows preserve exact string values, reject duplicate/invalid names, and
+  keep example-file values blank. On mobile each row becomes a stacked group.
+- Plain variables and encrypted Secret rows are distinct. Secret values are
+  write-only, blank edits preserve them, and they are never rerendered. Never
+  offer Secret semantics without encrypted catalog-vault storage.
 - Port mapping uses Host port (optional) and Container port controls beside the
   build type. Blank host port displays Automatic; custom values are explicit.
   Helper text states loopback-only binding and automatic allocation. Review and

@@ -6,14 +6,14 @@ use std::time::Duration;
 use anyhow::{bail, Context, Result};
 
 use hakobi::buildrunner::{BuildLogEvent, BuildRequest, BuildResponse};
-use hakobi::providers::{docker::validate_image_reference, ResourceLimits};
+use hakobi::providers::{docker::validate_image_reference, ContainerVolume, ResourceLimits};
 
 use super::stages::{
     container_name_for, BuildContext, STAGE_BUILDING, STAGE_DEPLOYING, STAGE_FAILED, STAGE_RUNNING,
 };
-use hakobi::catalog::Catalog;
+use hakobi::catalog::{volume_name_for, AppVolume, Catalog};
 
-use super::{run_catalog_op, DeploymentGuard, ExecutorDeps};
+use super::{processes, run_catalog_op, DeploymentGuard, ExecutorDeps};
 
 /// Pause after starting the container before the first state poll.
 const CONTAINER_SETTLE: Duration = Duration::from_secs(2);
@@ -44,6 +44,17 @@ pub(super) async fn run_pipeline(
         &format!("built image {image_tag}"),
     )
     .await?;
+    if let Err(error) = processes::prepare_volumes(deps, &context, app_id).await {
+        return fail(
+            deps,
+            deployment_id,
+            &format!("volume preparation failed: {error:#}"),
+        )
+        .await;
+    }
+    if let Err(error) = processes::run_release(deps, deployment_id, &context, &image_tag).await {
+        return fail(deps, deployment_id, &format!("release failed: {error:#}")).await;
+    }
     let deployed =
         match deploy_image(deps, guard, app_id, deployment_id, &context, &image_tag).await {
             Ok(deployed) => deployed,
@@ -196,7 +207,7 @@ async fn persist_build_response(
     Ok(())
 }
 
-async fn clear_previous_container(
+pub(super) async fn clear_previous_container(
     deps: &ExecutorDeps,
     deployment_id: &str,
     endpoint: &str,
@@ -253,34 +264,34 @@ async fn deploy_image(
     if !deployment_is_active(deps, deployment_id).await? {
         return Ok(false);
     }
-    let env: std::collections::HashMap<String, String> = serde_json::from_str(&context.env_json)
-        .context("app environment must be a JSON object with string values")?;
     let run = deps
         .backend
         .run_container(
             endpoint,
             image_tag,
             &container_name,
-            context.container_port,
+            Some(context.container_port),
             context.requested_host_port,
-            &env,
+            &context.environment,
             context.resources,
+            context.start_command.as_deref(),
+            &context.volumes,
         )
         .await
         .context("agent could not start the new container")?;
-    let host_port = run.host_port;
+    let host_port = run
+        .host_port
+        .context("web process did not publish a host port")?;
     persist_host_port(deps, app_id, host_port);
     super::stages::log(
         deps,
         deployment_id,
         "info",
-        &format!(
-            "container {} started on host port {}",
-            run.name, run.host_port
-        ),
+        &format!("container {} started on host port {}", run.name, host_port),
     )
     .await?;
     verify_running(deps, endpoint, &container_name, image_tag).await?;
+    processes::deploy_workers(deps, deployment_id, app_id, context, image_tag).await?;
     transition(deps, deployment_id, STAGE_RUNNING, "Deployment is running").await
 }
 
@@ -293,7 +304,7 @@ fn persist_host_port(deps: &ExecutorDeps, app_id: &str, host_port: u16) {
 
 /// Polls the backend until the container reports `running` with the deployed
 /// image, or the verification budget elapses.
-async fn verify_running(
+pub(super) async fn verify_running(
     deps: &ExecutorDeps,
     endpoint: &str,
     container_name: &str,
@@ -379,6 +390,28 @@ async fn deployment_is_active(deps: &ExecutorDeps, deployment_id: &str) -> Resul
 }
 
 /// Reads everything the build stage needs in one catalog pass.
+fn runtime_volume(app_id: &str, volume: &AppVolume) -> ContainerVolume {
+    ContainerVolume {
+        name: volume_name_for(app_id, &volume.name),
+        mount_path: volume.mount_path.clone(),
+        read_only: volume.read_only,
+    }
+}
+
+fn app_git_url(app: &hakobi::catalog::App) -> Result<String> {
+    app.github_repo
+        .as_deref()
+        .map(|repo| {
+            if repo.starts_with("https://") {
+                repo.to_owned()
+            } else {
+                format!("https://github.com/{repo}.git")
+            }
+        })
+        .filter(|url| !url.trim().is_empty())
+        .context("app has no repository configured")
+}
+
 async fn load_build_context(
     deps: &ExecutorDeps,
     app_id: &str,
@@ -394,12 +427,7 @@ async fn load_build_context(
         let deployment = catalog
             .get_deployment(&deployment_id)?
             .context("deployment record disappeared mid-deployment")?;
-        let git_url = app
-            .github_repo
-            .as_deref()
-            .map(|repo| format!("https://github.com/{repo}.git"))
-            .filter(|url| !url.trim().is_empty())
-            .context("app has no GitHub repository configured")?;
+        let git_url = app_git_url(&app)?;
         let build_type = app.build_type.clone();
         let is_compose = build_type == "compose";
         Ok(BuildContext {
@@ -410,7 +438,15 @@ async fn load_build_context(
                 cpu: app.cpu_limit,
                 memory_bytes: app.memory_limit_bytes,
             },
-            env_json: app.env_json.clone(),
+            environment: catalog.app_environment(&app)?,
+            start_command: app.start_command.clone(),
+            release_command: app.release_command.clone(),
+            volumes: catalog
+                .list_app_volumes(&app_id)?
+                .iter()
+                .map(|volume| runtime_volume(&app_id, volume))
+                .collect(),
+            processes: catalog.list_app_processes(&app_id)?,
             build_type,
             branch: app
                 .github_branch

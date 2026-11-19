@@ -169,14 +169,16 @@ impl ContainerBackend for FakeBackend {
         _endpoint: &str,
         _image: &str,
         name: &str,
-        _container_port: u16,
+        _container_port: Option<u16>,
         _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: ResourceLimits,
+        _start_command: Option<&str>,
+        _volumes: &[hakobi::providers::ContainerVolume],
     ) -> anyhow::Result<RunResult> {
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),
-            host_port: 18050,
+            host_port: Some(18050),
             name: name.to_owned(),
         })
     }
@@ -186,13 +188,31 @@ impl ContainerBackend for FakeBackend {
 /// running with the deployed image, so the executor's verification passes.
 pub(crate) struct PipelineBackend {
     deployed: tokio::sync::Mutex<Option<(String, String)>>,
+    release_exit_code: std::sync::atomic::AtomicI64,
+    release_calls: std::sync::atomic::AtomicUsize,
+    run_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl PipelineBackend {
     pub(crate) fn new() -> Self {
         Self {
             deployed: tokio::sync::Mutex::new(None),
+            release_exit_code: std::sync::atomic::AtomicI64::new(0),
+            release_calls: std::sync::atomic::AtomicUsize::new(0),
+            run_calls: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    pub(crate) fn fail_release(&self) {
+        self.release_exit_code
+            .store(17, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn call_counts(&self) -> (usize, usize) {
+        (
+            self.release_calls.load(std::sync::atomic::Ordering::SeqCst),
+            self.run_calls.load(std::sync::atomic::Ordering::SeqCst),
+        )
     }
 }
 
@@ -297,16 +317,39 @@ impl ContainerBackend for PipelineBackend {
         _endpoint: &str,
         image: &str,
         name: &str,
-        _container_port: u16,
+        _container_port: Option<u16>,
         _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: ResourceLimits,
+        _start_command: Option<&str>,
+        _volumes: &[hakobi::providers::ContainerVolume],
     ) -> anyhow::Result<RunResult> {
+        self.run_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *self.deployed.lock().await = Some((name.to_owned(), image.to_owned()));
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),
-            host_port: 18050,
+            host_port: Some(18050),
             name: name.to_owned(),
+        })
+    }
+
+    async fn release_container(
+        &self,
+        _endpoint: &str,
+        _image: &str,
+        _name: &str,
+        _env: &std::collections::HashMap<String, String>,
+        _volumes: &[hakobi::providers::ContainerVolume],
+        _command: &str,
+    ) -> anyhow::Result<hakobi::providers::ReleaseResult> {
+        self.release_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(hakobi::providers::ReleaseResult {
+            exit_code: self
+                .release_exit_code
+                .load(std::sync::atomic::Ordering::SeqCst),
+            logs: "release output".into(),
         })
     }
 }

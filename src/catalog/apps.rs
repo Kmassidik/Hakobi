@@ -27,6 +27,8 @@ pub struct App {
     pub container_port: Option<u16>,
     /// Requested loopback host port; None selects an automatic port per deployment.
     pub requested_host_port: Option<u16>,
+    pub start_command: Option<String>,
+    pub release_command: Option<String>,
     /// Maximum CPU cores; None leaves the container unlimited.
     pub cpu_limit: Option<f64>,
     /// Maximum memory in bytes; None leaves the container unlimited.
@@ -145,13 +147,16 @@ fn read_app_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<App> {
         runtime_status: row.get(19)?,
         subdomain: row.get(20)?,
         requested_host_port: row.get::<_, Option<i64>>(21)?.map(|v| v as u16),
+        start_command: row.get(22)?,
+        release_command: row.get(23)?,
     })
 }
 
 const APP_COLUMNS: &str = "id, name, host_id, build_type, github_repo, \
      github_branch, github_path, github_dockerfile, github_auto_deploy, container_port, host_port, \
      env_json, status, webhook_secret, webhook_enabled, created_at, updated_at, \
-     cpu_limit, memory_limit_bytes, runtime_status, subdomain, requested_host_port";
+     cpu_limit, memory_limit_bytes, runtime_status, subdomain, requested_host_port, \
+     start_command, release_command";
 
 impl Catalog {
     /// Replaces the app's container environment variables (JSON object).

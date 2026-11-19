@@ -5,7 +5,8 @@ use async_trait::async_trait;
 
 use crate::providers::agent::RoutingBackend;
 use crate::providers::docker::{
-    ContainerBackend, ContainerRow, DockerSnapshot, ResourceLimits, RunResult,
+    ContainerBackend, ContainerRow, ContainerVolume, DockerSnapshot, ReleaseResult, ResourceLimits,
+    RunResult,
 };
 
 /// Backend that records which endpoint it was asked to serve.
@@ -84,12 +85,26 @@ impl ContainerBackend for StubBackend {
         _endpoint: &str,
         _image: &str,
         _name: &str,
-        _container_port: u16,
+        _container_port: Option<u16>,
         _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: ResourceLimits,
+        _start_command: Option<&str>,
+        _volumes: &[ContainerVolume],
     ) -> Result<RunResult> {
         bail!("{} run", self.0)
+    }
+
+    async fn release_container(
+        &self,
+        _endpoint: &str,
+        _image: &str,
+        _name: &str,
+        _env: &std::collections::HashMap<String, String>,
+        _volumes: &[ContainerVolume],
+        _command: &str,
+    ) -> Result<ReleaseResult> {
+        bail!("{} release", self.0)
     }
 }
 
@@ -99,6 +114,23 @@ fn routing(agent: Option<&'static str>) -> RoutingBackend {
         agent.map(|label| Arc::new(StubBackend(label)) as Arc<dyn ContainerBackend>),
         None,
     )
+}
+
+async fn assert_agent_run_rejected(backend: &RoutingBackend) {
+    assert!(backend
+        .run_container(
+            "agent://local",
+            "alpine:3.20",
+            "demo",
+            Some(80),
+            None,
+            &std::collections::HashMap::new(),
+            ResourceLimits::default(),
+            None,
+            &[],
+        )
+        .await
+        .is_err());
 }
 
 #[tokio::test]
@@ -138,18 +170,7 @@ async fn routing_dispatches_by_endpoint_scheme() {
         "agent remove image"
     );
     assert!(backend.snapshot("agent://local").await.is_err());
-    assert!(backend
-        .run_container(
-            "agent://local",
-            "alpine:3.20",
-            "demo",
-            80,
-            None,
-            &std::collections::HashMap::new(),
-            ResourceLimits::default(),
-        )
-        .await
-        .is_err());
+    assert_agent_run_rejected(&backend).await;
 }
 
 #[tokio::test]

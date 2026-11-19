@@ -11,6 +11,8 @@ mod github;
 mod hosts;
 mod migrations;
 mod providers;
+mod runtime;
+mod secrets;
 mod settings;
 mod vault;
 
@@ -29,6 +31,11 @@ pub use deployments::{
 pub use github::{GithubApp, GithubConnection};
 pub use hosts::HostAgent;
 pub use providers::ProviderConnection;
+pub use runtime::{
+    validate_command, validate_runtime_options, volume_name_for, worker_container_name, AppProcess,
+    AppVolume,
+};
+pub use secrets::validate_secret_name;
 
 use audit::{new_id, record_audit, record_created};
 

@@ -33,6 +33,10 @@ pub(super) fn app(state: AgentState) -> Router {
         )
         .route("/v1/docker/snapshot", get(docker::docker_snapshot))
         .route("/v1/docker/containers/run", post(docker::docker_run))
+        .route(
+            "/v1/docker/containers/release",
+            post(docker::docker_release),
+        )
         .merge(auxiliary_routes())
         .route(
             "/v1/docker/containers/{name}/start",

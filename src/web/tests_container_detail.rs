@@ -1,3 +1,7 @@
+use super::{
+    router_with_backend,
+    tests_support::{body_text, config, sign_in},
+};
 use async_trait::async_trait;
 use axum::{
     body::Body,
@@ -13,12 +17,6 @@ use hakobi::{
 use std::sync::Arc;
 use tempfile::TempDir;
 use tower::ServiceExt;
-
-use super::{
-    router_with_backend,
-    tests_support::{body_text, config, sign_in},
-};
-
 /// Backend that answers the container detail reads with fixed data, so the
 /// detail page, stats partial, and logs partial can be rendered without a
 /// Docker daemon.
@@ -215,14 +213,16 @@ impl ContainerBackend for DetailBackend {
         _endpoint: &str,
         _image: &str,
         name: &str,
-        _container_port: u16,
+        _container_port: Option<u16>,
         _requested_host_port: Option<u16>,
         _env: &std::collections::HashMap<String, String>,
         _resources: hakobi::providers::ResourceLimits,
+        _start_command: Option<&str>,
+        _volumes: &[hakobi::providers::ContainerVolume],
     ) -> anyhow::Result<RunResult> {
         Ok(RunResult {
             container_id: "fedcba9876543210".into(),
-            host_port: 18050,
+            host_port: Some(18050),
             name: name.to_owned(),
         })
     }

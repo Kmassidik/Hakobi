@@ -176,7 +176,7 @@ fn catalog_persists_apps_across_reopen() {
     let app_id;
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 17);
+        assert_eq!(catalog.schema_version().expect("schema version"), 18);
         let host_id = catalog
             .create_host_agent("apps-host", "https://apps.example.com", "tok_apps_0123456")
             .expect("create host");
@@ -213,7 +213,7 @@ fn catalog_persists_apps_across_reopen() {
     }
 
     let catalog = Catalog::open(&path).expect("reopen catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 17);
+    assert_eq!(catalog.schema_version().expect("schema version"), 18);
     assert_eq!(catalog.list_apps().expect("list apps").len(), 1);
 }
 
@@ -254,7 +254,7 @@ fn schema_v16_apps_default_to_automatic_host_ports() {
 
     let catalog = Catalog::open(&path).unwrap();
     let app = catalog.get_app(&app_id).unwrap().unwrap();
-    assert_eq!(catalog.schema_version().unwrap(), 17);
+    assert_eq!(catalog.schema_version().unwrap(), 18);
     assert_eq!(app.container_port, Some(3000));
     assert_eq!(app.requested_host_port, None);
 }
@@ -324,7 +324,7 @@ fn schema_v12_apps_gain_unlimited_resource_columns() {
     drop(connection);
 
     let catalog = Catalog::open(&path).expect("migrate catalog");
-    assert_eq!(catalog.schema_version().expect("schema version"), 17);
+    assert_eq!(catalog.schema_version().expect("schema version"), 18);
     drop(catalog);
     let connection = rusqlite::Connection::open(&path).expect("reopen database");
     let mut statement = connection.prepare("PRAGMA table_info(apps)").unwrap();
@@ -355,7 +355,7 @@ fn apps_crud_round_trip() {
 
     {
         let mut catalog = Catalog::open(&path).expect("open catalog");
-        assert_eq!(catalog.schema_version().expect("schema version"), 17);
+        assert_eq!(catalog.schema_version().expect("schema version"), 18);
         let (app_id, host_id) = create_and_load_crud_app(&mut catalog);
         catalog.set_app_host_port(&app_id, Some(19000)).unwrap();
 
