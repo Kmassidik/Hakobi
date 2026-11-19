@@ -64,12 +64,11 @@ async fn write_release_logs(
     Ok(())
 }
 
-pub(super) async fn deploy_workers(
+async fn clear_stale_workers(
     deps: &ExecutorDeps,
     deployment_id: &str,
     app_id: &str,
     context: &BuildContext,
-    image_tag: &str,
 ) -> Result<()> {
     let prefix = format!("hakobi-{app_id}-worker-");
     let existing = deps.backend.containers(&context.deploy_endpoint).await?;
@@ -82,6 +81,17 @@ pub(super) async fn deploy_workers(
         )
         .await?;
     }
+    Ok(())
+}
+
+pub(super) async fn deploy_workers(
+    deps: &ExecutorDeps,
+    deployment_id: &str,
+    app_id: &str,
+    context: &BuildContext,
+    image_tag: &str,
+) -> Result<()> {
+    clear_stale_workers(deps, deployment_id, app_id, context).await?;
     for process in &context.processes {
         let name = worker_container_name(app_id, &process.name);
         super::executor::clear_previous_container(

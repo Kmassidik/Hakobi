@@ -1,6 +1,7 @@
 use axum::{
     body::Body,
     http::{header::COOKIE, Request, StatusCode},
+    Router,
 };
 use hakobi::catalog::Catalog;
 use tower::ServiceExt;
@@ -32,6 +33,25 @@ fn runtime_payload(host_id: &str, csrf: &str) -> String {
         .map(|(key, value)| format!("{key}={}", form_encode(value)))
         .collect::<Vec<_>>()
         .join("&")
+}
+
+async fn assert_edit_form(app: &Router, authenticated: &str, app_id: &str) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/apps/{app_id}/edit"))
+                .header(COOKIE, authenticated)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = body_text(response, 128 * 1024).await;
+    assert!(body.contains("DATABASE_URL"));
+    assert!(body.contains("npm run worker"));
+    assert!(body.contains("/var/lib/app"));
+    assert!(!body.contains("postgres://private"));
+    assert!(body.contains("data-secret-value"));
 }
 
 #[tokio::test]
@@ -77,22 +97,7 @@ async fn runtime_options_persist_and_secrets_stay_write_only() {
         Some("postgres://private")
     );
 
-    let response = app
-        .clone()
-        .oneshot(
-            Request::get(format!("/apps/{}/edit", app_record.id))
-                .header(COOKIE, &authenticated)
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let body = body_text(response, 128 * 1024).await;
-    assert!(body.contains("DATABASE_URL"));
-    assert!(body.contains("npm run worker"));
-    assert!(body.contains("/var/lib/app"));
-    assert!(!body.contains("postgres://private"));
-    assert!(body.contains("data-secret-value"));
+    assert_edit_form(&app, &authenticated, &app_record.id).await;
 }
 
 #[tokio::test]

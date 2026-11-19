@@ -183,8 +183,7 @@ impl Catalog {
 mod tests {
     use super::*;
 
-    #[test]
-    fn runtime_options_round_trip_and_reject_unsafe_mounts() {
+    fn app() -> (tempfile::TempDir, Catalog, String) {
         let directory = tempfile::tempdir().unwrap();
         let mut catalog = Catalog::open(directory.path().join("catalog.sqlite3")).unwrap();
         catalog.connection.execute(
@@ -207,6 +206,12 @@ mod tests {
                 None,
             )
             .unwrap();
+        (directory, catalog, app_id)
+    }
+
+    #[test]
+    fn runtime_options_round_trip() {
+        let (_directory, mut catalog, app_id) = app();
         let volume = AppVolume {
             name: "data".into(),
             mount_path: "/var/lib/demo".into(),
@@ -225,10 +230,7 @@ mod tests {
                 std::slice::from_ref(&process),
             )
             .unwrap();
-        assert_eq!(
-            catalog.list_app_volumes(&app_id).unwrap(),
-            vec![volume.clone()]
-        );
+        assert_eq!(catalog.list_app_volumes(&app_id).unwrap(), vec![volume]);
         assert_eq!(catalog.list_app_processes(&app_id).unwrap(), vec![process]);
         assert_eq!(
             catalog
@@ -239,17 +241,18 @@ mod tests {
                 .as_deref(),
             Some("npm start")
         );
+    }
+
+    #[test]
+    fn unsafe_mount_is_rejected() {
+        let (_directory, mut catalog, app_id) = app();
+        let volume = AppVolume {
+            name: "data".into(),
+            mount_path: "../host".into(),
+            read_only: false,
+        };
         assert!(catalog
-            .set_app_runtime(
-                &app_id,
-                None,
-                None,
-                &[AppVolume {
-                    mount_path: "../host".into(),
-                    ..volume
-                }],
-                &[],
-            )
+            .set_app_runtime(&app_id, None, None, &[volume], &[])
             .is_err());
     }
 }
