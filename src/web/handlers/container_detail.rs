@@ -110,16 +110,21 @@ async fn redact_detail(
     Ok(inspect)
 }
 
+fn managed_app_id(inspect: &hakobi::providers::DockerInspect) -> Option<String> {
+    let name = inspect
+        .name
+        .trim_start_matches('/')
+        .strip_prefix("hakobi-")?;
+    let app_id = name.get(..36)?;
+    uuid::Uuid::parse_str(app_id).ok()?;
+    Some(app_id.to_owned())
+}
+
 async fn redact_managed_secrets(
     state: &AppState,
     inspect: &mut hakobi::providers::DockerInspect,
 ) -> anyhow::Result<()> {
-    let Some(app_id) = inspect
-        .labels
-        .iter()
-        .find(|(key, _)| key == hakobi::providers::APP_OWNER_LABEL)
-        .map(|(_, value)| value.clone())
-    else {
+    let Some(app_id) = managed_app_id(inspect) else {
         return Ok(());
     };
     let names =
@@ -249,12 +254,17 @@ mod tests {
     #[test]
     fn managed_secret_values_are_masked() {
         let mut inspect = hakobi::providers::DockerInspect {
+            name: "hakobi-2b85234e-b896-4d72-b166-06694b27c6da-worker-worker".into(),
             env: vec![
                 "DATABASE_URL=postgres://private".into(),
                 "RUST_LOG=info".into(),
             ],
             ..Default::default()
         };
+        assert_eq!(
+            super::managed_app_id(&inspect).as_deref(),
+            Some("2b85234e-b896-4d72-b166-06694b27c6da")
+        );
         super::redact_environment(&mut inspect, &["DATABASE_URL".into()]);
         assert_eq!(inspect.env[0], "DATABASE_URL=[redacted]");
         assert_eq!(inspect.env[1], "RUST_LOG=info");
