@@ -172,8 +172,11 @@ async fn check_edit_form(app: &Router, authenticated: &str, app_id: &str) {
     assert!(!body.contains("data-step-progress"));
     assert!(!body.contains("data-step-navigation"));
     assert!(!body.contains("data-summary="));
-    for step in 1..=4 {
-        assert!(body.contains(&format!("data-app-step=\"{step}\"")));
+    assert!(body.contains("data-settings-form"));
+    assert!(body.contains("data-settings-footer"));
+    assert!(!body.contains("data-app-step="));
+    for tab in ["general", "source", "build", "processes", "data"] {
+        assert!(body.contains(&format!("data-settings-panel=\"{tab}\"")));
     }
 }
 

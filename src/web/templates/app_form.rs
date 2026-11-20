@@ -2,6 +2,7 @@
 
 mod fields;
 mod runtime;
+mod settings;
 mod wizard;
 
 use maud::{html, Markup};
@@ -18,6 +19,7 @@ pub struct AppFormValues {
     pub host_id: String,
     pub build_type: String,
     pub source_kind: String,
+    pub settings_tab: String,
     pub github_repo: String,
     pub github_branch: String,
     pub github_path: String,
@@ -147,20 +149,24 @@ fn app_form_fields(
     guided: bool,
 ) -> Markup {
     html! {
-        form method="post" action=(action) data-app-form data-app-stepper[guided] class="mt-6" {
+        form method="post" action=(action) data-app-form data-app-stepper[guided] data-settings-form[!guided] class="mt-6" {
             input type="hidden" name="csrf_token" value=(csrf_token);
             @if guided {
                 (wizard::stepper_navigation())
                 p data-step-error role="alert" class="mb-0 mt-3 min-h-5 text-[13px] text-danger" {}
             }
-            div class=(if guided { "mt-2 grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start" } else { "mt-6" }) {
-                div class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm lg:col-span-8" {
-                    (step_panel(1, "Source", "Choose a connected repository or enter a public HTTPS clone URL.", github_source_fields(values), guided, submit_label))
-                    (step_panel(2, "Name your app", "Choose a recognizable name and an enrolled host for the app.", app_identity_fields(hosts, values), guided, submit_label))
-                    (step_panel(3, "Configure the build", "Set the runtime, port, environment, and build paths.", build_settings_fields(values), guided, submit_label))
-                    (step_panel(4, "Resources and review", "Choose an allocation and deployment policy, then review the recipe.", resources_and_review(values, guided), guided, submit_label))
+            @if guided {
+                div class="mt-2 grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start" {
+                    div class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm lg:col-span-8" {
+                        (step_panel(1, "Source", "Choose a connected repository or enter a public HTTPS clone URL.", github_source_fields(values), true, submit_label))
+                        (step_panel(2, "Name your app", "Choose a recognizable name and an enrolled host for the app.", app_identity_fields(hosts, values), true, submit_label))
+                        (step_panel(3, "Configure the build", "Set the runtime, port, environment, and build paths.", build_settings_fields(values), true, submit_label))
+                        (step_panel(4, "Resources and review", "Choose an allocation and deployment policy, then review the recipe.", resources_and_review(values, true), true, submit_label))
+                    }
+                    (wizard::recipe_summary(hosts, values))
                 }
-                @if guided { (wizard::recipe_summary(hosts, values)) }
+            } @else {
+                (settings::edit_settings(hosts, values, action, submit_label))
             }
         }
     }
@@ -196,8 +202,6 @@ fn step_panel(
             div class="grid gap-5 p-6" { (body) }
             @if guided {
                 (step_navigation(number, submit_label))
-            } @else if number == 4 {
-                (edit_actions(submit_label))
             }
         }
     }
@@ -221,15 +225,6 @@ fn step_navigation(step: u8, submit_label: &str) -> Markup {
                     button class=(PRIMARY_BUTTON) type="submit" { (submit_label) }
                 }
             }
-        }
-    }
-}
-
-fn edit_actions(submit_label: &str) -> Markup {
-    html! {
-        div class="flex items-center justify-end gap-3 border-t border-zinc-200 bg-zinc-50 px-6 py-4" data-step-submit {
-            a class="text-[12px] font-semibold text-zinc-500 no-underline hover:text-zinc-950" href="/apps" { "Cancel" }
-            button class=(PRIMARY_BUTTON) type="submit" { (submit_label) }
         }
     }
 }

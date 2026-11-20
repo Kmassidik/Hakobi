@@ -101,6 +101,49 @@ async fn runtime_options_persist_and_secrets_stay_write_only() {
 }
 
 #[tokio::test]
+async fn edit_tabs_have_native_deep_links_and_server_selected_panels() {
+    let (data, app) = app();
+    let path = data.path().join("catalog.sqlite3");
+    let mut catalog = Catalog::open(&path).unwrap();
+    let host_id = catalog
+        .create_host_agent("runtime-host", "https://runtime.example.com", "tok_runtime")
+        .unwrap();
+    let app_id = catalog
+        .create_app(
+            "runtime-app",
+            &host_id,
+            "dockerfile",
+            Some("owner/repo"),
+            Some("main"),
+            Some("."),
+            Some("Dockerfile"),
+            false,
+            Some(8080),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    drop(catalog);
+    let (authenticated, _) = sign_in(&app).await;
+    let response = app
+        .oneshot(
+            Request::get(format!("/apps/{app_id}/edit?tab=processes"))
+                .header(COOKIE, &authenticated)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = body_text(response, 128 * 1024).await;
+    assert!(body.contains("data-settings-panel=\"general\" hidden"));
+    assert!(body.contains("data-settings-panel=\"processes\" aria-labelledby"));
+    assert!(body.contains("data-settings-link=\"processes\" data-state=\"active\""));
+    assert!(body.contains(&format!("href=\"/apps/{app_id}/edit?tab=data\"")));
+    assert!(body.contains("name=\"settings_tab\" value=\"processes\""));
+}
+
+#[tokio::test]
 async fn unsafe_mounts_and_duplicate_secret_names_are_rejected() {
     let (data, app) = app();
     let path = data.path().join("catalog.sqlite3");

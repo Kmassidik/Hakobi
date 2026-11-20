@@ -97,7 +97,10 @@ shown when multiple hosts are available. Environment variables use add/remove na
 rows; example-file discovery imports names only and preserves manual edits. The
 server wire format remains a JSON object, with native-form fallback when browser
 scripting is unavailable. Editing an existing app remains a fully visible form.
-Creating an app immediately queues its first build and container start. Apps
+Creating an app immediately queues its first build and container start. The
+wizard is creation-only; editing uses deep-linkable General, Source, Build,
+Processes, and Environment & data tabs with a shared sticky save footer and
+native query-link fallback. Switching tabs preserves unsaved values. Apps
 remain private until a running app is explicitly assigned a subdomain; only
 then are managed DNS and tunnel ingress created and public health checked.
 Managed existing DNS/ingress that exactly matches the app's loopback target can

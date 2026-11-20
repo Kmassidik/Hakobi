@@ -16,7 +16,6 @@
     });
     return parsed;
   }
-
   function environmentError(editor, message, field) {
     editor.error.textContent = message;
     editor.rows.querySelectorAll("[data-env-key], [data-env-value]").forEach(function (input) {
@@ -28,14 +27,12 @@
       field.setAttribute("aria-invalid", "true");
     }
   }
-
   function cloneRow(editor, key, value) {
     var row = editor.template.content.querySelector("[data-env-row]").cloneNode(true);
     row.querySelector("[data-env-key]").value = key || "";
     row.querySelector("[data-env-value]").value = value || "";
     return row;
   }
-
   function renderEnvironment(editor, values) {
     var keys = Object.keys(values);
     editor.rows.replaceChildren();
@@ -49,7 +46,6 @@
     editor.input.setCustomValidity("");
     environmentError(editor, "");
   }
-
   function readRows(editor) {
     var values = Object.create(null);
     var seen = new Set();
@@ -76,7 +72,6 @@
     });
     return { values: values, message: message, field: invalidField };
   }
-
   function syncEnvironment(editor, userEdit) {
     var result = readRows(editor);
     editor.input.value = JSON.stringify(result.values);
@@ -87,7 +82,6 @@
     }
     return !result.message;
   }
-
   function importEnvironment(editor) {
     try {
       renderEnvironment(editor, parseEnvironment(editor.input.value));
@@ -372,6 +366,15 @@
   }
 
   function validateSubmission(form, event) {
+    if (form.matches("[data-settings-form]")) {
+      if (!syncFormEnvironment(form)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        form.dispatchEvent(new CustomEvent("hakobi:settings-show", { detail: "data" }));
+        form.reportValidity();
+      }
+      return;
+    }
     if (!form.matches("[data-app-stepper]")) {
       if (!syncFormEnvironment(form) || !form.checkValidity()) {
         event.preventDefault();

@@ -19,6 +19,8 @@ pub(crate) struct AppForm {
     #[serde(default)]
     pub(crate) source_kind: String,
     #[serde(default)]
+    pub(crate) settings_tab: String,
+    #[serde(default)]
     pub(crate) github_repo: String,
     #[serde(default)]
     pub(crate) public_git_url: String,
@@ -71,6 +73,7 @@ pub(crate) fn form_values(form: &AppForm) -> templates::AppFormValues {
         host_id: form.host_id.trim().to_owned(),
         build_type: form.build_type.trim().to_owned(),
         source_kind,
+        settings_tab: settings_tab(&form.settings_tab),
         github_repo: if public && !form.public_git_url.trim().is_empty() {
             form.public_git_url.trim().to_owned()
         } else {
@@ -122,6 +125,7 @@ pub(crate) fn edit_form_values(
     volumes: &[hakobi::catalog::AppVolume],
     processes: &[hakobi::catalog::AppProcess],
     secret_names: &[String],
+    active_tab: &str,
 ) -> templates::AppFormValues {
     let source_kind = edit_source_kind(&app);
     let (volumes_json, processes_json, secrets_json) =
@@ -131,6 +135,7 @@ pub(crate) fn edit_form_values(
         host_id: app.host_id,
         build_type: app.build_type,
         source_kind: source_kind.to_owned(),
+        settings_tab: settings_tab(active_tab),
         github_repo: app.github_repo.unwrap_or_default(),
         github_branch: app.github_branch.unwrap_or_default(),
         github_path: app.github_path.unwrap_or_default(),
@@ -158,6 +163,13 @@ pub(crate) fn edit_form_values(
         volumes_json,
         processes_json,
         secrets_json,
+    }
+}
+
+pub(crate) fn settings_tab(value: &str) -> String {
+    match value {
+        "source" | "build" | "processes" | "data" => value.to_owned(),
+        _ => "general".to_owned(),
     }
 }
 

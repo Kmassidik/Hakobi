@@ -156,7 +156,11 @@
       var invalid = editors.map(function (editor) { return editor.input; }).find(function (input) {
         return input.validationMessage;
       });
-      if (invalid) invalid.reportValidity();
+      if (invalid) {
+        var panel = invalid.closest("[data-settings-panel]");
+        if (panel) invalid.form.dispatchEvent(new CustomEvent("hakobi:settings-show", { detail: panel.dataset.settingsPanel }));
+        invalid.reportValidity();
+      }
     });
     updateReview(form);
   }

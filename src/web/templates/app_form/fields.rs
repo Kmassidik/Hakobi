@@ -143,6 +143,14 @@ pub(super) fn app_identity_fields(hosts: &[HostAgent], values: &AppFormValues) -
 
 pub(super) fn build_settings_fields(values: &AppFormValues) -> Markup {
     html! {
+        (build_configuration_fields(values))
+        (environment_fields(values))
+        (super::runtime::runtime_fields(values))
+    }
+}
+
+pub(super) fn build_configuration_fields(values: &AppFormValues) -> Markup {
+    html! {
         label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
             "Build type"
             select class=(CONTROL) name="build_type" required {
@@ -173,8 +181,6 @@ pub(super) fn build_settings_fields(values: &AppFormValues) -> Markup {
                 }
             }
         }
-        (environment_fields(values))
-        (super::runtime::runtime_fields(values))
         section class="grid gap-5 border-t border-zinc-200 pt-5" aria-labelledby="build-paths-title" {
             h3 id="build-paths-title" class="m-0 text-[13px] font-semibold text-zinc-800" { "Build paths" }
             label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
@@ -191,7 +197,7 @@ pub(super) fn build_settings_fields(values: &AppFormValues) -> Markup {
     }
 }
 
-fn environment_fields(values: &AppFormValues) -> Markup {
+pub(super) fn environment_fields(values: &AppFormValues) -> Markup {
     html! {
         section class="grid gap-4 border-y border-zinc-200 py-5" aria-labelledby="environment-title" {
             label data-env-raw class="grid gap-2 text-[13px] font-semibold text-zinc-800" {

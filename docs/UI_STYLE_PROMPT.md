@@ -70,6 +70,14 @@ anything new.
 - Update summaries after user input and programmatic auto-detection. The summary
   is informational; it must not replace the final review or server validation.
 
+## Application settings pattern
+
+- Keep the guided wizard only for app creation. Existing apps use compact,
+  deep-linkable General, Source, Build, Processes, and Environment & data tabs.
+- Switching tabs preserves unsaved values. A shared sticky footer exposes dirty
+  state, Discard, and Save changes. Native query links and POST remain usable
+  without JavaScript, and validation reveals the tab containing the error.
+
 ## Build terminal pattern
 
 - Place one inline Deployment section on the existing app page, not a modal,

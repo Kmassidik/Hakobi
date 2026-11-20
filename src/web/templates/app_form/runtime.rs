@@ -4,12 +4,24 @@ use super::{AppFormValues, CONTROL};
 
 pub(super) fn runtime_fields(values: &AppFormValues) -> Markup {
     html! {
+        (process_fields(values))
+        (data_fields(values))
+    }
+}
+
+pub(super) fn process_fields(values: &AppFormValues) -> Markup {
+    html! {
         section class="grid gap-5 border-t border-zinc-200 pt-5" aria-labelledby="processes-title" {
             h3 id="processes-title" class="m-0 text-[13px] font-semibold text-zinc-800" { "Processes" }
             (command_field("start_command", "Web start command", &values.start_command, "npm start", "Optional. Runs through /bin/sh -c and replaces the image CMD; the image ENTRYPOINT is preserved."))
             (command_field("release_command", "Release command", &values.release_command, "npm run migrate", "Optional. Runs once after the build and before production containers are replaced. A non-zero exit fails the deployment."))
             (process_editor(values))
         }
+    }
+}
+
+pub(super) fn data_fields(values: &AppFormValues) -> Markup {
+    html! {
         (volume_editor(values))
         (secret_editor(values))
     }

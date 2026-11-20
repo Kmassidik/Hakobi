@@ -64,6 +64,7 @@ pub(crate) fn page(title: &str, content: Markup) -> Markup {
                 script src=(super::handlers::asset_url("hakobi-github.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-app-form.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-runtime-form.js")) defer {}
+                script src=(super::handlers::asset_url("hakobi-settings.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-actions.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-publish.js")) defer {}
                 script src=(super::handlers::asset_url("hakobi-terminal.js")) defer {}

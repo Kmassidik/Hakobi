@@ -65,6 +65,7 @@ pub(crate) async fn app_new(State(state): State<AppState>, headers: HeaderMap) -
             .unwrap_or_default(),
         build_type: "dockerfile".into(),
         source_kind: "connected".into(),
+        settings_tab: "general".into(),
         github_repo: String::new(),
         github_branch: "main".into(),
         github_path: String::new(),
@@ -308,6 +309,7 @@ pub(crate) async fn app_edit_page(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    RawQuery(raw_query): RawQuery,
 ) -> Response {
     if !super::authenticated(&state, &headers).await {
         return axum::response::Redirect::to("/login").into_response();
@@ -334,7 +336,9 @@ pub(crate) async fn app_edit_page(
         Ok(runtime) => runtime,
         Err(error) => return internal_error(error),
     };
-    let values = edit_form_values(app, &volumes, &processes, &secret_names);
+    let query = parse_query(raw_query.as_deref());
+    let active_tab = query.get("tab").map(String::as_str).unwrap_or("general");
+    let values = edit_form_values(app, &volumes, &processes, &secret_names, active_tab);
     render_app_form(
         &state,
         &headers,
