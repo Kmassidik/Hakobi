@@ -52,6 +52,10 @@
     form.addEventListener("hakobi:settings-show", function (event) {
       activate(form, event.detail, false);
     });
+    form.addEventListener("invalid", function (event) {
+      var panel = event.target.closest("[data-settings-panel]");
+      if (panel) activate(form, panel.dataset.settingsPanel, false);
+    }, true);
     form.addEventListener("submit", function (event) {
       if (form.checkValidity()) return;
       event.preventDefault();
