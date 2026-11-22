@@ -2,7 +2,7 @@ use std::sync::{mpsc, Arc};
 
 use axum::{
     body::Body,
-    http::{header::CONTENT_TYPE, header::COOKIE, Request, StatusCode},
+    http::{header::CONTENT_TYPE, header::COOKIE, header::ORIGIN, Request, StatusCode},
     Router,
 };
 use hakobi::{buildrunner::BuildRunnerClient, catalog::Catalog};
@@ -54,7 +54,9 @@ async fn create_public_app(app: &Router, authenticated: &str, csrf: &str, host_i
     assert_eq!(status, StatusCode::OK);
     assert!(page.contains("Your repositories"));
     assert!(page.contains("Public repository"));
-    assert!(page.contains("name=\"github_repo\" type=\"url\""));
+    assert!(page.contains("data-public-repo"));
+    assert!(page.contains("data-public-repo-scan"));
+    assert!(page.contains("data-public-ref-panel hidden"));
     let response = post_form(
         app,
         "/apps",
@@ -365,6 +367,42 @@ async fn github_push_does_not_match_public_url_apps() {
     let catalog = Catalog::open(&path).unwrap();
     assert_eq!(catalog.list_deployments(&connected_id).unwrap().len(), 1);
     assert!(catalog.list_deployments(&public_id).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn public_scan_requires_authentication_csrf_and_an_enabled_host() {
+    let (_data, app) = app();
+    let (authenticated, csrf) = sign_in(&app).await;
+    let body = serde_json::json!({
+        "host_id": "missing", "git_url": "https://github.com/acme/app",
+        "branch": null, "csrf_token": csrf,
+    })
+    .to_string();
+    let forbidden = app
+        .clone()
+        .oneshot(
+            Request::post("/api/public/scan")
+                .header(COOKIE, &authenticated)
+                .header(CONTENT_TYPE, "application/json")
+                .header(ORIGIN, "https://evil.example")
+                .body(Body::from(body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+    let invalid_host = app
+        .oneshot(
+            Request::post("/api/public/scan")
+                .header(COOKIE, authenticated)
+                .header(CONTENT_TYPE, "application/json")
+                .header(ORIGIN, "http://127.0.0.1:3000")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid_host.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

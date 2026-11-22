@@ -139,7 +139,6 @@
     var target = next && next.querySelector("[data-env-key]");
     (target || editor.wrapper.querySelector("[data-env-add]")).focus();
   }
-
   function bindEnvironment(editor) {
     editor.wrapper.querySelector("[data-env-add]").addEventListener("click", function () {
       addEnvironmentRow(editor);
@@ -177,17 +176,14 @@
   function activeField(form, name) {
     return form.querySelector('[name="' + name + '"]:not(:disabled)');
   }
-
   function fieldValue(form, name, fallback) {
     var field = activeField(form, name);
     return field && field.value ? field.value : (fallback || "");
   }
-
   function portMapping(form, containerFallback) {
     var host = fieldValue(form, "requested_host_port", "auto");
     return host + " → " + fieldValue(form, "container_port", containerFallback);
   }
-
   function environmentLabel(form) {
     try {
       var count = Object.keys(parseEnvironment(form.elements.env_json.value)).length;
@@ -196,7 +192,6 @@
       return "Invalid variables";
     }
   }
-
   function updateReview(form) {
     var values = {
       repo: fieldValue(form, "github_repo", "Not selected") + " · " + fieldValue(form, "github_branch", "Not selected"),
@@ -218,7 +213,6 @@
     if (!field.selectedOptions || !field.selectedOptions.length) return field.value;
     return field.selectedOptions[0].textContent.trim();
   }
-
   function updateSummary(form) {
     var autoDeploy = form.elements.github_auto_deploy;
     var cpu = fieldValue(form, "cpu_limit", "—");
@@ -261,7 +255,6 @@
       }
     });
   }
-
   function showStep(form, step) {
     form.dataset.currentStep = String(step);
     form.querySelectorAll("[data-app-step]").forEach(function (panel) {
@@ -288,7 +281,14 @@
     var repo = activeField(form, "github_repo");
     var branch = activeField(form, "github_branch");
     var detected = panel.querySelector("[name=github_app_path]:checked");
-    if (repo && repo.value && branch && branch.value && (detected || publicSource)) return true;
+    if (publicSource) {
+      var publicPanel = panel.querySelector('[data-source-panel="public"]');
+      if (publicPanel.dataset.publicScanState === "ready" && repo && repo.value && branch && branch.value) return true;
+      error.textContent = "Scan the public repository and choose a branch or tag before continuing.";
+      if (focus) panel.querySelector("[data-public-repo-scan]").focus({ preventScroll: true });
+      return false;
+    }
+    if (repo && repo.value && branch && branch.value && detected) return true;
     error.textContent = publicSource
       ? "Enter a public repository URL and branch or tag before continuing."
       : "Select a repository, branch, and detected app before continuing.";

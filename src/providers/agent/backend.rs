@@ -14,11 +14,12 @@ use super::super::docker::{
     ResourceLimits, RunResult,
 };
 use super::local::ensure_local_endpoint;
+use crate::buildrunner::{validate_branch, validate_public_git_url};
 use crate::host_agent::{
     AgentEndpoint, AgentErrorBody, AgentHost, DockerContainerInspect, DockerContainerLogs,
     DockerContainerStats, DockerContainersResponse, DockerResourceRequest, DockerSnapshotResponse,
-    DockerVersion, ReleaseContainerRequest, ReleaseContainerResponse, RemoveImageRequest,
-    RunContainerRequest, RunContainerResponse,
+    DockerVersion, PublicSourceScanRequest, PublicSourceScanResponse, ReleaseContainerRequest,
+    ReleaseContainerResponse, RemoveImageRequest, RunContainerRequest, RunContainerResponse,
 };
 
 // Client budgets stay above the agent's own limits (20 s for queries and
@@ -28,6 +29,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(25);
 const MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
 const RUN_TIMEOUT: Duration = Duration::from_secs(150);
+const PUBLIC_SOURCE_TIMEOUT: Duration = Duration::from_secs(65);
 pub(super) const MAX_ERROR_CHARS: usize = 500;
 /// Mirrors the log window cap applied by the direct Docker backend.
 const MAX_LOG_LINES: usize = 500;
@@ -164,6 +166,20 @@ impl ContainerBackend for AgentBackend {
         let response: DockerSnapshotResponse =
             self.get("/v1/docker/snapshot", QUERY_TIMEOUT).await?;
         Ok(DockerSnapshot::from(response))
+    }
+
+    async fn scan_public_source(
+        &self,
+        endpoint: &str,
+        request: &PublicSourceScanRequest,
+    ) -> Result<PublicSourceScanResponse> {
+        ensure_local_endpoint(endpoint)?;
+        validate_public_git_url(&request.git_url)?;
+        if let Some(branch) = request.branch.as_deref() {
+            validate_branch(branch)?;
+        }
+        self.post("/v1/public-source/scan", request, PUBLIC_SOURCE_TIMEOUT)
+            .await
     }
 
     async fn start_container(&self, endpoint: &str, name: &str) -> Result<()> {

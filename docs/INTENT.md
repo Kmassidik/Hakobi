@@ -58,7 +58,12 @@ and never rerendered. Connected repositories support push auto-deploy, while
 public HTTPS Git sources use tokenless manual Deploy latest builds. Authenticated
 public-source scanning imports names only from `.env.example`/`.env.sample` on
 GitHub, GitLab, and Codeberg, with blank values, no redirects, bounded reads, and
-existing-value preservation. Matching volumes are preserved unless the user separately
+existing-value preservation. New public sources additionally use an
+authenticated, CSRF-protected native-agent scan: bounded `ls-remote` discovers
+real branches/tags and the default branch, then a bounded shallow clone detects
+Dockerfile/Nixpacks recipes, ports, and example keys. The Source step hides refs
+until scanning succeeds, invalidates URL changes, and rescans ref changes.
+Workspaces auto-clean after success, failure, or timeout. Matching volumes are preserved unless the user separately
 confirms permanent app-data deletion. Unlabeled, shared, external, and other-app
 resources are never selected by cleanup.
 Usage charts accumulate up to 60 real samples over five

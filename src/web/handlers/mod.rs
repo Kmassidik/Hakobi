@@ -59,7 +59,7 @@ pub(crate) use github_settings::{
 };
 pub(crate) use install::{host_install, host_install_status};
 pub(crate) use partials::{charts_partial, metrics_partial, readiness_partial, status};
-pub(crate) use public_source::environment as public_environment;
+pub(crate) use public_source::{environment as public_environment, scan as public_source_scan};
 
 use std::{fmt::Write as _, sync::LazyLock};
 
@@ -265,6 +265,7 @@ static ASSET_VERSION: LazyLock<String> = LazyLock::new(|| {
         "assets/hakobi-charts.js",
         "assets/hakobi-metrics.js",
         "assets/hakobi-source.js",
+        "assets/hakobi-public-scan.js",
         "assets/hakobi-github.js",
         "assets/hakobi-app-form.js",
         "assets/hakobi-runtime-form.js",

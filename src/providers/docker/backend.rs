@@ -15,6 +15,7 @@ use super::{
     ContainerPort, ContainerRow, ContainerVolume, DockerSnapshot, HostInfo, ImageRow, NetworkRow,
     ReleaseResult, ResourceLimits, VolumeRow, APP_OWNER_LABEL,
 };
+use crate::host_agent::{PublicSourceScanRequest, PublicSourceScanResponse};
 use crate::providers::docker_exec::{
     release, remove_container as remove_docker_container, run_image,
 };
@@ -33,6 +34,16 @@ pub trait ContainerBackend: Send + Sync {
     async fn test(&self, endpoint: &str) -> Result<String>;
     async fn containers(&self, endpoint: &str) -> Result<Vec<ContainerRow>>;
     async fn snapshot(&self, endpoint: &str) -> Result<DockerSnapshot>;
+
+    /// Discovers applications in a credential-free public Git repository.
+    async fn scan_public_source(
+        &self,
+        _endpoint: &str,
+        _request: &PublicSourceScanRequest,
+    ) -> Result<PublicSourceScanResponse> {
+        bail!("this backend does not support public source scanning")
+    }
+
     /// Starts an existing container. Never creates or pulls anything.
     async fn start_container(&self, endpoint: &str, name: &str) -> Result<()>;
     /// Stops a running container.

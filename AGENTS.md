@@ -11,7 +11,10 @@ manual Deploy latest. Apps may add shell web/release commands, private worker
 processes, named persistent volumes, and write-only encrypted environment
 secrets. Public sources can import blank example-variable names from GitHub,
 GitLab, and Codeberg without credentials; existing values are preserved and
-imported rows remain removable. Release commands run before production replacement and fail closed;
+imported rows remain removable. New public apps scan through the native agent
+using bounded `ls-remote` and shallow-clone jobs before branch/tag and detected
+recipe controls appear. URL edits invalidate stale results; ref edits rescan.
+Scan workspaces are bounded and automatically cleaned up. Release commands run before production replacement and fail closed;
 workers publish no ports, and ordinary rebuilds never reset volume data.
 Primary UI: Dashboard, Apps, Containers, Settings.
 

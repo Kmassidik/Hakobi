@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 pub use crate::providers::ContainerVolume;
@@ -7,6 +9,45 @@ pub use crate::providers::ContainerVolume;
 pub struct AgentErrorBody {
     #[serde(default)]
     pub error: String,
+}
+
+/// Credential-free public repository discovery request.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicSourceScanRequest {
+    #[serde(default)]
+    pub git_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+}
+
+/// One buildable application discovered in a public repository checkout.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicSourceApp {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub dockerfile: Option<String>,
+    #[serde(default)]
+    pub build_type: String,
+    #[serde(default)]
+    pub container_port: Option<u16>,
+    #[serde(default)]
+    pub environment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub environment_found: bool,
+}
+
+/// Public refs and applications discovered by the native host agent.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicSourceScanResponse {
+    #[serde(default)]
+    pub default_branch: String,
+    #[serde(default)]
+    pub branches: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub apps: Vec<PublicSourceApp>,
 }
 
 /// Docker server version reported by the host agent.

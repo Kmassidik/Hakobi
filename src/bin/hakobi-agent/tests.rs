@@ -99,6 +99,30 @@ async fn docker_endpoints_require_the_bearer_token() {
 }
 
 #[tokio::test]
+async fn public_source_scan_requires_auth_and_validates_before_running_git() {
+    assert_eq!(
+        status_of(json_request(
+            "/v1/public-source/scan",
+            "wrong-token-0123456789abcdef",
+            "not json"
+        ))
+        .await,
+        StatusCode::UNAUTHORIZED
+    );
+    for body in [
+        r#"{"git_url":"http://github.com/acme/app.git"}"#,
+        r#"{"git_url":"https://user:secret@github.com/acme/app.git"}"#,
+        r#"{"git_url":"https://github.com/acme/app.git","branch":"-bad"}"#,
+    ] {
+        assert_eq!(
+            status_of(json_request("/v1/public-source/scan", TEST_TOKEN, body)).await,
+            StatusCode::BAD_REQUEST,
+            "{body}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn docker_run_requires_the_bearer_token_even_with_an_invalid_body() {
     assert_eq!(
         status_of(json_request(

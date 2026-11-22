@@ -20,9 +20,9 @@ pub use wire::{
     AgentErrorBody, ContainerVolume, DockerContainerInspect, DockerContainerLogs,
     DockerContainerMount, DockerContainerPort, DockerContainerRow, DockerContainerStats,
     DockerContainersResponse, DockerHostInfo, DockerImageRow, DockerNetworkRow,
-    DockerResourceRequest, DockerSnapshotResponse, DockerVersion, DockerVolumeRow,
-    ReleaseContainerRequest, ReleaseContainerResponse, RemoveImageRequest, RunContainerRequest,
-    RunContainerResponse,
+    DockerResourceRequest, DockerSnapshotResponse, DockerVersion, DockerVolumeRow, PublicSourceApp,
+    PublicSourceScanRequest, PublicSourceScanResponse, ReleaseContainerRequest,
+    ReleaseContainerResponse, RemoveImageRequest, RunContainerRequest, RunContainerResponse,
 };
 
 /// Provider endpoint that is served by the host agent instead of a socket.

@@ -10,7 +10,7 @@ pub fn example_file_path(app_path: &str, filename: &str) -> String {
     }
 }
 
-pub(super) fn parse_exposed_port(dockerfile: &str) -> Option<u16> {
+pub fn parse_exposed_port(dockerfile: &str) -> Option<u16> {
     dockerfile.lines().find_map(|line| {
         let mut parts = line.split_whitespace();
         if !parts

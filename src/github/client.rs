@@ -9,14 +9,13 @@ mod environment;
 #[path = "webhook.rs"]
 mod webhook;
 
-pub use environment::{example_file_path, parse_example_environment};
+pub use environment::{example_file_path, parse_example_environment, parse_exposed_port};
 pub use webhook::{changed_files_from_push, hex, path_matches, verify_webhook_signature};
 
 use crate::public_source::validate_app_path;
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use cache::MutexCache;
-use environment::parse_exposed_port;
 use serde::Deserialize;
 use std::{collections::BTreeMap, time::Duration};
 

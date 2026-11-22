@@ -15,6 +15,8 @@ mod install;
 mod routes;
 #[path = "hakobi-agent/sampler.rs"]
 mod sampler;
+#[path = "hakobi-agent/scanner.rs"]
+mod scanner;
 #[cfg(test)]
 #[path = "hakobi-agent/tests.rs"]
 mod tests;

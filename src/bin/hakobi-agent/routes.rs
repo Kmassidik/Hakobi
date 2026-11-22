@@ -7,7 +7,7 @@ use axum::{
 };
 use hakobi::agent_build;
 
-use super::{authorized, docker, error_response, install, unauthorized, AgentState};
+use super::{authorized, docker, error_response, install, scanner, unauthorized, AgentState};
 
 /// Builds the agent router.
 ///
@@ -70,6 +70,7 @@ fn auxiliary_routes() -> Router<AgentState> {
         .route("/healthz", get(health))
         .route("/v1/readiness", get(readiness))
         .route("/v1/system/metrics", get(system_metrics))
+        .route("/v1/public-source/scan", post(scanner::scan_public_source))
         .route("/build/dockerfile", post(agent_build::build_dockerfile))
         .route("/build/compose", post(agent_build::build_compose))
         .route("/build/nixpacks", post(agent_build::build_nixpacks))

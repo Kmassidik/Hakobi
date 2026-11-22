@@ -93,6 +93,10 @@ anything new.
 
 ## Controls and data entry
 
+- Public Source starts with repository URL and Scan repository only. Branch/tag
+  and detected applications appear after a successful native scan, using the
+  real default branch. URL edits invalidate results; ref changes rescan. Continue
+  cannot bypass scanning. Pending, success, empty, and error states are visible.
 - Repository and branch controls sit side by side when space permits. Detected
   applications use single-line radio rows for up to three paths and native
   searchable selection for four or more. Each row shows path and build recipe;

@@ -10,7 +10,8 @@ use crate::host_agent::{
     AgentErrorBody, DockerContainerInspect, DockerContainerLogs, DockerContainerMount,
     DockerContainerPort, DockerContainerRow, DockerContainerStats, DockerContainersResponse,
     DockerHostInfo, DockerImageRow, DockerNetworkRow, DockerResourceRequest,
-    DockerSnapshotResponse, DockerVersion, DockerVolumeRow, ReleaseContainerRequest,
+    DockerSnapshotResponse, DockerVersion, DockerVolumeRow, PublicSourceApp,
+    PublicSourceScanRequest, PublicSourceScanResponse, ReleaseContainerRequest,
     ReleaseContainerResponse, RemoveImageRequest, RunContainerRequest, RunContainerResponse,
 };
 
@@ -332,11 +333,41 @@ async fn fake_release(
     .into_response()
 }
 
+async fn fake_public_scan(
+    State(agent): State<FakeAgent>,
+    headers: HeaderMap,
+    Json(request): Json<PublicSourceScanRequest>,
+) -> Response {
+    if !agent.authorized(&headers) {
+        return FakeAgent::unauthorized_response();
+    }
+    if request.git_url != "https://github.com/acme/app.git"
+        || request.branch.as_deref() != Some("main")
+    {
+        return FakeAgent::unauthorized_response();
+    }
+    Json(PublicSourceScanResponse {
+        default_branch: "main".into(),
+        branches: vec!["main".into(), "develop".into()],
+        tags: vec!["v1.0.0".into()],
+        apps: vec![PublicSourceApp {
+            path: "services/api".into(),
+            dockerfile: Some("services/api/Dockerfile".into()),
+            build_type: "dockerfile".into(),
+            container_port: Some(3000),
+            environment: std::collections::BTreeMap::from([("API_URL".into(), String::new())]),
+            environment_found: true,
+        }],
+    })
+    .into_response()
+}
+
 pub(super) async fn spawn_fake_agent(token: &str) -> String {
     let app = Router::new()
         .route("/v1/docker/version", get(fake_version))
         .route("/v1/docker/containers", get(fake_containers))
         .route("/v1/docker/snapshot", get(fake_snapshot))
+        .route("/v1/public-source/scan", post(fake_public_scan))
         .route("/v1/docker/containers/run", post(fake_run))
         .route("/v1/docker/containers/release", post(fake_release))
         .route("/v1/docker/images/remove", post(fake_remove_image))

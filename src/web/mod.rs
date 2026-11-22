@@ -328,6 +328,7 @@ fn github_routes() -> Router<AppState> {
         .route("/api/github/detect", get(handlers::github_detect))
         .route("/api/github/environment", get(handlers::github_environment))
         .route("/api/public/environment", get(handlers::public_environment))
+        .route("/api/public/scan", post(handlers::public_source_scan))
 }
 
 fn settings_routes() -> Router<AppState> {

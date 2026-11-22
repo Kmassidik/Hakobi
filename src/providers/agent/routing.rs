@@ -10,7 +10,9 @@ use super::super::docker::{
 };
 use super::backend::AgentBackend;
 use crate::catalog::Catalog;
-use crate::host_agent::{self, AgentEndpoint, AgentHost};
+use crate::host_agent::{
+    self, AgentEndpoint, AgentHost, PublicSourceScanRequest, PublicSourceScanResponse,
+};
 
 /// Routes each provider endpoint to the backend that can serve it.
 ///
@@ -128,6 +130,17 @@ impl ContainerBackend for RoutingBackend {
 
     async fn snapshot(&self, endpoint: &str) -> Result<DockerSnapshot> {
         self.select(endpoint).await?.snapshot(endpoint).await
+    }
+
+    async fn scan_public_source(
+        &self,
+        endpoint: &str,
+        request: &PublicSourceScanRequest,
+    ) -> Result<PublicSourceScanResponse> {
+        self.select(endpoint)
+            .await?
+            .scan_public_source(endpoint, request)
+            .await
     }
 
     async fn start_container(&self, endpoint: &str, name: &str) -> Result<()> {

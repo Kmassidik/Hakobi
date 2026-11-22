@@ -86,25 +86,38 @@ fn connected_source_fields(values: &AppFormValues) -> Markup {
 
 fn public_source_fields(values: &AppFormValues) -> Markup {
     let public = values.is_public_source();
-    let branch = if public {
-        values.github_branch.as_str()
-    } else {
-        "main"
-    };
+    let scanned = public && !values.github_repo.is_empty() && !values.github_branch.is_empty();
     html! {
-        div data-source-panel="public" hidden[!public] class="grid grid-cols-1 gap-4 sm:grid-cols-2" {
-            label class="grid gap-2 text-[13px] font-semibold text-zinc-800 sm:col-span-2" {
+        div data-source-panel="public" hidden[!public] class="grid grid-cols-1 gap-4" data-public-scan-state=(if scanned { "ready" } else { "idle" }) {
+            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
                 "Repository URL"
-                input class=(CONTROL) name="github_repo" type="url" pattern="https://.*" value=(if public { values.github_repo.as_str() } else { "" }) maxlength="2048" required[public] disabled[!public] autocomplete="off" spellcheck="false" placeholder="https://github.com/owner/repository.git";
+                input class=(CONTROL) name="github_repo" data-public-repo type="url" pattern="https://.*" value=(if public { values.github_repo.as_str() } else { "" }) maxlength="2048" required[public] disabled[!public] autocomplete="off" spellcheck="false" placeholder="https://github.com/owner/repository.git";
                 span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
-                    "HTTPS only. Credentials, query parameters, and fragments are not allowed."
+                    "HTTPS only. Hakobi inspects a bounded shallow clone before showing repository settings."
                 }
             }
-            label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
-                "Branch or tag"
-                input class=(CONTROL) name="github_branch" type="text" value=(branch) maxlength="255" required[public] disabled[!public] autocomplete="off" placeholder="main";
-                span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
-                    "Hakobi clones this ref for each manual deployment."
+            div class="flex flex-wrap items-center gap-3" {
+                button type="button" data-public-repo-scan disabled[!public] class="inline-flex min-h-10 items-center rounded-lg bg-[#165237] px-3.5 text-[13px] font-semibold text-white hover:bg-[#11402b]" { "Scan repository" }
+                span data-public-repo-status role="status" class="text-[11.5px] text-zinc-500" {
+                    @if scanned { "Saved repository configuration. Rescan to refresh detected settings." } @else { "No repository settings are assumed before scanning." }
+                }
+            }
+            div data-public-ref-panel hidden[!scanned] class="grid gap-4" {
+                label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                    "Branch or tag"
+                    select class=(CONTROL) name="github_branch" data-public-ref required[public] disabled[!public] {
+                        @if scanned { option value=(values.github_branch) selected { (values.github_branch) } }
+                    }
+                    span class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
+                        "Hakobi clones this ref for each manual deployment."
+                    }
+                }
+                div data-public-apps class="grid gap-3" {}
+            }
+            noscript {
+                label class="grid gap-2 text-[13px] font-semibold text-zinc-800" {
+                    "Branch or tag (required without JavaScript)"
+                    input class=(CONTROL) name="public_branch" type="text" value=(values.github_branch) maxlength="255" autocomplete="off" placeholder="main";
                 }
             }
         }

@@ -1,6 +1,6 @@
 use super::fake::spawn_fake_agent;
 use super::TOKEN;
-use crate::host_agent::{self, AgentEndpoint};
+use crate::host_agent::{self, AgentEndpoint, PublicSourceScanRequest};
 use crate::providers::agent::backend::{truncate_chars, MAX_ERROR_CHARS};
 use crate::providers::agent::AgentBackend;
 use crate::providers::docker::{ContainerBackend, ContainerVolume};
@@ -37,6 +37,36 @@ async fn agent_backend_reads_the_typed_agent_api() {
     );
     assert_eq!(snapshot.networks.len(), 1);
     assert_eq!(snapshot.networks[0].app_id, None);
+}
+
+#[tokio::test]
+async fn agent_backend_scans_public_source_with_the_typed_api() {
+    let url = spawn_fake_agent(TOKEN).await;
+    let backend = AgentBackend::new(AgentEndpoint::new(url, TOKEN).unwrap()).unwrap();
+    let request = PublicSourceScanRequest {
+        git_url: "https://github.com/acme/app.git".into(),
+        branch: Some("main".into()),
+    };
+    let response = backend
+        .scan_public_source(host_agent::LOCAL_ENDPOINT, &request)
+        .await
+        .unwrap();
+    assert_eq!(response.default_branch, "main");
+    assert_eq!(response.branches, ["main", "develop"]);
+    assert_eq!(response.tags, ["v1.0.0"]);
+    assert_eq!(response.apps.len(), 1);
+    assert_eq!(response.apps[0].path, "services/api");
+    assert_eq!(response.apps[0].container_port, Some(3000));
+    assert!(response.apps[0].environment.contains_key("API_URL"));
+    let invalid = PublicSourceScanRequest {
+        git_url: "http://github.com/acme/app.git".into(),
+        branch: None,
+    };
+    let error = backend
+        .scan_public_source(host_agent::LOCAL_ENDPOINT, &invalid)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("https://"));
 }
 
 #[tokio::test]
