@@ -56,6 +56,8 @@
     var path = form.elements.github_path ? form.elements.github_path.value.trim() : "";
     var query = "?repo=" + encodeURIComponent(repo) + "&branch=" + encodeURIComponent(branch) +
       "&path=" + encodeURIComponent(path);
+    button.dataset.scanLabel = button.textContent;
+    button.textContent = "Scanning repository…";
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     status.textContent = "Checking .env.example and .env.sample…";
@@ -79,6 +81,7 @@
     } catch (error) {
       status.textContent = error.message || "Could not inspect the public repository.";
     } finally {
+      button.textContent = button.dataset.scanLabel;
       button.disabled = false;
       button.removeAttribute("aria-busy");
     }

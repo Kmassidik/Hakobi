@@ -33,16 +33,17 @@
     row.querySelector("[data-env-value]").value = value || "";
     return row;
   }
+  function syncEnvironmentEmpty(editor) {
+    var empty = editor.wrapper.querySelector("[data-env-empty]");
+    if (empty) empty.hidden = editor.rows.querySelector("[data-env-row]") !== null;
+  }
   function renderEnvironment(editor, values) {
     var keys = Object.keys(values);
     editor.rows.replaceChildren();
-    if (!keys.length) {
-      editor.rows.appendChild(cloneRow(editor, "", ""));
-    } else {
-      keys.forEach(function (key) {
-        editor.rows.appendChild(cloneRow(editor, key, values[key]));
-      });
-    }
+    keys.forEach(function (key) {
+      editor.rows.appendChild(cloneRow(editor, key, values[key]));
+    });
+    syncEnvironmentEmpty(editor);
     editor.input.setCustomValidity("");
     environmentError(editor, "");
   }
@@ -89,13 +90,11 @@
       environmentError(editor, "The imported variables could not be read. Check the JSON and try again.");
     }
   }
-
   function hasEnvironmentControls(editor) {
     var row = editor.template.content && editor.template.content.querySelector("[data-env-row]");
     return row && row.querySelector("[data-env-key]") && row.querySelector("[data-env-value]") &&
       row.querySelector("[data-env-remove]") && editor.wrapper.querySelector("[data-env-add]");
   }
-
   function prepareEnvironment(form) {
     var input = form.querySelector("[name=env_json][data-env-json]");
     var wrapper = form.querySelector("[data-env-editor]");
@@ -122,10 +121,10 @@
     wrapper.hidden = false;
     return editor;
   }
-
   function addEnvironmentRow(editor) {
     var row = cloneRow(editor, "", "");
     editor.rows.appendChild(row);
+    syncEnvironmentEmpty(editor);
     syncEnvironment(editor, true);
     row.querySelector("[data-env-key]").focus();
   }
@@ -135,6 +134,7 @@
     if (!row) return;
     var next = row.nextElementSibling || row.previousElementSibling;
     row.remove();
+    syncEnvironmentEmpty(editor);
     syncEnvironment(editor, true);
     var target = next && next.querySelector("[data-env-key]");
     (target || editor.wrapper.querySelector("[data-env-add]")).focus();

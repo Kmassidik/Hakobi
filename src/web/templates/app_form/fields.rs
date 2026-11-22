@@ -224,6 +224,9 @@ pub(super) fn environment_fields(values: &AppFormValues) -> Markup {
                     span class="sm:col-span-1" {}
                 }
                 div data-env-rows class="grid gap-3" {}
+                p data-env-empty class="m-0 rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-[12px] text-zinc-500" {
+                    "No variables yet. Add one or scan an example file."
+                }
                 template data-env-row-template { (environment_row()) }
                 p data-env-error role="alert" class="m-0 text-[11.5px] font-normal text-danger" {}
             }

@@ -102,7 +102,9 @@ anything new.
 - Environment variables use repeatable rows, never a JSON textarea as the
   primary UI. Desktop proportions: Type 3/12, Name 4/12, Value 4/12, remove
   1/12. Rows preserve exact string values, reject duplicate/invalid names, and
-  keep example-file values blank. On mobile each row becomes a stacked group.
+  keep example-file values blank. Zero variables show an empty state, never a
+  phantom row. Public scans show a visible pending label only during the real
+  request. On mobile each row becomes a stacked group.
 - Plain variables and encrypted Secret rows are distinct. Secret values are
   write-only, blank edits preserve them, and they are never rerendered. Never
   offer Secret semantics without encrypted catalog-vault storage.
