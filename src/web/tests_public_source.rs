@@ -366,3 +366,33 @@ async fn github_push_does_not_match_public_url_apps() {
     assert_eq!(catalog.list_deployments(&connected_id).unwrap().len(), 1);
     assert!(catalog.list_deployments(&public_id).unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn public_environment_requires_a_session_and_rejects_unsafe_urls() {
+    let (_data, app) = app();
+    let unauthenticated = app
+        .clone()
+        .oneshot(
+            Request::get(
+                "/api/public/environment?repo=https%3A%2F%2Fgithub.com%2Facme%2Fapp&branch=main",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+    let (authenticated, _) = sign_in(&app).await;
+    let invalid = app
+        .oneshot(
+            Request::get(
+                "/api/public/environment?repo=https%3A%2F%2F127.0.0.1%2Facme%2Fapp&branch=main",
+            )
+            .header(COOKIE, authenticated)
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+}

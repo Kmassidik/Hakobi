@@ -9,7 +9,9 @@ path, Dockerfile, container port, environment, CPU/memory limits, and deployment
 policy. Connected GitHub sources support push auto-deploy; public sources use
 manual Deploy latest. Apps may add shell web/release commands, private worker
 processes, named persistent volumes, and write-only encrypted environment
-secrets. Release commands run before production replacement and fail closed;
+secrets. Public sources can import blank example-variable names from GitHub,
+GitLab, and Codeberg without credentials; existing values are preserved and
+imported rows remain removable. Release commands run before production replacement and fail closed;
 workers publish no ports, and ordinary rebuilds never reset volume data.
 Primary UI: Dashboard, Apps, Containers, Settings.
 

@@ -44,7 +44,44 @@
     syncCards(form, source);
     syncPanels(form, source);
     syncDeploymentPolicy(form, source === "public");
+    var publicEnvironment = form.querySelector("[data-public-environment]");
+    if (publicEnvironment) publicEnvironment.hidden = source !== "public";
     form.dispatchEvent(new CustomEvent("hakobi:form-change", { bubbles: true }));
+  }
+
+  async function scanEnvironment(form, button) {
+    var status = form.querySelector("[data-public-env-status]");
+    var repo = form.querySelector('[data-source-panel="public"] [name="github_repo"]').value.trim();
+    var branch = form.querySelector('[data-source-panel="public"] [name="github_branch"]').value.trim();
+    var path = form.elements.github_path ? form.elements.github_path.value.trim() : "";
+    var query = "?repo=" + encodeURIComponent(repo) + "&branch=" + encodeURIComponent(branch) +
+      "&path=" + encodeURIComponent(path);
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    status.textContent = "Checking .env.example and .env.sample…";
+    try {
+      var response = await fetch("/api/public/environment" + query);
+      var data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Public example discovery failed.");
+      var keys = Object.keys(data.env || {});
+      if (!data.found || !keys.length) {
+        status.textContent = data.found ? "No valid variable names found." : "No example environment file found.";
+        return;
+      }
+      var current = JSON.parse(form.elements.env_json.value.trim() || "{}");
+      keys.forEach(function (key) {
+        if (!Object.prototype.hasOwnProperty.call(current, key)) current[key] = "";
+      });
+      form.elements.env_json.value = JSON.stringify(current);
+      form.dispatchEvent(new CustomEvent("hakobi:env-import"));
+      form.dispatchEvent(new CustomEvent("hakobi:form-change", { bubbles: true }));
+      status.textContent = "Imported " + keys.length + " names with blank values; existing values were preserved.";
+    } catch (error) {
+      status.textContent = error.message || "Could not inspect the public repository.";
+    } finally {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+    }
   }
 
   function prepareForm(form) {
@@ -56,6 +93,8 @@
         form.dispatchEvent(new CustomEvent("hakobi:source-change", { bubbles: true }));
       });
     });
+    var scan = form.querySelector("[data-public-env-scan]");
+    if (scan) scan.addEventListener("click", function () { scanEnvironment(form, scan); });
     syncSource(form);
   }
 

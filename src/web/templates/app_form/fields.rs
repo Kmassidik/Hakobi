@@ -230,6 +230,14 @@ pub(super) fn environment_fields(values: &AppFormValues) -> Markup {
             span data-gh-env-status class="text-[11.5px] font-normal leading-relaxed text-zinc-500" {
                 "After scanning, keys from .env.example or .env.sample appear here with blank values."
             }
+            div data-public-environment hidden[!values.is_public_source()] class="flex flex-wrap items-center gap-3 border-t border-zinc-100 pt-3" {
+                button type="button" data-public-env-scan class="inline-flex min-h-9 items-center rounded-lg border border-zinc-200 bg-white px-3 text-[12px] font-semibold text-zinc-700 hover:bg-zinc-50" {
+                    "Scan example file"
+                }
+                span data-public-env-status role="status" class="text-[11.5px] text-zinc-500" {
+                    "Import names only from the selected public repository."
+                }
+            }
         }
     }
 }

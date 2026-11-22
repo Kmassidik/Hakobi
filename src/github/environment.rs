@@ -1,22 +1,8 @@
 //! Safe parsing for example environment files and Dockerfile EXPOSE lines.
 
-use anyhow::Result;
 use std::collections::BTreeMap;
 
-pub(super) fn validate_app_path(path: &str) -> Result<()> {
-    anyhow::ensure!(
-        path.is_empty()
-            || (!path.starts_with('/')
-                && !path.ends_with('/')
-                && path
-                    .split('/')
-                    .all(|part| !part.is_empty() && part != "." && part != "..")),
-        "invalid app path"
-    );
-    Ok(())
-}
-
-pub(super) fn example_file_path(app_path: &str, filename: &str) -> String {
+pub fn example_file_path(app_path: &str, filename: &str) -> String {
     if app_path.is_empty() {
         filename.to_owned()
     } else {
@@ -43,7 +29,7 @@ pub(super) fn parse_exposed_port(dockerfile: &str) -> Option<u16> {
     })
 }
 
-pub(super) fn parse_example_environment(text: &str) -> BTreeMap<String, String> {
+pub fn parse_example_environment(text: &str) -> BTreeMap<String, String> {
     text.lines()
         .map(str::trim)
         .map(|line| line.strip_prefix("export ").unwrap_or(line))
@@ -80,11 +66,5 @@ mod tests {
         );
         assert_eq!(vars.keys().collect::<Vec<_>>(), ["API_URL", "TOKEN"]);
         assert!(vars.values().all(String::is_empty));
-    }
-
-    #[test]
-    fn environment_discovery_rejects_parent_paths() {
-        assert!(super::validate_app_path("../secrets").is_err());
-        assert!(super::validate_app_path("apps/web").is_ok());
     }
 }

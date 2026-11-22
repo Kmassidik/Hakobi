@@ -55,7 +55,10 @@ deletion operations include every configured worker. Persistent volume data
 survives rebuilds and mount edits. Plain variables and encrypted write-only
 secrets share runtime injection; secret values are redacted from release logs
 and never rerendered. Connected repositories support push auto-deploy, while
-public HTTPS Git sources use tokenless manual Deploy latest builds. Matching volumes are preserved unless the user separately
+public HTTPS Git sources use tokenless manual Deploy latest builds. Authenticated
+public-source scanning imports names only from `.env.example`/`.env.sample` on
+GitHub, GitLab, and Codeberg, with blank values, no redirects, bounded reads, and
+existing-value preservation. Matching volumes are preserved unless the user separately
 confirms permanent app-data deletion. Unlabeled, shared, external, and other-app
 resources are never selected by cleanup.
 Usage charts accumulate up to 60 real samples over five

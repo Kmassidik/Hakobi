@@ -19,6 +19,7 @@ mod github_repos;
 mod github_settings;
 mod install;
 mod partials;
+mod public_source;
 mod settings;
 pub(crate) use settings::{
     cloudflare_save, domain_create, domain_delete, domain_update, settings_page,
@@ -58,6 +59,7 @@ pub(crate) use github_settings::{
 };
 pub(crate) use install::{host_install, host_install_status};
 pub(crate) use partials::{charts_partial, metrics_partial, readiness_partial, status};
+pub(crate) use public_source::environment as public_environment;
 
 use std::{fmt::Write as _, sync::LazyLock};
 
