@@ -21,6 +21,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 
 const SESSION_LIFETIME: Duration = Duration::from_secs(30 * 24 * 60 * 60);
+pub const SESSION_COOKIE_AGE: u64 = SESSION_LIFETIME.as_secs();
 const MAX_REVOKED: usize = 4096;
 const LOGIN_WINDOW: Duration = Duration::from_secs(5 * 60);
 const MAX_LOGIN_FAILURES: u8 = 8;

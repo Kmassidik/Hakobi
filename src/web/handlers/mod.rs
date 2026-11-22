@@ -83,7 +83,7 @@ use super::{
 use crate::{config::PublicConfig, utils::random::random_token};
 use hakobi::catalog::Catalog;
 
-pub(crate) const SESSION_COOKIE_AGE: u64 = 12 * 60 * 60;
+pub(crate) use super::auth::SESSION_COOKIE_AGE;
 pub(crate) const CSRF_COOKIE_AGE: u64 = 24 * 60 * 60;
 
 #[derive(Debug, Deserialize)]
