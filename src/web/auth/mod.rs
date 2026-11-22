@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use tokio::sync::Mutex;
 
-const SESSION_LIFETIME: Duration = Duration::from_secs(12 * 60 * 60);
+const SESSION_LIFETIME: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 const MAX_REVOKED: usize = 4096;
 const LOGIN_WINDOW: Duration = Duration::from_secs(5 * 60);
 const MAX_LOGIN_FAILURES: u8 = 8;

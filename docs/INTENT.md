@@ -62,6 +62,15 @@ Usage charts accumulate up to 60 real samples over five
 minutes in the browser; failed polls never insert zero samples.
 Gap: commit statuses and PR check runs remain separate CP9 work.
 
+### Console sessions
+User intent: signing in once should survive browser and console restarts without
+repeated daily authentication.
+Code reality: signed JWT cookies use HttpOnly, SameSite=Lax, Secure in
+production, and a 30-day Max-Age/expiry. The signing secret persists in the
+catalog data directory; credential rotation can rotate it to invalidate all
+existing sessions. Logout revokes the current session ID.
+Gap: none.
+
 ### Containers
 User intent: See every container, inspect metadata, live stats and logs, and
 perform guarded lifecycle actions.
