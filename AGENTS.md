@@ -112,6 +112,12 @@ and guarded domain CRUD must remain working. Use parameterized SQL only.
 CI also runs the build-runner suite and source-limit guard. Do not narrow a
 test, delete a behavioral assertion, or claim success from compilation alone.
 
+## Release builds
+
+Build production images on the production server, never on the development
+laptop. Transfer a committed source archive, build the AMD64 image remotely,
+and keep the previous console container for rollback.
+
 ## Testing conventions
 
 - Preserve fake-backend HTTP tests and real-browser production QA.
