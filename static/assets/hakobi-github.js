@@ -7,6 +7,24 @@
     if (picker.status) picker.status.textContent = text;
   }
 
+  function updateConnectionBadges(available) {
+    document.querySelectorAll("[data-github-connection]").forEach(function (badge) {
+      badge.dataset.state = available ? "connected" : "unavailable";
+      badge.textContent = available ? "Connected" : "API unavailable";
+      badge.className = available
+        ? "rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700"
+        : "rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700";
+    });
+  }
+
+  function loadConnectionBadges() {
+    if (!document.querySelector("[data-github-connection]")) return;
+    fetch("/api/github/status")
+      .then(function (response) { return response.json(); })
+      .then(function (data) { updateConnectionBadges(data.api_available === true); })
+      .catch(function () { updateConnectionBadges(false); });
+  }
+
   function suggestName(picker, source) {
     if (!picker.nameInput || picker.nameDirty) return;
     var part = source.split("/").filter(Boolean).pop() || "";
@@ -254,7 +272,12 @@
           );
           return;
         }
-        setStatus(picker, "Connected as " + (data.github_login || "") + ".");
+        setStatus(
+          picker,
+          data.api_available
+            ? "Connected as " + (data.github_login || "") + "."
+            : "GitHub API unavailable. Repository detection may fail until access recovers."
+        );
         return fetch("/api/github/repos")
           .then(function (r) { return r.json(); })
           .then(function (data) {
@@ -324,8 +347,12 @@
   });
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", function () { init(document); });
+    document.addEventListener("DOMContentLoaded", function () {
+      init(document);
+      loadConnectionBadges();
+    });
   } else {
     init(document);
+    loadConnectionBadges();
   }
 }

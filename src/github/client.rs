@@ -181,6 +181,17 @@ impl GithubClient {
         self.installation_id
     }
 
+    /// Checks API credentials and availability with one minimal request.
+    pub async fn check_api(&self) -> Result<()> {
+        let token = self.installation_token().await?;
+        self.get_json::<serde_json::Value>(
+            &format!("{GITHUB_API}/installation/repositories?per_page=1"),
+            &token,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Repositories the installation can access.
     pub async fn list_repos(&self) -> Result<Vec<RepoSummary>> {
         let token = self.installation_token().await?;

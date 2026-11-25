@@ -14,10 +14,40 @@ use axum::{
 use hakobi::{catalog::Catalog, github::GithubClient, github::RepoSummary};
 use serde::{Deserialize, Serialize};
 
-use super::{super::AppState, github::client_for};
+use super::{super::AppState, authenticated, github::client_for};
 
 const CACHE_TTL: Duration = Duration::from_secs(300);
 const SNAPSHOT_PREFIX: &str = "github.repositories.";
+
+/// GET /api/github/status — installation, identity, and live API health.
+pub(crate) async fn status(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if !authenticated(&state, &headers).await {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Ok(catalog) = Catalog::open((*state.catalog_path).clone()) else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let app_installed = catalog.github_app_installed().unwrap_or(false);
+    let user = catalog
+        .load_github_connection(&state.config.username)
+        .ok()
+        .flatten();
+    let api_available = if app_installed && user.is_some() {
+        match client_for(&state, &headers).await {
+            Some(client) => client.check_api().await.is_ok(),
+            None => false,
+        }
+    } else {
+        false
+    };
+    Json(serde_json::json!({
+        "app_installed": app_installed,
+        "user_connected": user.is_some(),
+        "github_login": user.map(|u| u.github_login),
+        "api_available": api_available,
+    }))
+    .into_response()
+}
 
 #[derive(Serialize, Deserialize)]
 struct Snapshot {

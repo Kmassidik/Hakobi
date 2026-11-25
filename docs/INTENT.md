@@ -101,7 +101,9 @@ Gap: none.
 ### GitHub integration
 User intent: GitHub App repository selection, push-to-build, auto-deploy,
 rollback, and deletion. Registration, installation, and user connection must
-be honest distinct states. Monorepos and single repositories both work.
+be honest distinct states. The Settings badge shows Connected only after a live
+GitHub API probe succeeds; rate limits and API failures show API unavailable.
+Monorepos and single repositories both work.
 New-app creation uses validated Source, Identity, Build, and Review steps with
 the canonical connected progress card, an eight-column task panel, and a sticky
 four-column live recipe summary from `docs/UI_STYLE_PROMPT.md`. Detection fills

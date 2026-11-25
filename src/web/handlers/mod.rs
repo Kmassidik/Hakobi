@@ -49,10 +49,9 @@ pub(crate) use docker_resources::{
 };
 pub(crate) use github::{
     branches as github_branches_api, detect as github_detect, environment as github_environment,
-    manifest_callback as github_manifest_callback, status as github_status,
-    webhook as github_webhook,
+    manifest_callback as github_manifest_callback, webhook as github_webhook,
 };
-pub(crate) use github_repos::repos as github_repos;
+pub(crate) use github_repos::{repos as github_repos, status as github_status};
 pub(crate) use github_settings::{
     github_connect_callback, github_connect_start, github_disconnect, github_install_start,
     github_manifest_post_install, github_recheck_installation, github_settings_page,

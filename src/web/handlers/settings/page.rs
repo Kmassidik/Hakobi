@@ -150,7 +150,7 @@ fn github_section(page: &SettingsPage<'_>) -> Markup {
 fn github_status(page: &SettingsPage<'_>) -> Markup {
     html! {
         @if page.app_installed {
-            span class="rounded-full bg-emerald-50 px-3 py-1.5 text-[0.7rem] font-bold text-emerald-700" { "Connected" }
+            span data-github-connection data-state="checking" class="rounded-full bg-zinc-100 px-3 py-1.5 text-[0.7rem] font-bold text-zinc-600" { "Checking API…" }
         } @else if page.app_registered {
             span class="rounded-full bg-amber-50 px-3 py-1.5 text-[0.7rem] font-bold text-amber-700" { "Registered — install pending" }
         } @else {

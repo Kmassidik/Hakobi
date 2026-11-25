@@ -17,27 +17,6 @@ use hakobi::github::{
     changed_files_from_push, path_matches, verify_webhook_signature, GithubClient,
 };
 
-/// GET /api/github/status — app installed? user connected?
-pub(crate) async fn status(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if !authenticated(&state, &headers).await {
-        return StatusCode::UNAUTHORIZED.into_response();
-    }
-    let Ok(catalog) = Catalog::open((*state.catalog_path).clone()) else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
-    let app_installed = catalog.github_app_installed().unwrap_or(false);
-    let user = catalog
-        .load_github_connection(&state.config.username)
-        .ok()
-        .flatten();
-    Json(serde_json::json!({
-        "app_installed": app_installed,
-        "user_connected": user.is_some(),
-        "github_login": user.map(|u| u.github_login),
-    }))
-    .into_response()
-}
-
 #[derive(Deserialize)]
 pub(crate) struct RepoQuery {
     repo: String,
